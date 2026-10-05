@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "django_filters",
     "rest_framework",
     "apps.accounts.apps.AccountsConfig",
+    "apps.businesses.apps.BusinessesConfig",
 ]
 
 MIDDLEWARE = [
