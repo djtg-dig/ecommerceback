@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "django_filters",
     "rest_framework",
+    "drf_spectacular",
     "apps.accounts.apps.AccountsConfig",
     "apps.businesses.apps.BusinessesConfig",
     "apps.catalog.apps.CatalogConfig",
@@ -71,6 +72,7 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
     "DEFAULT_FILTER_BACKENDS": ["django_filters.rest_framework.DjangoFilterBackend", "rest_framework.filters.SearchFilter", "rest_framework.filters.OrderingFilter"],
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
 # OAuth 2.0 / OpenID Connect settings for the future Carri Account integration.
@@ -99,4 +101,26 @@ SIMPLE_JWT = {
     "BLACKLIST_AFTER_ROTATION": False,
     "USER_ID_FIELD": "id",
     "USER_ID_CLAIM": ECOMMERCE_IDENTITY_CLAIM,
+}
+
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Ecommerce API",
+    "DESCRIPTION": "API métier multi-tenant. Carri Account fournit l’identité ; les appels protégés utilisent les JWT émis par ecommerce.",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
+    "ENUM_NAME_OVERRIDES": {
+        "BusinessCurrencyEnum": "apps.businesses.models.Business.Currency",
+        "ProductStatusEnum": "apps.catalog.models.Product.Status",
+    },
+    "TAGS": [
+        {"name": "Health", "description": "Liveness technique publique."},
+        {"name": "Authentication", "description": "Intégration Carri Account et JWT ecommerce."},
+        {"name": "Businesses", "description": "Commerces accessibles à l’identité authentifiée."},
+        {"name": "Business Categories", "description": "Taxonomie globale des activités commerciales."},
+        {"name": "Product Categories", "description": "Taxonomie globale des produits et attributs effectifs."},
+        {"name": "Products", "description": "Catalogue produit isolé par commerce."},
+        {"name": "Product Variants", "description": "Combinaisons de variantes d’un produit."},
+    ],
 }

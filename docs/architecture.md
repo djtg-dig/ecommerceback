@@ -25,3 +25,7 @@ Business is the legal/operational tenant; a future BusinessLocation may represen
 ## Tenant products and inventory boundary
 
 `apps.catalog` owns global category metadata and tenant-owned Product/ProductVariant records. Products are reached only through an active `BusinessMember`, then the requested Business, so public identifiers do not bypass tenant boundaries. Attribute validation is centralized against the global taxonomy before persistence. Inventory will be a separate domain and will later attach stock movements and balances to a simple Product or a ProductVariant; it must not add quantities to catalog models.
+
+## OpenAPI
+
+`drf-spectacular` génère le contrat OpenAPI à partir des routes DRF et des serializers. Une extension décrit `EcommerceJWTAuthentication` comme un bearer JWT afin que le schéma conserve le même modèle de sécurité que l’API exécutée. Les pages Swagger et ReDoc sont publiques pour consultation, mais ne changent ni permissions ni authentification des opérations métier.

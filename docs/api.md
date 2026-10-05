@@ -31,3 +31,13 @@ Business routes use `public_id` (`SHXXXXXXXXXX`), never the internal UUID: `GET/
 | GET/PATCH `/api/v1/businesses/{SH}/products/{PR}/variants/{PV}/` | membre actif / OWNER, MANAGER | Returns effective inherited prices; UUID and signature are not exposed. |
 
 Invalid/inactive/non-leaf categories, invalid attribute values, unknown keys, a duplicate variant combination, negative price, or conflicting SKU return `400`. Foreign business/product/variant paths return `404`.
+
+## OpenAPI / Swagger
+
+La documentation développeur est générée depuis les routes et serializers réels :
+
+- Swagger UI : `/api/docs/`
+- ReDoc : `/api/redoc/`
+- Schéma OpenAPI : `/api/schema/`
+
+Les routes protégées affichent le bouton **Authorize**. Coller uniquement un JWT d’accès ecommerce dans le champ Bearer (`Authorization: Bearer <ecommerce_access_token>`). Swagger ne demande jamais de mot de passe Carri Account, de secret client, de code OAuth ou de vérificateur PKCE. `/api/v1/` n’est pas une API root et peut répondre `404`; `/api/docs/` est le point d’entrée développeur.

@@ -35,6 +35,7 @@ class ProductCategoryListView(generics.ListAPIView):
 class ProductCategoryAttributesView(generics.GenericAPIView):
     """Expose active attributes effective for one active category."""
 
+    queryset = ProductCategory.objects.none()
     serializer_class = EffectiveAttributeSerializer
     permission_classes = [permissions.AllowAny]
     authentication_classes = []
@@ -162,8 +163,12 @@ class ProductVariantListCreateView(BusinessProductMixin, APIView):
         return Response(ProductVariantOutputSerializer(variant).data, status=status.HTTP_201_CREATED)
 
 
-class ProductVariantDetailView(ProductVariantListCreateView):
+class ProductVariantDetailView(BusinessProductMixin, APIView):
     """Read or update a variant after both product and business scoping."""
+
+    def get_product_or_404(self, request, business_public_id, product_public_id):
+        business = self.get_business(request, business_public_id)
+        return business, self.get_product(business, product_public_id) if business else None
 
     def get_variant(self, product, variant_public_id):
         return ProductVariant.objects.filter(product=product, public_id=variant_public_id).select_related("product__category", "product__business").first()
@@ -187,3 +192,22 @@ class ProductVariantDetailView(ProductVariantListCreateView):
         except IntegrityError:
             return Response({"detail": "Combinaison de variante ou référence interne déjà utilisée."}, status=400)
         return Response(ProductVariantOutputSerializer(variant).data)
+
+from drf_spectacular.utils import OpenApiParameter, extend_schema
+
+_business_public_id = OpenApiParameter("business_public_id", str, OpenApiParameter.PATH, description="Identifiant public Business, format SH + 10 caractères.")
+_product_public_id = OpenApiParameter("product_public_id", str, OpenApiParameter.PATH, description="Identifiant public Product, format PR + 10 caractères.")
+_variant_public_id = OpenApiParameter("variant_public_id", str, OpenApiParameter.PATH, description="Identifiant public ProductVariant, format PV + 10 caractères.")
+_category_code = OpenApiParameter("code", str, OpenApiParameter.PATH, description="Code de ProductCategory.")
+
+ProductCategoryListView.get = extend_schema(tags=["Product Categories"], operation_id="product_category_list", auth=[], responses={200: ProductCategorySerializer(many=True)})(ProductCategoryListView.get)
+ProductCategoryAttributesView.get = extend_schema(tags=["Product Categories"], operation_id="product_category_effective_attributes", auth=[], parameters=[_category_code], responses={200: EffectiveAttributeSerializer(many=True), 404: None})(ProductCategoryAttributesView.get)
+ProductListCreateView.get = extend_schema(tags=["Products"], operation_id="product_list", parameters=[_business_public_id, OpenApiParameter("status", str, OpenApiParameter.QUERY), OpenApiParameter("category", str, OpenApiParameter.QUERY), OpenApiParameter("search", str, OpenApiParameter.QUERY)], responses={200: ProductOutputSerializer(many=True), 404: None})(ProductListCreateView.get)
+ProductListCreateView.post = extend_schema(tags=["Products"], operation_id="product_create", parameters=[_business_public_id], request=ProductWriteSerializer, responses={201: ProductOutputSerializer, 400: None, 403: None, 404: None})(ProductListCreateView.post)
+ProductDetailView.get = extend_schema(tags=["Products"], operation_id="product_retrieve", parameters=[_business_public_id, _product_public_id], responses={200: ProductOutputSerializer, 404: None})(ProductDetailView.get)
+ProductDetailView.patch = extend_schema(tags=["Products"], operation_id="product_update", parameters=[_business_public_id, _product_public_id], request=ProductWriteSerializer, responses={200: ProductOutputSerializer, 400: None, 403: None, 404: None})(ProductDetailView.patch)
+ProductArchiveView.post = extend_schema(tags=["Products"], operation_id="product_archive", parameters=[_business_public_id, _product_public_id], request=None, responses={200: ProductOutputSerializer, 403: None, 404: None})(ProductArchiveView.post)
+ProductVariantListCreateView.get = extend_schema(tags=["Product Variants"], operation_id="product_variant_list", parameters=[_business_public_id, _product_public_id], responses={200: ProductVariantOutputSerializer(many=True), 404: None})(ProductVariantListCreateView.get)
+ProductVariantListCreateView.post = extend_schema(tags=["Product Variants"], operation_id="product_variant_create", parameters=[_business_public_id, _product_public_id], request=ProductVariantWriteSerializer, responses={201: ProductVariantOutputSerializer, 400: None, 403: None, 404: None})(ProductVariantListCreateView.post)
+ProductVariantDetailView.get = extend_schema(tags=["Product Variants"], operation_id="product_variant_retrieve", parameters=[_business_public_id, _product_public_id, _variant_public_id], responses={200: ProductVariantOutputSerializer, 404: None})(ProductVariantDetailView.get)
+ProductVariantDetailView.patch = extend_schema(tags=["Product Variants"], operation_id="product_variant_update", parameters=[_business_public_id, _product_public_id, _variant_public_id], request=ProductVariantWriteSerializer, responses={200: ProductVariantOutputSerializer, 400: None, 403: None, 404: None})(ProductVariantDetailView.patch)

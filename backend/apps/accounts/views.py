@@ -174,3 +174,41 @@ class CarriHandoffConsumeView(APIView):
 class CurrentIdentityView(APIView):
     def get(self, request):
         return Response({"id": str(request.user.id), "carri_subject": request.user.carri_subject})
+
+# Explicit APIView annotations keep authentication flows visible without exposing
+# provider secrets, authorization codes or PKCE verifier values.
+from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
+from rest_framework import serializers
+
+_token_pair_schema = inline_serializer("EcommerceTokenPair", {
+    "access": serializers.CharField(read_only=True),
+    "refresh": serializers.CharField(read_only=True),
+})
+_error_schema = inline_serializer("AuthenticationError", {"detail": serializers.CharField(read_only=True)})
+
+CarriMobileExchangeView.post = extend_schema(
+    tags=["Authentication"], operation_id="carri_mobile_exchange",
+    request=inline_serializer("CarriMobileExchangeRequest", {
+        "id_token": serializers.CharField(), "access_token": serializers.CharField(), "nonce": serializers.CharField(),
+    }), responses={200: _token_pair_schema, 400: _error_schema, 503: _error_schema},
+    description="Valide la preuve OIDC Android puis émet des JWT ecommerce.",
+)(CarriMobileExchangeView.post)
+CarriLoginView.get = extend_schema(
+    tags=["Authentication"], operation_id="carri_web_login", request=None,
+    responses={302: None, 503: _error_schema},
+    description="Démarre Authorization Code + PKCE chez Carri Account.",
+)(CarriLoginView.get)
+CarriCallbackView.get = extend_schema(
+    tags=["Authentication"], operation_id="carri_web_callback", request=None,
+    responses={200: inline_serializer("OAuthHandoffResponse", {"handoff": serializers.CharField(read_only=True)}), 400: _error_schema, 503: _error_schema},
+    description="Traite le callback OIDC et retourne un handoff opaque à usage unique.",
+)(CarriCallbackView.get)
+CarriHandoffConsumeView.post = extend_schema(
+    tags=["Authentication"], operation_id="carri_handoff_consume",
+    request=inline_serializer("OAuthHandoffConsumeRequest", {"handoff": serializers.CharField()}),
+    responses={200: _token_pair_schema, 400: _error_schema},
+)(CarriHandoffConsumeView.post)
+CurrentIdentityView.get = extend_schema(
+    tags=["Authentication"], operation_id="current_ecommerce_identity",
+    responses={200: inline_serializer("CurrentIdentity", {"id": serializers.UUIDField(), "carri_subject": serializers.CharField()}), 401: _error_schema},
+)(CurrentIdentityView.get)

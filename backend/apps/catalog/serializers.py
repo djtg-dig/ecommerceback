@@ -1,6 +1,7 @@
 """Serializers for public taxonomy metadata and tenant-scoped catalog items."""
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from .models import Product, ProductCategory, ProductVariant
@@ -38,6 +39,7 @@ class EffectiveAttributeSerializer(serializers.Serializer):
     inherited_from = serializers.CharField(source="inherited_from.code")
     options = serializers.SerializerMethodField()
 
+    @extend_schema_field(AttributeOptionSerializer(many=True))
     def get_options(self, effective):
         options = [option for option in effective.definition.options.all() if option.is_active]
         return AttributeOptionSerializer(options, many=True).data

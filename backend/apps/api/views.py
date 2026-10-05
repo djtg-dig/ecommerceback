@@ -12,3 +12,13 @@ class HealthCheckView(APIView):
 
     def get(self, request):
         return Response({"status": "ok"})
+
+from drf_spectacular.utils import extend_schema, inline_serializer
+from rest_framework import serializers
+
+
+HealthCheckView.get = extend_schema(
+    tags=["Health"],
+    operation_id="health_check",
+    responses={200: inline_serializer("HealthResponse", {"status": serializers.CharField()})},
+)(HealthCheckView.get)

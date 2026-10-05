@@ -1,0 +1,9 @@
+Django==5.2.17
+django-cors-headers==4.9.0
+django-filter==25.2
+djangorestframework==3.18.1
+djangorestframework-simplejwt==5.5.1
+drf-spectacular==0.28.0
+PyJWT==2.15.1
+cryptography==45.0.7
+python-dotenv==1.2.4
