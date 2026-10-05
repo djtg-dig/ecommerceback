@@ -8,6 +8,8 @@
 | GET `/api/v1/auth/carri/callback/` | public | valide callback et retourne un handoff |
 | POST `/api/v1/auth/carri/handoff/consume/` | public, handoff | consomme le handoff une fois et retourne JWT ecommerce |
 | GET `/api/v1/auth/me/` | JWT ecommerce | `{id,carri_subject}` |
+| GET `/api/v1/product-categories/` | public | catégories globales actives, à plat (`parent_code`, `level`) |
+| GET `/api/v1/product-categories/{code}/attributes/` | public | attributs actifs effectifs et leurs options actives |
 | POST `/api/v1/auth/token/refresh/` | refresh ecommerce | renouvelle les tokens |
 | GET/POST `/api/v1/businesses/` | JWT ecommerce | liste isolée / crée Business + OWNER |
 | GET/PATCH `/api/v1/businesses/{id}/` | membre actif | détail / modification OWNER ou MANAGER |

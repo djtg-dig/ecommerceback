@@ -9,6 +9,7 @@ from apps.businesses.views import BusinessCategoriesView
 urlpatterns = [
     path("businesses/", include("apps.businesses.urls")),
     path("business-categories/", BusinessCategoriesView.as_view()),
+    path("product-categories/", include("apps.catalog.urls")),
     path("health/", HealthCheckView.as_view(), name="health"),
     path("auth/", include("apps.accounts.urls")),
 ]
