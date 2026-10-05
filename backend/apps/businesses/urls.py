@@ -1,3 +1,3 @@
 from django.urls import path
-from .views import BusinessesView,BusinessDetailView,BusinessMembersView
-urlpatterns=[path("",BusinessesView.as_view()),path("<uuid:pk>/",BusinessDetailView.as_view()),path("<uuid:pk>/members/",BusinessMembersView.as_view())]
+from .views import BusinessesView,BusinessDetailView,BusinessMembersView,BusinessCategoriesView
+urlpatterns=[path("",BusinessesView.as_view()),path("<str:p>/",BusinessDetailView.as_view()),path("<str:p>/members/",BusinessMembersView.as_view()),path("../business-categories/",BusinessCategoriesView.as_view())]

@@ -12,13 +12,13 @@ def test_create_business_creates_owner_and_is_scoped():
  response=auth(identity).post("/api/v1/businesses/",{"name":"Shop","primary_currency":"CDF"},format="json")
  assert response.status_code==201
  business=Business.objects.get(); assert BusinessMember.objects.get(business=business,identity=identity).role=="OWNER"
- assert auth(CarriIdentity.objects.create(carri_subject="other")).get(f"/api/v1/businesses/{business.id}/").status_code==404
+ assert auth(CarriIdentity.objects.create(carri_subject="other")).get(f"/api/v1/businesses/{business.public_id}/").status_code==404
 @pytest.mark.django_db
 def test_roles_control_updates_and_member_list():
  owner=CarriIdentity.objects.create(carri_subject="owner2"); employee=CarriIdentity.objects.create(carri_subject="employee")
  business=Business.objects.create(name="Shop")
  BusinessMember.objects.create(business=business,identity=owner,role="OWNER")
  BusinessMember.objects.create(business=business,identity=employee,role="EMPLOYEE")
- assert auth(owner).patch(f"/api/v1/businesses/{business.id}/",{"name":"New"},format="json").status_code==200
- assert auth(employee).patch(f"/api/v1/businesses/{business.id}/",{"name":"No"},format="json").status_code==403
- assert auth(employee).get(f"/api/v1/businesses/{business.id}/members/").status_code==403
+ assert auth(owner).patch(f"/api/v1/businesses/{business.public_id}/",{"name":"New"},format="json").status_code==200
+ assert auth(employee).patch(f"/api/v1/businesses/{business.public_id}/",{"name":"No"},format="json").status_code==403
+ assert auth(employee).get(f"/api/v1/businesses/{business.public_id}/members/").status_code==403

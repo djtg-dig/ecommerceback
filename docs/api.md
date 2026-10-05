@@ -14,3 +14,5 @@
 | GET `/api/v1/businesses/{id}/members/` | OWNER ou MANAGER | memberships sans données Carri |
 
 Un Business étranger répond 404. Invitations de membres : à implémenter.
+
+Business routes use `public_id` (`SHXXXXXXXXXX`), never the internal UUID: `GET/PATCH /api/v1/businesses/{public_id}/` and `GET /api/v1/businesses/{public_id}/members/`. Create and PATCH accept `categories` (codes) and optional `primary_category`; OWNER and MANAGER may change them. `GET /api/v1/business-categories/` is public and returns active platform categories only.

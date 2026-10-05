@@ -14,3 +14,5 @@ Django expose l'API métier versionnée et PostgreSQL stocke les projections et 
 - Les JWT ecommerce sont distincts des tokens Carri.
 - Android est un client public PKCE; le Web est confidentiel.
 - Chaque queryset Business est filtré par BusinessMember actif : c'est le socle multi-tenant des prochains domaines.
+
+Business is the legal/operational tenant; a future BusinessLocation may represent outlets. BusinessCategory is a flat business-activity taxonomy and is distinct from future ProductCategory. Public IDs improve client-facing references but do not grant access: membership filtering remains mandatory.
