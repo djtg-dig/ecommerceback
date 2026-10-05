@@ -27,3 +27,25 @@ class AttributeOptionAdmin(admin.ModelAdmin):
     list_filter = ("is_active",)
     search_fields = ("value", "label", "attribute_definition__code")
     readonly_fields = ("id", "created_at", "updated_at")
+
+from .models import Product, ProductVariant
+
+
+@admin.register(Product)
+class ProductAdmin(admin.ModelAdmin):
+    """Read-oriented management of tenant products without exposing UUIDs."""
+
+    list_display = ("public_id", "name", "business", "category", "selling_price", "currency", "status")
+    list_filter = ("status", "currency", "category")
+    search_fields = ("public_id", "name", "internal_reference", "barcode")
+    readonly_fields = ("id", "public_id", "created_at", "updated_at")
+
+
+@admin.register(ProductVariant)
+class ProductVariantAdmin(admin.ModelAdmin):
+    """Inspect variants and their stable combination signatures."""
+
+    list_display = ("public_id", "product", "internal_reference", "selling_price", "status")
+    list_filter = ("status",)
+    search_fields = ("public_id", "internal_reference", "barcode", "product__name")
+    readonly_fields = ("id", "public_id", "variant_signature", "created_at", "updated_at")

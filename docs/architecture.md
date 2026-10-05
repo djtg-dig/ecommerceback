@@ -21,3 +21,7 @@ Business is the legal/operational tenant; a future BusinessLocation may represen
 ## Global catalog
 
 `apps.catalog` is platform metadata, independent from tenants. It exposes public category and effective-attribute reads. Product entities will reference this taxonomy in a later phase; this app deliberately creates no product, inventory or sales model.
+
+## Tenant products and inventory boundary
+
+`apps.catalog` owns global category metadata and tenant-owned Product/ProductVariant records. Products are reached only through an active `BusinessMember`, then the requested Business, so public identifiers do not bypass tenant boundaries. Attribute validation is centralized against the global taxonomy before persistence. Inventory will be a separate domain and will later attach stock movements and balances to a simple Product or a ProductVariant; it must not add quantities to catalog models.

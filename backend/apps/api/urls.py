@@ -7,6 +7,7 @@ from .views import HealthCheckView
 from apps.businesses.views import BusinessCategoriesView
 
 urlpatterns = [
+    path("businesses/<str:business_public_id>/products/", include("apps.catalog.product_urls")),
     path("businesses/", include("apps.businesses.urls")),
     path("business-categories/", BusinessCategoriesView.as_view()),
     path("product-categories/", include("apps.catalog.urls")),

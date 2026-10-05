@@ -145,3 +145,135 @@ class AttributeOption(models.Model):
 
     def __str__(self) -> str:
         return self.label
+
+
+class Product(models.Model):
+    """A business-owned catalog item; it deliberately contains no stock balance."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "ACTIVE", "Active"
+        INACTIVE = "INACTIVE", "Inactive"
+        ARCHIVED = "ARCHIVED", "Archived"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    public_id = models.CharField(max_length=12, unique=True, editable=False, db_index=True)
+    business = models.ForeignKey("businesses.Business", on_delete=models.PROTECT, related_name="products")
+    category = models.ForeignKey(ProductCategory, on_delete=models.PROTECT, related_name="products")
+    name = models.CharField(max_length=240)
+    description = models.TextField(blank=True)
+    internal_reference = models.CharField(max_length=100, null=True, blank=True)
+    barcode = models.CharField(max_length=128, null=True, blank=True)
+    selling_price = models.DecimalField(max_digits=14, decimal_places=2)
+    cost_price = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    currency = models.CharField(max_length=3, choices=(("CDF", "CDF"), ("USD", "USD")))
+    attributes = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.ACTIVE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("name", "public_id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("business", "internal_reference"),
+                condition=models.Q(internal_reference__isnull=False),
+                name="catalog_product_business_internal_reference_unique",
+            ),
+            models.CheckConstraint(condition=models.Q(selling_price__gte=0), name="catalog_product_selling_price_nonnegative"),
+            models.CheckConstraint(
+                condition=models.Q(cost_price__isnull=True) | models.Q(cost_price__gte=0),
+                name="catalog_product_cost_price_nonnegative",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+    @property
+    def product_type_key(self):
+        """Expose the category-derived type without duplicating it in this table."""
+        return self.category.product_type_key
+
+    def save(self, *args, **kwargs):
+        from apps.businesses.identifiers import generate_product_public_id
+
+        if self.pk and type(self).objects.filter(pk=self.pk).exclude(public_id=self.public_id).exists():
+            raise ValidationError({"public_id": "L'identifiant public produit est immuable."})
+        if not self.public_id:
+            self.public_id = generate_product_public_id()
+        if self.internal_reference == "":
+            self.internal_reference = None
+        if self.barcode == "":
+            self.barcode = None
+        if not self.currency and self.business_id:
+            self.currency = self.business.primary_currency
+        return super().save(*args, **kwargs)
+
+
+class ProductVariant(models.Model):
+    """A sellable option combination whose prices optionally override its product."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "ACTIVE", "Active"
+        INACTIVE = "INACTIVE", "Inactive"
+        ARCHIVED = "ARCHIVED", "Archived"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    public_id = models.CharField(max_length=12, unique=True, editable=False, db_index=True)
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="variants")
+    internal_reference = models.CharField(max_length=100, null=True, blank=True)
+    barcode = models.CharField(max_length=128, null=True, blank=True)
+    attributes = models.JSONField(default=dict)
+    variant_signature = models.CharField(max_length=64, editable=False)
+    selling_price = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    cost_price = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.ACTIVE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("public_id",)
+        constraints = [
+            models.UniqueConstraint(fields=("product", "variant_signature"), name="catalog_variant_product_signature_unique"),
+            models.UniqueConstraint(
+                fields=("product", "internal_reference"),
+                condition=models.Q(internal_reference__isnull=False),
+                name="catalog_variant_product_internal_reference_unique",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(selling_price__isnull=True) | models.Q(selling_price__gte=0),
+                name="catalog_variant_selling_price_nonnegative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(cost_price__isnull=True) | models.Q(cost_price__gte=0),
+                name="catalog_variant_cost_price_nonnegative",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.public_id
+
+    @property
+    def effective_selling_price(self):
+        """Use the product price unless the variant explicitly overrides it."""
+        return self.selling_price if self.selling_price is not None else self.product.selling_price
+
+    @property
+    def effective_cost_price(self):
+        """Use the product cost unless the variant explicitly overrides it."""
+        return self.cost_price if self.cost_price is not None else self.product.cost_price
+
+    def save(self, *args, **kwargs):
+        from apps.businesses.identifiers import generate_product_variant_public_id
+        from .services import variant_attributes_signature
+
+        if self.pk and type(self).objects.filter(pk=self.pk).exclude(public_id=self.public_id).exists():
+            raise ValidationError({"public_id": "L'identifiant public variante est immuable."})
+        if not self.public_id:
+            self.public_id = generate_product_variant_public_id()
+        if self.internal_reference == "":
+            self.internal_reference = None
+        if self.barcode == "":
+            self.barcode = None
+        self.variant_signature = variant_attributes_signature(self.attributes)
+        return super().save(*args, **kwargs)

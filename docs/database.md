@@ -7,6 +7,9 @@ erDiagram
   PRODUCT_CATEGORY ||--o{ PRODUCT_CATEGORY : parent
   PRODUCT_CATEGORY ||--o{ ATTRIBUTE_DEFINITION : defines
   ATTRIBUTE_DEFINITION ||--o{ ATTRIBUTE_OPTION : allows
+  BUSINESS ||--o{ PRODUCT : owns
+  PRODUCT_CATEGORY ||--o{ PRODUCT : classifies
+  PRODUCT ||--o{ PRODUCT_VARIANT : has
 ```
 
 - **CarriIdentity** : PK UUID, `carri_subject` unique, projection minimale OIDC. Suppression protégée par les memberships.
@@ -28,3 +31,9 @@ BusinessCategory is the platform-controlled flat commerce taxonomy. BusinessCate
 - **ProductCategory**: UUID PK; unique code and slug; optional globally unique `product_type_key`; protected parent relation; active flag and sort order. Model validation limits trees to three levels and rejects cycles.
 - **AttributeDefinition**: UUID PK; protected category relation; unique `(category, code)`; typed active definition. A code cannot duplicate an ancestor's code.
 - **AttributeOption**: UUID PK; protected definition relation; unique `(attribute_definition, value)`; active choice value.
+
+## Tenant product catalog
+
+- **Product**: UUID internal PK; indexed unique immutable `PR` public ID; protected FK to Business and ProductCategory; decimal selling/cost prices; CDF/USD; JSONB `attributes`; status and timestamps. `internal_reference` is conditionally unique per Business when non-null. Database checks reject negative prices.
+- **ProductVariant**: UUID internal PK; indexed unique immutable `PV` public ID; protected FK to Product; JSONB attributes; SHA-256 `variant_signature`; optional decimal overrides and status. `(product, variant_signature)` is unique. Its SKU is conditionally unique per Product; service validation additionally protects the intended shared Business SKU namespace.
+- **Barcode** is nullable and deliberately not unique. Neither table has a quantity or stock field.
