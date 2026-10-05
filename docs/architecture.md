@@ -29,3 +29,7 @@ Business is the legal/operational tenant; a future BusinessLocation may represen
 ## OpenAPI
 
 `drf-spectacular` génère le contrat OpenAPI à partir des routes DRF et des serializers. Une extension décrit `EcommerceJWTAuthentication` comme un bearer JWT afin que le schéma conserve le même modèle de sécurité que l’API exécutée. Les pages Swagger et ReDoc sont publiques pour consultation, mais ne changent ni permissions ni authentification des opérations métier.
+
+## Inventory
+
+Le catalogue définit ce qui est vendable; Inventory définit combien est disponible. `InventoryItem` est le solde transactionnel d’un Product simple ou d’un ProductVariant, et `StockMovement` est son journal immuable. Les mutations prennent un verrou de ligne PostgreSQL avant le calcul du solde. La future évolution `Business -> BusinessLocation -> InventoryItem` ajoutera des emplacements sans mélanger inventaire et catalogue.

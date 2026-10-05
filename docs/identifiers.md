@@ -5,3 +5,15 @@
 ## Product catalog identifiers
 
 Products use immutable `PR` plus ten random characters and variants use `PV` plus ten. Both use the same secure alphabet and bounded collision retry strategy as businesses; they are opaque references, never authorization credentials.
+
+## Inventory identifiers
+
+| Prefix | Resource |
+|---|---|
+| `SH` | Business |
+| `PR` | Product |
+| `PV` | ProductVariant |
+| `IV` | InventoryItem |
+| `SM` | StockMovement |
+
+Chaque identifiant est son préfixe plus 10 caractères tirés cryptographiquement de `23456789ABCDEFGHJKLMNPQRSTUVWXYZ`.

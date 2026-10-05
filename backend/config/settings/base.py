@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     "apps.accounts.apps.AccountsConfig",
     "apps.businesses.apps.BusinessesConfig",
     "apps.catalog.apps.CatalogConfig",
+    "apps.inventory.apps.InventoryConfig",
 ]
 
 MIDDLEWARE = [
@@ -122,5 +123,7 @@ SPECTACULAR_SETTINGS = {
         {"name": "Product Categories", "description": "Taxonomie globale des produits et attributs effectifs."},
         {"name": "Products", "description": "Catalogue produit isolé par commerce."},
         {"name": "Product Variants", "description": "Combinaisons de variantes d’un produit."},
+        {"name": "Inventory", "description": "Quantités disponibles isolées par commerce."},
+        {"name": "Stock Movements", "description": "Historique immuable des entrées, sorties et ajustements."},
     ],
 }

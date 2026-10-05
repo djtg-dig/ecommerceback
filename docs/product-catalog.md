@@ -36,3 +36,8 @@ A variant contains only variant-axis values. Its `variant_signature` is SHA-256 
 All writes require an active OWNER or MANAGER membership. Active EMPLOYEE memberships can read product and variant data only. Every lookup is constrained by membership, business and then product/variant; knowing an `SH`, `PR`, or `PV` code is never authorization.
 
 A future `ProductImage` relation will add file handling. Marketplace publication will later have its own publication state, distinct from internal `Product.status`.
+
+
+## Inventory boundary
+
+Product and ProductVariant remain catalog records. Quantities, reservations and movements are implemented only in `apps.inventory`; see [Inventory](inventory.md). A simple product receives inventory directly, whereas a product with active variants is stocked through its variants.

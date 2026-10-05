@@ -34,6 +34,8 @@ def test_schema_lists_real_routes_and_ecommerce_bearer_security(client):
         "/api/v1/product-categories/",
         "/api/v1/product-categories/{code}/attributes/",
         "/api/v1/businesses/{business_public_id}/products/",
+        "/api/v1/businesses/{business_public_id}/inventory/",
+        "/api/v1/businesses/{business_public_id}/inventory/{inventory_public_id}/movements/",
     ):
         assert path in schema["paths"]
     assert schema["paths"]["/api/v1/auth/me/"]["get"]["security"] == [{"EcommerceJWT": []}]

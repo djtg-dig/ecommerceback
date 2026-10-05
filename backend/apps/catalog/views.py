@@ -1,5 +1,6 @@
 """Public taxonomy reads and authenticated multi-tenant product APIs."""
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
@@ -157,7 +158,11 @@ class ProductVariantListCreateView(BusinessProductMixin, APIView):
         serializer = ProductVariantWriteSerializer(data=request.data, context={"product": product})
         serializer.is_valid(raise_exception=True)
         try:
+            from apps.inventory.services import ensure_can_create_variant
+            ensure_can_create_variant(product)
             variant = create_variant(product=product, values=dict(serializer.validated_data))
+        except DjangoValidationError as exc:
+            return Response(exc.message_dict if hasattr(exc, "message_dict") else {"detail": exc.messages}, status=400)
         except IntegrityError:
             return Response({"detail": "Combinaison de variante ou référence interne déjà utilisée."}, status=400)
         return Response(ProductVariantOutputSerializer(variant).data, status=status.HTTP_201_CREATED)

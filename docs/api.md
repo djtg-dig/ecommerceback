@@ -41,3 +41,31 @@ La documentation développeur est générée depuis les routes et serializers r�
 - Schéma OpenAPI : `/api/schema/`
 
 Les routes protégées affichent le bouton **Authorize**. Coller uniquement un JWT d’accès ecommerce dans le champ Bearer (`Authorization: Bearer <ecommerce_access_token>`). Swagger ne demande jamais de mot de passe Carri Account, de secret client, de code OAuth ou de vérificateur PKCE. `/api/v1/` n’est pas une API root et peut répondre `404`; `/api/docs/` est le point d’entrée développeur.
+
+## Inventory / Stock
+
+Toutes les routes utilisent un JWT ecommerce Bearer. OWNER, MANAGER et EMPLOYEE lisent; seul OWNER ou MANAGER crée un InventoryItem ou un mouvement.
+
+| Endpoint | Permission | Comportement |
+|---|---|---|
+| GET `/api/v1/businesses/{SH}/inventory/` | membre actif | Filtres optionnels `product=PR...`, `variant=PV...`, `low_stock=true`. |
+| POST `/api/v1/businesses/{SH}/inventory/` | OWNER, MANAGER | `{ "product": "PR...", "low_stock_threshold": "5.000" }` ou `{ "variant": "PV..." }`; quantité initiale zéro. |
+| GET `/api/v1/businesses/{SH}/inventory/{IV}/` | membre actif | Solde, réservé, disponible, seuil et statut low-stock. |
+| GET `/api/v1/businesses/{SH}/inventory/{IV}/movements/` | membre actif | Historique immuable, plus récent en premier. |
+| POST `/api/v1/businesses/{SH}/inventory/{IV}/movements/` | OWNER, MANAGER | Entrée, sortie ou ajustement manuel. |
+
+Exemples de mutation :
+
+```json
+{ "type": "IN", "quantity": "25.000", "reason": "Stock initial" }
+```
+
+```json
+{ "type": "OUT", "quantity": "3.000", "reason": "Produit endommagé" }
+```
+
+```json
+{ "type": "ADJUSTMENT", "target_quantity": "20.000", "reason": "Inventaire physique" }
+```
+
+Les champs `quantity`, `reserved_quantity`, snapshots avant/après, auteur, références techniques et identifiants publics sont calculés ou réservés au serveur. Les erreurs de cible invalide, stock insuffisant, type réservé, produit archivé ou accès inter-tenant renvoient `400`, `403` ou `404` selon le cas.

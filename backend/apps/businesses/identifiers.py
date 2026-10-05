@@ -28,3 +28,13 @@ def generate_product_public_id() -> str:
 def generate_product_variant_public_id() -> str:
     """Return a ``PV`` product-variant identifier."""
     return generate_public_id("PV")
+
+
+def generate_inventory_item_public_id() -> str:
+    """Return an ``IV`` inventory-item identifier."""
+    return generate_public_id("IV")
+
+
+def generate_stock_movement_public_id() -> str:
+    """Return an ``SM`` immutable stock-movement identifier."""
+    return generate_public_id("SM")

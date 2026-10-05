@@ -37,3 +37,8 @@ BusinessCategory is the platform-controlled flat commerce taxonomy. BusinessCate
 - **Product**: UUID internal PK; indexed unique immutable `PR` public ID; protected FK to Business and ProductCategory; decimal selling/cost prices; CDF/USD; JSONB `attributes`; status and timestamps. `internal_reference` is conditionally unique per Business when non-null. Database checks reject negative prices.
 - **ProductVariant**: UUID internal PK; indexed unique immutable `PV` public ID; protected FK to Product; JSONB attributes; SHA-256 `variant_signature`; optional decimal overrides and status. `(product, variant_signature)` is unique. Its SKU is conditionally unique per Product; service validation additionally protects the intended shared Business SKU namespace.
 - **Barcode** is nullable and deliberately not unique. Neither table has a quantity or stock field.
+
+## Inventory
+
+- **InventoryItem**: UUID interne, index unique `IV`, FK protégée vers Business et exactement une FK protégée vers Product ou ProductVariant. Quantités `Decimal(14,3)`, seuil bas et timestamps. Contraintes PostgreSQL : XOR Product/Variant, unicité conditionnelle par Product/Variant, quantité/réservé/seuil non négatifs et `reserved_quantity <= quantity`.
+- **StockMovement**: UUID interne, index unique `SM`, FK protégées vers Business, InventoryItem et CarriIdentity. Événement immuable avec type, delta, avant/après, motif et date. Les contraintes empêchent des snapshots négatifs.
