@@ -7,8 +7,10 @@ from rest_framework.test import APIClient
 from apps.accounts.models import CarriIdentity
 from apps.businesses.models import Business, BusinessMember
 from apps.businesses.services import create_business
+from apps.common.choices import PaymentMethod
 from apps.expenses.models import Expense, ExpenseCategory
 from apps.expenses.services import ensure_default_expense_categories
+from apps.receivables.models import ReceivablePayment
 
 pytestmark = pytest.mark.django_db
 
@@ -284,3 +286,48 @@ def test_business_creation_rolls_back_when_expense_initialization_fails():
 
     assert not Business.objects.filter(name="Rollback business").exists()
     assert not BusinessMember.objects.filter(identity=identity).exists()
+
+
+def test_payment_method_choices_are_shared_by_expenses_and_receivables():
+    expense_choices = Expense._meta.get_field("payment_method").choices
+    receivable_payment_choices = ReceivablePayment._meta.get_field(
+        "payment_method"
+    ).choices
+
+    assert list(expense_choices) == list(PaymentMethod.choices)
+    assert list(receivable_payment_choices) == list(PaymentMethod.choices)
+
+
+@pytest.mark.parametrize("payment_method", PaymentMethod.values)
+def test_expense_api_accepts_each_canonical_payment_method(payment_method):
+    business, owner, _, _, _ = setup_business()
+    category = ExpenseCategory.objects.get(business=business, code="RENT")
+
+    response = create_expense(
+        client(owner),
+        business,
+        category,
+        payment_method=payment_method,
+    )
+
+    expense = Expense.objects.get(public_id=response.data["public_id"])
+    assert expense.payment_method == payment_method
+    assert response.data["payment_method"] == payment_method
+
+
+def test_expense_api_rejects_non_canonical_payment_method():
+    business, owner, _, _, _ = setup_business()
+    category = ExpenseCategory.objects.get(business=business, code="RENT")
+
+    response = client(owner).post(
+        base_url(business) + "expenses/",
+        {
+            "category": category.public_id,
+            "amount": "10.00",
+            "description": "Invalid payment method",
+            "payment_method": "BITCOIN",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400

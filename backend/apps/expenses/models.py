@@ -4,6 +4,8 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 
+from apps.common.choices import PaymentMethod
+
 
 class ExpenseCategory(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -66,7 +68,7 @@ class Expense(models.Model):
     category = models.ForeignKey(ExpenseCategory, on_delete=models.PROTECT)
     amount = models.DecimalField(max_digits=16, decimal_places=2)
     currency = models.CharField(max_length=3, choices=Currency.choices)
-    payment_method = models.CharField(max_length=20)
+    payment_method = models.CharField(max_length=20, choices=PaymentMethod.choices)
     expense_date = models.DateField()
     description = models.CharField(max_length=500)
     reference = models.CharField(max_length=120, blank=True)

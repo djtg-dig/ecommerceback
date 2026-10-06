@@ -7,12 +7,10 @@ from rest_framework.views import APIView
 
 from apps.businesses.models import Business
 from apps.businesses.permissions import can_manage_business, membership_for
+from apps.common.choices import PaymentMethod
 
 from .models import Expense, ExpenseCategory
 from .services import cancel_expense
-
-PAYMENT_METHODS = {"CASH", "MOBILE_MONEY", "BANK_TRANSFER", "CARD", "OTHER"}
-
 
 def category_data(category):
     return {
@@ -71,7 +69,9 @@ class Categories(BusinessScopedView):
         business = self.business_for(request, business_public_id)
         if not business:
             return self.not_found()
-        return Response(category_data(category) for category in ExpenseCategory.objects.filter(business=business))
+        categories = ExpenseCategory.objects.filter(business=business)
+
+        return Response(category_data(category) for category in categories)
 
     def post(self, request, business_public_id):
         business = self.manageable_business(request, business_public_id)
@@ -92,7 +92,12 @@ class Categories(BusinessScopedView):
                 sort_order=request.data.get("sort_order", 0),
             )
         except ValidationError as error:
-            return Response({"detail": error.message_dict if hasattr(error, "message_dict") else error.messages}, status=400)
+            detail = (
+                error.message_dict
+                if hasattr(error, "message_dict")
+                else error.messages
+            )
+            return Response({"detail": detail}, status=400)
         return Response(category_data(category), status=201)
 
 
@@ -101,7 +106,12 @@ class CategoryDetail(BusinessScopedView):
         business = self.business_for(request, business_public_id)
         if not business:
             return None, None
-        return business, ExpenseCategory.objects.filter(business=business, public_id=category_public_id).first()
+        category = ExpenseCategory.objects.filter(
+            business=business,
+            public_id=category_public_id,
+        ).first()
+
+        return business, category
 
     def get(self, request, business_public_id, category_public_id):
         business, category = self.get_object(request, business_public_id, category_public_id)
@@ -126,7 +136,12 @@ class CategoryDetail(BusinessScopedView):
         try:
             category.save()
         except ValidationError as error:
-            return Response({"detail": error.message_dict if hasattr(error, "message_dict") else error.messages}, status=400)
+            detail = (
+                error.message_dict
+                if hasattr(error, "message_dict")
+                else error.messages
+            )
+            return Response({"detail": detail}, status=400)
         return Response(category_data(category))
 
 
@@ -139,7 +154,7 @@ class Expenses(BusinessScopedView):
         validators = {
             "status": {choice for choice, _ in Expense.Status.choices},
             "currency": {choice for choice, _ in Expense.Currency.choices},
-            "payment_method": PAYMENT_METHODS,
+            "payment_method": set(PaymentMethod.values),
         }
         for parameter, permitted in validators.items():
             value = request.query_params.get(parameter)
@@ -152,7 +167,11 @@ class Expenses(BusinessScopedView):
             if not ExpenseCategory.objects.filter(business=business, public_id=category).exists():
                 return Response({"detail": "Invalid category."}, status=400)
             queryset = queryset.filter(category__public_id=category)
-        for parameter, lookup in (("date_from", "expense_date__gte"), ("date_to", "expense_date__lte")):
+        date_filters = (
+            ("date_from", "expense_date__gte"),
+            ("date_to", "expense_date__lte"),
+        )
+        for parameter, lookup in date_filters:
             value = request.query_params.get(parameter)
             if value:
                 try:
@@ -177,10 +196,17 @@ class Expenses(BusinessScopedView):
             amount = Decimal(0)
         currency = request.data.get("currency", business.primary_currency)
         payment_method = request.data.get("payment_method", "CASH")
-        if not category or amount <= 0 or currency not in Expense.Currency.values or payment_method not in PAYMENT_METHODS:
+        if (
+            not category
+            or amount <= 0
+            or currency not in Expense.Currency.values
+            or payment_method not in PaymentMethod.values
+        ):
             return Response({"detail": "Invalid expense."}, status=400)
         try:
-            expense_date = date.fromisoformat(request.data.get("expense_date", date.today().isoformat()))
+            expense_date = date.fromisoformat(
+                request.data.get("expense_date", date.today().isoformat())
+            )
         except (TypeError, ValueError):
             return Response({"detail": "Invalid expense date."}, status=400)
         expense = Expense.objects.create(
@@ -202,9 +228,12 @@ class ExpenseDetail(BusinessScopedView):
         business = self.business_for(request, business_public_id)
         if not business:
             return None, None
-        return business, Expense.objects.select_related("category").filter(
-            business=business, public_id=expense_public_id
+        expense = Expense.objects.select_related("category").filter(
+            business=business,
+            public_id=expense_public_id,
         ).first()
+
+        return business, expense
 
     def get(self, request, business_public_id, expense_public_id):
         business, expense = self.get_object(request, business_public_id, expense_public_id)
@@ -220,7 +249,15 @@ class ExpenseDetail(BusinessScopedView):
             return self.forbidden()
         if expense.status != Expense.Status.ACTIVE:
             return Response({"detail": "Cancelled expenses are immutable."}, status=400)
-        allowed_fields = {"category", "amount", "currency", "payment_method", "expense_date", "description", "reference"}
+        allowed_fields = {
+            "category",
+            "amount",
+            "currency",
+            "payment_method",
+            "expense_date",
+            "description",
+            "reference",
+        }
         unknown_fields = set(request.data).difference(allowed_fields)
         if unknown_fields:
             return Response({"detail": "One or more fields cannot be changed."}, status=400)
@@ -244,7 +281,7 @@ class ExpenseDetail(BusinessScopedView):
                 return Response({"detail": "Invalid currency."}, status=400)
             expense.currency = request.data["currency"]
         if "payment_method" in request.data:
-            if request.data["payment_method"] not in PAYMENT_METHODS:
+            if request.data["payment_method"] not in PaymentMethod.values:
                 return Response({"detail": "Invalid payment method."}, status=400)
             expense.payment_method = request.data["payment_method"]
         if "expense_date" in request.data:
@@ -258,7 +295,12 @@ class ExpenseDetail(BusinessScopedView):
         try:
             expense.save()
         except ValidationError as error:
-            return Response({"detail": error.message_dict if hasattr(error, "message_dict") else error.messages}, status=400)
+            detail = (
+                error.message_dict
+                if hasattr(error, "message_dict")
+                else error.messages
+            )
+            return Response({"detail": detail}, status=400)
         return Response(expense_data(expense))
 
 
