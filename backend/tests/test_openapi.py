@@ -37,6 +37,8 @@ def test_schema_lists_real_routes_and_ecommerce_bearer_security(client):
         "/api/v1/businesses/{business_public_id}/inventory/",
         "/api/v1/businesses/{business_public_id}/suppliers/",
         "/api/v1/businesses/{business_public_id}/purchases/",
+        "/api/v1/businesses/{business_public_id}/receivables/",
+        "/api/v1/businesses/{business_public_id}/receivables/{receivable_public_id}/payments/",
         "/api/v1/businesses/{business_public_id}/inventory/{inventory_public_id}/movements/",
     ):
         assert path in schema["paths"]

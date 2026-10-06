@@ -1,3 +1,4 @@
+from decimal import Decimal
 from django.core.exceptions import ValidationError
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -44,7 +45,7 @@ class Action(SD):
  def post(self,r,business_public_id,sale_public_id):
   b=self.b(r,business_public_id);s=self.o(b,sale_public_id) if b else None
   if not s:return self.nf()
-  try:o=complete(s,r.user) if self.fn=='complete' else cancel(s,r.user)
+  try:o=complete(s,r.user,Decimal(str(r.data['amount_paid'])) if 'amount_paid' in r.data else None,r.data.get('payment_method','CASH')) if self.fn=='complete' else cancel(s,r.user)
   except ValidationError as e:return Response({'detail':str(e)},400)
   return Response(SaleSerializer(o).data)
 class Complete(Action):fn='complete'

@@ -76,3 +76,6 @@ Les champs `quantity`, `reserved_quantity`, snapshots avant/après, auteur, réf
 
 ## Sales
 Routes internes : `/customers/`, `/sales/`, `/sales/{SA}/lines/`, `/complete/`, `/cancel/`.
+
+## Receivables
+GET `/receivables/`, detail, PATCH metadata et GET/POST `/payments/`.

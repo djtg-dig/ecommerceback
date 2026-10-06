@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     "apps.inventory.apps.InventoryConfig",
     "apps.purchases.apps.PurchasesConfig",
     "apps.sales.apps.SalesConfig",
+    "apps.receivables.apps.ReceivablesConfig",
 ]
 
 MIDDLEWARE = [
@@ -131,5 +132,6 @@ SPECTACULAR_SETTINGS = {
         {"name": "Purchases", "description": "Approvisionnements et réceptions atomiques."},
         {"name": "Customers", "description": "Clients internes d’un commerce."},
         {"name": "Sales", "description": "Ventes internes/POS."},
+        {"name": "Receivables", "description": "Créances clients et paiements internes."},
     ],
 }

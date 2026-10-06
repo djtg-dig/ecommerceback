@@ -51,3 +51,6 @@ BusinessCategory is the platform-controlled flat commerce taxonomy. BusinessCate
 
 ## Sales
 Customer, Sale et SaleLine forment les ventes internes; SaleLine cible Product XOR Variant et conserve les snapshots.
+
+## Receivables
+Receivable est unique par Sale; ReceivablePayment est historique et immuable.

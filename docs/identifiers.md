@@ -25,3 +25,6 @@ Chaque identifiant est son préfixe plus 10 caractères tirés cryptographiqueme
 | `CU` | Customer |
 | `SA` | Sale |
 | `SL` | SaleLine |
+
+| `RC` | Receivable |
+| `RP` | ReceivablePayment |

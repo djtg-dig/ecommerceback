@@ -47,3 +47,6 @@ def generate_purchase_line_public_id(): return generate_public_id("PL")
 def generate_customer_public_id(): return generate_public_id("CU")
 def generate_sale_public_id(): return generate_public_id("SA")
 def generate_sale_line_public_id(): return generate_public_id("SL")
+
+def generate_receivable_public_id(): return generate_public_id("RC")
+def generate_receivable_payment_public_id(): return generate_public_id("RP")

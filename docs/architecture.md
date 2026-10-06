@@ -40,3 +40,5 @@ Purchases reste séparé de Inventory: seule la réception validée appelle le s
 
 ## Niveau 1 — Gestion interne
 Business, catalogue, fournisseurs, achats, inventaire, clients et ventes servent les opérations internes. Sale est une vente POS, pas un Order. Niveau 2 visibilité publique et Niveau 3 vente en ligne ne sont pas implémentés.
+
+Créances fait partie du Niveau 1 interne; aucun gateway, caisse ou marketplace n’est implémenté.
