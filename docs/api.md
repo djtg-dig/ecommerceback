@@ -133,3 +133,6 @@ GET/POST `/api/v1/businesses/{SH}/purchases/{PU}/payments/` et POST `/payments/{
 ### Financial summary
 
 `GET /businesses/{SH}/financial-summary/` accepte `date_from`, `date_to`, `payment_method`, `event_type`, `business_payment_method` et `recording_mode`. La réponse conserve `total_inflow`, `total_outflow`, `net_flow` et `by_payment_method`; elle ajoute les ventilations `by_category`, `by_business_payment_method` et `by_recording_mode`.
+
+### Dashboard
+`GET /businesses/{SH}/dashboard/` est réservé aux OWNER/MANAGER. Paramètres : `period`, ou `date_from` et `date_to`. La réponse compacte contient périodes, CA, cash, créances, rupture et dette fournisseur.

@@ -1,0 +1,2 @@
+# Dashboard Niveau 1
+`GET /api/v1/businesses/{SH}/dashboard/` fournit une synthèse compacte OWNER/MANAGER pour faible connectivité. Il retourne CA des ventes complétées, caisse du ledger, créances actuelles, ruptures et dette fournisseur. `period` accepte `today`, `last_7_days`, `last_30_days`; `date_from` et `date_to` forment une période personnalisée. CA, cash et bénéfice sont distincts. Aucun cache, ETag, solde bancaire réel, low-stock ou bénéfice n'est fourni.

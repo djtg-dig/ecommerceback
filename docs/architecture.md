@@ -78,3 +78,5 @@ Expense, ExpensePayment et FinancialMovement sont trois responsabilités distinc
 Purchase peut recevoir des marchandises via Inventory IN et recevoir séparément des SupplierPayment qui génèrent des OUTFLOW Finance. Reverser un paiement ne modifie jamais le stock.
 
 La caisse vendeur est une projection calculée depuis `FinancialMovement`; aucun solde financier persistant n'est stocké sur Business ou sur une méthode de paiement.
+
+Les écrans synthétiques critiques utilisent un endpoint agrégé compact afin de limiter les requêtes HTTP en connectivité faible. Cette optimisation réseau n'impose pas une requête SQL monolithique.
