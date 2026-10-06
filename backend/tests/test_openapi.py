@@ -113,3 +113,11 @@ def test_schema_documents_expense_payment_and_reversal_routes(client):
     assert "post" in schema["paths"][reversal]
     names = {parameter["name"] for parameter in schema["paths"][payments]["post"]["parameters"]}
     assert "Idempotency-Key" in names
+
+
+def test_schema_documents_supplier_payment_routes(client):
+    schema = yaml.safe_load(client.get(reverse("openapi-schema")).content)
+    payments = "/api/v1/businesses/{business_public_id}/purchases/{purchase_public_id}/payments/"
+    reversal = payments + "{payment_public_id}/reverse/"
+    assert set(schema["paths"][payments]) >= {"get", "post"}
+    assert "post" in schema["paths"][reversal]

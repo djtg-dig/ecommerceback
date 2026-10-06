@@ -11,8 +11,9 @@ from .serializers import (
     PurchaseWriteSerializer,
     PurchaseLineSerializer,
     PurchaseLineWriteSerializer,
+    SupplierPaymentSerializer, SupplierPaymentCreateSerializer, SupplierPaymentReverseSerializer,
 )
-from .services import transition, receive_purchase
+from .services import transition, receive_purchase, add_supplier_payment, reverse_supplier_payment, SupplierPaymentIdempotencyConflict
 
 
 class Mixin:
@@ -335,3 +336,29 @@ LineDetail.http_method_names = ["get", "patch", "delete", "head", "options"]
 Confirm.http_method_names = ["post", "options"]
 Receive.http_method_names = ["post", "options"]
 Cancel.http_method_names = ["post", "options"]
+
+class PurchasePayments(PurchaseDetail):
+ def get(self,r,business_public_id,purchase_public_id):
+  b=self.business(r,business_public_id);p=self.obj(b,purchase_public_id) if b else None
+  return Response(SupplierPaymentSerializer(p.payments.all(),many=True).data) if p else self.nf()
+ def post(self,r,business_public_id,purchase_public_id):
+  b=self.business(r,business_public_id);p=self.obj(b,purchase_public_id) if b else None
+  if not p:return self.nf()
+  if not can_manage_business(membership_for(r.user,b)):return self.forbid()
+  s=SupplierPaymentCreateSerializer(data=r.data);s.is_valid(raise_exception=True)
+  try:o=add_supplier_payment(p,r.user,idempotency_key=r.headers.get('Idempotency-Key',''),**s.validated_data)
+  except SupplierPaymentIdempotencyConflict as e:return Response({'detail':str(e)},409)
+  except ValidationError as e:return Response({'detail':str(e)},400)
+  return Response(SupplierPaymentSerializer(o).data,201)
+class SupplierPaymentReverse(PurchasePayments):
+ def post(self,r,business_public_id,purchase_public_id,payment_public_id):
+  b=self.business(r,business_public_id);p=self.obj(b,purchase_public_id) if b else None;o=p.payments.filter(public_id=payment_public_id).first() if p else None
+  if not o:return self.nf()
+  if not can_manage_business(membership_for(r.user,b)):return self.forbid()
+  s=SupplierPaymentReverseSerializer(data=r.data);s.is_valid(raise_exception=True)
+  try:return Response(SupplierPaymentSerializer(reverse_supplier_payment(o,r.user,s.validated_data['reason'])).data)
+  except ValidationError as e:return Response({'detail':str(e)},400)
+PurchasePayments.http_method_names=['get','post','head','options'];SupplierPaymentReverse.http_method_names=['post','options']
+
+PurchasePayments.serializer_class = SupplierPaymentSerializer
+SupplierPaymentReverse.serializer_class = SupplierPaymentReverseSerializer

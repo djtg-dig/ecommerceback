@@ -8,8 +8,9 @@ class PurchaseLineSerializer(serializers.ModelSerializer):
  product=serializers.CharField(source='product.public_id',read_only=True,allow_null=True);variant=serializers.CharField(source='variant.public_id',read_only=True,allow_null=True)
  class Meta:model=PurchaseLine;fields=('public_id','product','variant','quantity','unit_cost','line_total','created_at','updated_at')
 class PurchaseSerializer(serializers.ModelSerializer):
+ paid_amount=serializers.DecimalField(max_digits=16,decimal_places=2,read_only=True);balance=serializers.DecimalField(max_digits=16,decimal_places=2,read_only=True);payment_status=serializers.CharField(read_only=True)
  supplier=serializers.CharField(source='supplier.public_id',read_only=True,allow_null=True);subtotal=serializers.DecimalField(max_digits=16,decimal_places=2,read_only=True);total=serializers.DecimalField(max_digits=16,decimal_places=2,read_only=True)
- class Meta:model=Purchase;fields=('public_id','supplier','status','currency','reference','notes','subtotal','total','created_at','confirmed_at','received_at','cancelled_at','updated_at')
+ class Meta:model=Purchase;fields=('public_id','supplier','status','currency','reference','notes','subtotal','total','paid_amount','balance','payment_status','created_at','confirmed_at','received_at','cancelled_at','updated_at')
 class PurchaseWriteSerializer(serializers.ModelSerializer):
  supplier=serializers.SlugRelatedField(slug_field='public_id',queryset=Supplier.objects.all(),required=False,allow_null=True);currency=serializers.ChoiceField(choices=('CDF','USD'),required=False)
  class Meta:model=Purchase;fields=('supplier','currency','reference','notes')
@@ -27,3 +28,10 @@ class PurchaseLineWriteSerializer(serializers.Serializer):
   try:validate_line_target(self.context['purchase'],a.get('product'),a.get('variant'))
   except Exception as e:raise serializers.ValidationError(str(e))
   return a
+class SupplierPaymentSerializer(serializers.ModelSerializer):
+ class Meta:
+  from .models import SupplierPayment
+  model=SupplierPayment;fields=('public_id','amount','payment_method','paid_at','created_by','created_at','reversed_at','reversal_reason');read_only_fields=fields
+class SupplierPaymentCreateSerializer(serializers.Serializer):
+ amount=serializers.DecimalField(max_digits=16,decimal_places=2,min_value=Decimal('0.01'));payment_method=serializers.ChoiceField(choices=__import__('apps.common.choices',fromlist=['PaymentMethod']).PaymentMethod.choices)
+class SupplierPaymentReverseSerializer(serializers.Serializer):reason=serializers.CharField()

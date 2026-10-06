@@ -9,3 +9,7 @@ Les lignes visent exactement un Product simple ou ProductVariant, utilisent quan
 OWNER et MANAGER écrivent; EMPLOYEE lit. Aucun Supplier, achat ou article d’un autre commerce ne peut être utilisé.
 
 Les nouvelles purchases utilisent obligatoirement `Business.primary_currency`. Une devise contradictoire est refusée et aucune conversion n’est appliquée.
+
+## Paiements fournisseurs
+
+Une Purchase décrit l'approvisionnement; `RECEIVED` produit uniquement Inventory IN. Un `SupplierPayment` (`PP`) est le versement réel au fournisseur et crée `SUPPLIER_PAYMENT` OUTFLOW. Il est permis en CONFIRMED ou RECEIVED, peut être partiel ou multiple, et accepte `Idempotency-Key`. Un reversal ajoute `SUPPLIER_PAYMENT_REVERSAL` INFLOW sans modifier Inventory.

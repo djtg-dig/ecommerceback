@@ -47,3 +47,5 @@ Ils utilisent le préfixe suivi de 10 caractères cryptographiquement générés
 `FM` utilise le même suffixe aléatoire de 10 caractères que les autres identifiants publics.
 
 | `EP` | ExpensePayment |
+
+| `PP` | SupplierPayment |

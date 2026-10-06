@@ -35,3 +35,7 @@ Sales et Receivables appellent exclusivement `create_financial_movement`; ils ne
 # Finance — Lot 4 : décaissements Expenses
 
 Une `Expense` est une charge reconnue, sans mouvement de trésorerie implicite. Seul un `ExpensePayment` crée un `EXPENSE_PAYMENT` OUTFLOW, lié au paiement réel. Le reversal d’un paiement ajoute un INFLOW `EXPENSE_REVERSAL` : le ledger conserve donc les deux écritures et son net flow reflète la correction. Les ExpensePayment sont immuables, idempotents par Expense et verrouillent la dépense durant leur création.
+
+## Supplier payments
+
+`SUPPLIER_PAYMENT` est un OUTFLOW lié à SupplierPayment. Son reversal est un `SUPPLIER_PAYMENT_REVERSAL` INFLOW relié à l'écriture originale. Réception fournisseur et paiement sont volontairement deux journaux distincts : Inventory pour les marchandises, Finance pour l'argent.

@@ -21,6 +21,8 @@ class FinancialMovement(models.Model):
         RECEIVABLE_PAYMENT = "RECEIVABLE_PAYMENT", "Receivable payment"
         EXPENSE_PAYMENT = "EXPENSE_PAYMENT", "Expense payment"
         EXPENSE_REVERSAL = "EXPENSE_REVERSAL", "Expense reversal"
+        SUPPLIER_PAYMENT = "SUPPLIER_PAYMENT", "Supplier payment"
+        SUPPLIER_PAYMENT_REVERSAL = "SUPPLIER_PAYMENT_REVERSAL", "Supplier payment reversal"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     public_id = models.CharField(max_length=12, unique=True, editable=False, db_index=True)
@@ -29,7 +31,7 @@ class FinancialMovement(models.Model):
     amount = models.DecimalField(max_digits=16, decimal_places=2)
     currency = models.CharField(max_length=3, choices=(("CDF", "CDF"), ("USD", "USD")))
     payment_method = models.CharField(max_length=20, choices=PaymentMethod.choices)
-    event_type = models.CharField(max_length=24, choices=EventType.choices)
+    event_type = models.CharField(max_length=32, choices=EventType.choices)
     occurred_at = models.DateTimeField()
     created_by = models.ForeignKey("accounts.CarriIdentity", on_delete=models.PROTECT)
     reason = models.CharField(max_length=500, blank=True)
@@ -42,6 +44,7 @@ class FinancialMovement(models.Model):
     expense_payment = models.OneToOneField(
         "expenses.ExpensePayment", null=True, blank=True, on_delete=models.PROTECT
     )
+    supplier_payment = models.OneToOneField("purchases.SupplierPayment", null=True, blank=True, on_delete=models.PROTECT)
     reversal_of = models.OneToOneField(
         "self", null=True, blank=True, on_delete=models.PROTECT, related_name="reversal"
     )
@@ -54,13 +57,14 @@ class FinancialMovement(models.Model):
             models.CheckConstraint(condition=Q(amount__gt=0), name="financial_movement_amount_positive"),
             models.CheckConstraint(
                 condition=(
-                    Q(reversal_of__isnull=False, sale__isnull=True, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=True)
+                    Q(reversal_of__isnull=False, sale__isnull=True, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=True, supplier_payment__isnull=True)
                     | Q(reversal_of__isnull=True)
                     & (
-                        Q(sale__isnull=False, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=True)
-                        | Q(sale__isnull=True, receivable_payment__isnull=False, expense__isnull=True, expense_payment__isnull=True)
-                        | Q(sale__isnull=True, receivable_payment__isnull=True, expense__isnull=False, expense_payment__isnull=True)
-                        | Q(sale__isnull=True, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=False)
+                        Q(sale__isnull=False, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=True, supplier_payment__isnull=True)
+                        | Q(sale__isnull=True, receivable_payment__isnull=False, expense__isnull=True, expense_payment__isnull=True, supplier_payment__isnull=True)
+                        | Q(sale__isnull=True, receivable_payment__isnull=True, expense__isnull=False, expense_payment__isnull=True, supplier_payment__isnull=True)
+                        | Q(sale__isnull=True, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=False, supplier_payment__isnull=True)
+                        | Q(sale__isnull=True, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=True, supplier_payment__isnull=False)
                     )
                 ),
                 name="financial_movement_valid_source",
@@ -95,19 +99,24 @@ class FinancialMovement(models.Model):
             "receivable_payment": self.receivable_payment,
             "expense": self.expense,
             "expense_payment": self.expense_payment,
+            "supplier_payment": self.supplier_payment,
         }
         present_sources = [name for name, value in sources.items() if value is not None]
         if self.reversal_of_id:
             if present_sources:
                 errors["reversal_of"] = "A reversal cannot have a separate source."
-            elif self.event_type != self.EventType.EXPENSE_REVERSAL:
+            elif self.event_type not in {self.EventType.EXPENSE_REVERSAL, self.EventType.SUPPLIER_PAYMENT_REVERSAL}:
                 errors["event_type"] = "A reversal must use EXPENSE_REVERSAL."
             elif not self.reason.strip():
                 errors["reason"] = "A reversal reason is required."
             else:
                 original = self.reversal_of
-                if original.event_type != self.EventType.EXPENSE_PAYMENT:
-                    errors["reversal_of"] = "Only expense payments can be reversed in this version."
+                allowed_reversals = {
+                    self.EventType.EXPENSE_PAYMENT: self.EventType.EXPENSE_REVERSAL,
+                    self.EventType.SUPPLIER_PAYMENT: self.EventType.SUPPLIER_PAYMENT_REVERSAL,
+                }
+                if allowed_reversals.get(original.event_type) != self.event_type:
+                    errors["reversal_of"] = "The reversal event type does not match the original payment."
                 if original.business_id != self.business_id:
                     errors["business"] = "The reversal must belong to the original Business."
                 if self.amount != original.amount or self.currency != original.currency:
@@ -121,6 +130,7 @@ class FinancialMovement(models.Model):
                 self.EventType.SALE_PAYMENT: "sale",
                 self.EventType.RECEIVABLE_PAYMENT: "receivable_payment",
                 self.EventType.EXPENSE_PAYMENT: "expense_payment",
+                self.EventType.SUPPLIER_PAYMENT: "supplier_payment",
             }.get(self.event_type)
             if expected_source is None:
                 errors["event_type"] = "EXPENSE_REVERSAL requires reversal_of."
@@ -128,7 +138,7 @@ class FinancialMovement(models.Model):
                 errors["event_type"] = "The event type does not match its source."
             elif self.business_id:
                 source = sources[expected_source]
-                source_business_id = source.expense.business_id if expected_source == "expense_payment" else source.business_id
+                source_business_id = source.expense.business_id if expected_source == "expense_payment" else (source.purchase.business_id if expected_source == "supplier_payment" else source.business_id)
                 if source_business_id != self.business_id:
                     errors[expected_source] = "The source must belong to the same Business."
         if errors:

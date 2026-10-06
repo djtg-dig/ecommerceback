@@ -35,3 +35,24 @@ class PurchaseLine(models.Model):
   if not self.public_id:self.public_id=generate_purchase_line_public_id()
   self.line_total=self.quantity*self.unit_cost
   return super().save(*a,**kw)
+
+class SupplierPayment(models.Model):
+ id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False);public_id=models.CharField(max_length=12,unique=True,editable=False,db_index=True);purchase=models.ForeignKey(Purchase,on_delete=models.PROTECT,related_name='payments');amount=models.DecimalField(max_digits=16,decimal_places=2);payment_method=models.CharField(max_length=20,choices=__import__('apps.common.choices',fromlist=['PaymentMethod']).PaymentMethod.choices);paid_at=models.DateTimeField(auto_now_add=True);created_by=models.ForeignKey('accounts.CarriIdentity',on_delete=models.PROTECT,related_name='supplier_payments');idempotency_key=models.CharField(max_length=255,blank=True);idempotency_fingerprint=models.CharField(max_length=64,blank=True);reversed_at=models.DateTimeField(null=True,blank=True);reversed_by=models.ForeignKey('accounts.CarriIdentity',null=True,blank=True,on_delete=models.PROTECT,related_name='reversed_supplier_payments');reversal_reason=models.CharField(max_length=500,blank=True);created_at=models.DateTimeField(auto_now_add=True)
+ class Meta:
+  constraints=[models.CheckConstraint(condition=Q(amount__gt=0),name='supplier_payment_amount_positive'),models.UniqueConstraint(fields=('purchase','idempotency_key'),condition=~Q(idempotency_key=''),name='supplier_payment_idempotency_key')]
+ @property
+ def is_reversed(self):return self.reversed_at is not None
+ def save(self,*a,**kw):
+  from apps.businesses.identifiers import generate_supplier_payment_public_id
+  if not self._state.adding:
+   prev=type(self).objects.get(pk=self.pk);allowed={'reversed_at','reversed_by','reversal_reason'};changed={f.name for f in self._meta.fields if getattr(prev,f.attname)!=getattr(self,f.attname)}
+   if not changed.issubset(allowed):raise ValidationError('Supplier payments are immutable.')
+  if not self.public_id:self.public_id=generate_supplier_payment_public_id()
+  self.full_clean();return super().save(*a,**kw)
+ def delete(self,*a,**kw):raise ValidationError('Supplier payments cannot be deleted.')
+
+def _purchase_paid_amount(self):
+ return self.payments.filter(reversed_at__isnull=True).aggregate(total=models.Sum('amount'))['total'] or Decimal('0')
+def _purchase_balance(self):return self.total-self.paid_amount
+def _purchase_payment_status(self):return 'UNPAID' if self.paid_amount==0 else ('PAID' if self.paid_amount==self.total else 'PARTIALLY_PAID')
+Purchase.paid_amount=property(_purchase_paid_amount);Purchase.balance=property(_purchase_balance);Purchase.payment_status=property(_purchase_payment_status)

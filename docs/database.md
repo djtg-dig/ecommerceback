@@ -72,3 +72,5 @@ Receivable est unique par Sale; ReceivablePayment est historique et immuable.
 
 - **ExpensePayment** : UUID interne, identifiant public `EP`, FK protégée vers Expense et acteur, montant positif, PaymentMethod, horodatage, idempotence par `(expense, idempotency_key)` et métadonnées de reversal. Les valeurs monétaires sont immuables.
 - **FinancialMovement.expense_payment** : relation unique vers le règlement réel. La FK `expense` historique est conservée pour compatibilité mais n’est plus admise comme source des nouveaux `EXPENSE_PAYMENT`.
+
+- **SupplierPayment** : règlement immuable relié à Purchase, montant positif, moyen de paiement, idempotence par Purchase et métadonnées de reversal. `FinancialMovement.supplier_payment` est sa source financière unique.

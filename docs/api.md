@@ -125,3 +125,7 @@ Les filtres de date utilisent `YYYY-MM-DD`; les valeurs inconnues renvoient `400
 | POST `/api/v1/businesses/{SH}/expenses/{EX}/payments/{EP}/reverse/` | OWNER, MANAGER | Corrige un règlement via une écriture Finance opposée, avec `reason`. |
 
 Une Expense expose `paid_amount`, `balance` et `payment_status`. Créer une Expense ne crée aucun OUTFLOW.
+
+## Supplier payments
+
+GET/POST `/api/v1/businesses/{SH}/purchases/{PU}/payments/` et POST `/payments/{PP}/reverse/` sont réservés OWNER/MANAGER. Le POST accepte `amount`, `payment_method` et l'en-tête optionnel `Idempotency-Key`.
