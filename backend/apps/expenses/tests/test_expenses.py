@@ -1,10 +1,12 @@
 from datetime import date
+from unittest.mock import patch
 
 import pytest
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
 from apps.businesses.models import Business, BusinessMember
+from apps.businesses.services import create_business
 from apps.expenses.models import Expense, ExpenseCategory
 from apps.expenses.services import ensure_default_expense_categories
 
@@ -174,3 +176,111 @@ def test_expense_model_rejects_non_positive_amount_and_category_from_another_bus
             description="Invalid tenant",
             created_by=owner,
         )
+
+
+def test_default_category_service_creates_exact_active_system_categories_idempotently():
+    business, _, _, _, _ = setup_business()
+    ExpenseCategory.objects.filter(business=business).delete()
+
+    ensure_default_expense_categories(business)
+    first_categories = list(ExpenseCategory.objects.filter(business=business).order_by("code"))
+    ensure_default_expense_categories(business)
+    second_categories = list(ExpenseCategory.objects.filter(business=business).order_by("code"))
+
+    expected_codes = {
+        "RENT",
+        "ELECTRICITY",
+        "WATER",
+        "INTERNET",
+        "TRANSPORT",
+        "SALARY",
+        "MAINTENANCE",
+        "SUPPLIES",
+        "TAX",
+        "MARKETING",
+        "OTHER",
+    }
+    assert {category.code for category in first_categories} == expected_codes
+    assert len(second_categories) == len(expected_codes)
+    assert {category.id for category in first_categories} == {
+        category.id for category in second_categories
+    }
+    assert all(category.business_id == business.id for category in second_categories)
+    assert all(category.is_system and category.is_active for category in second_categories)
+
+
+def test_default_category_service_preserves_existing_category_with_standard_code():
+    business = Business.objects.create(name="Existing custom category")
+    existing_rent = ExpenseCategory.objects.create(
+        business=business,
+        code="RENT",
+        name="Custom rent label",
+        is_system=False,
+        is_active=False,
+    )
+
+    ensure_default_expense_categories(business)
+
+    categories = ExpenseCategory.objects.filter(business=business)
+    rent_categories = categories.filter(code="RENT")
+    assert categories.count() == 11
+    assert rent_categories.count() == 1
+    assert rent_categories.get().id == existing_rent.id
+    assert rent_categories.get().name == "Custom rent label"
+    assert rent_categories.get().is_system is False
+
+
+def test_business_api_creation_seeds_default_expense_categories():
+    identity = CarriIdentity.objects.create(carri_subject="expense-api-business-owner")
+    api_client = client(identity)
+
+    response = api_client.post(
+        "/api/v1/businesses/",
+        {"name": "Created through API", "primary_currency": "CDF"},
+        format="json",
+    )
+
+    assert response.status_code == 201, response.data
+    business = Business.objects.get(public_id=response.data["public_id"])
+    categories = ExpenseCategory.objects.filter(business=business)
+    assert categories.count() == 11
+    assert set(categories.values_list("code", flat=True)) == {
+        "RENT",
+        "ELECTRICITY",
+        "WATER",
+        "INTERNET",
+        "TRANSPORT",
+        "SALARY",
+        "MAINTENANCE",
+        "SUPPLIES",
+        "TAX",
+        "MARKETING",
+        "OTHER",
+    }
+
+
+def test_each_business_receives_its_own_standard_category_rows():
+    business_a = Business.objects.create(name="Business A")
+    business_b = Business.objects.create(name="Business B")
+
+    ensure_default_expense_categories(business_a)
+    ensure_default_expense_categories(business_b)
+
+    category_a = ExpenseCategory.objects.get(business=business_a, code="RENT")
+    category_b = ExpenseCategory.objects.get(business=business_b, code="RENT")
+    assert category_a.id != category_b.id
+    assert category_a.code == category_b.code == "RENT"
+
+
+def test_business_creation_rolls_back_when_expense_initialization_fails():
+    identity = CarriIdentity.objects.create(carri_subject="expense-rollback-owner")
+
+    with patch(
+        "apps.expenses.services.ensure_default_expense_categories",
+        side_effect=RuntimeError("Expense setup unavailable"),
+    ):
+        with pytest.raises(RuntimeError, match="Expense setup unavailable"):
+            create_business(identity, {"name": "Rollback business"})
+
+    assert not Business.objects.filter(name="Rollback business").exists()
+    assert not BusinessMember.objects.filter(identity=identity).exists()
