@@ -179,7 +179,7 @@ def test_expense_filters_validate_values_and_apply_all_supported_filters():
         business,
         transport,
         amount="20",
-        currency="USD",
+        currency="CDF",
         payment_method="CARD",
         expense_date="2026-10-03",
     )
@@ -195,7 +195,7 @@ def test_expense_filters_validate_values_and_apply_all_supported_filters():
         url,
         {
             "status": "CANCELLED",
-            "currency": "USD",
+            "currency": "CDF",
             "payment_method": "CARD",
             "category": transport.public_id,
             "date_from": "2026-10-02",
@@ -440,3 +440,21 @@ def test_expense_category_admin_preserves_system_categories():
         category_admin.get_readonly_fields(None, system_category)
     )
     assert "code" not in category_admin.get_readonly_fields(None, custom_category)
+
+
+def test_expense_rejects_currency_different_from_business_currency():
+    business, owner, _, _, _ = setup_business()
+    category = ExpenseCategory.objects.get(business=business, code="RENT")
+
+    response = client(owner).post(
+        base_url(business) + "expenses/",
+        {
+            "category": category.public_id,
+            "amount": "10.00",
+            "currency": "USD",
+            "description": "Invalid currency",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400

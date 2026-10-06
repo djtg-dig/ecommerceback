@@ -21,3 +21,11 @@ def test_purchase_receive(ctx):
  item=InventoryItem.objects.get(product=p);assert item.quantity==2 and StockMovement.objects.get(inventory_item=item).reference_type=='PURCHASE'
  assert api(o).post(base+f'purchases/{pu}/receive/',{},format='json').status_code==400 and InventoryItem.objects.get(pk=item.pk).quantity==2
  assert api(o).patch(base+f'purchases/{pu}/',{'notes':'x'},format='json').status_code==400
+
+
+def test_purchase_currency_is_imposed_by_business(ctx):
+    business, owner, _, _ = ctx
+    url = f"/api/v1/businesses/{business.public_id}/purchases/"
+
+    assert api(owner).post(url, {}, format="json").data["currency"] == "CDF"
+    assert api(owner).post(url, {"currency": "USD"}, format="json").status_code == 400

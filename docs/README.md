@@ -15,3 +15,4 @@ Ecommerce est le backend métier multi-tenant. Carri Account fournit l'identité
 - [Sales](sales.md)
 - [Receivables](receivables.md)
 - [Expenses](expenses.md)
+- [Finance foundation](finance.md)

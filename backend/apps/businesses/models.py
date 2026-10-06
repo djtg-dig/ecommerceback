@@ -48,6 +48,21 @@ class Business(models.Model):
         ordering = ["name"]
 
     def save(self, *args, **kwargs):
+        """Preserve the Business financial currency after its initial choice.
+
+        Operational amounts are snapshots in this currency; changing it later would
+        make existing Sale, Purchase, Expense and Receivable history ambiguous.
+        """
+        if self.pk:
+            previous_currency = type(self).objects.filter(pk=self.pk).values_list(
+                "primary_currency",
+                flat=True,
+            ).first()
+            if previous_currency and previous_currency != self.primary_currency:
+                raise ValidationError(
+                    {"primary_currency": "Business primary_currency is immutable."}
+                )
+
         if not self.public_id:
             self.public_id = generate_business_public_id()
 

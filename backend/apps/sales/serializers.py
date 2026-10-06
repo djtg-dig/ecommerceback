@@ -10,6 +10,10 @@ class SaleSerializer(serializers.ModelSerializer):
 class SaleWrite(serializers.ModelSerializer):
  customer=serializers.SlugRelatedField(slug_field='public_id',queryset=Customer.objects.all(),allow_null=True,required=False);currency=serializers.ChoiceField(choices=('CDF','USD'),required=False)
  class Meta:model=Sale;fields=('customer','currency','reference','notes')
+ def validate_currency(self,value):
+  business=self.context['business']
+  if value!=business.primary_currency:raise serializers.ValidationError('Currency must match the Business primary currency.')
+  return value
  def validate_customer(self,x):
   if x and x.business_id!=self.context['business'].id:raise serializers.ValidationError('External customer')
   return x

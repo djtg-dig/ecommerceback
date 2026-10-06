@@ -13,6 +13,10 @@ class PurchaseSerializer(serializers.ModelSerializer):
 class PurchaseWriteSerializer(serializers.ModelSerializer):
  supplier=serializers.SlugRelatedField(slug_field='public_id',queryset=Supplier.objects.all(),required=False,allow_null=True);currency=serializers.ChoiceField(choices=('CDF','USD'),required=False)
  class Meta:model=Purchase;fields=('supplier','currency','reference','notes')
+ def validate_currency(self,value):
+  business=self.context['business']
+  if value!=business.primary_currency:raise serializers.ValidationError('Currency must match the Business primary currency.')
+  return value
  def validate_supplier(self,x):
   if x and x.business_id!=self.context['business'].id:raise serializers.ValidationError('Supplier externe.')
   return x

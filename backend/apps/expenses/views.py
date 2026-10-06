@@ -207,7 +207,14 @@ class Expenses(BusinessScopedView):
             amount = Decimal(str(request.data.get("amount")))
         except (InvalidOperation, TypeError, ValueError):
             amount = Decimal(0)
-        currency = request.data.get("currency", business.primary_currency)
+        requested_currency = request.data.get("currency")
+        if requested_currency and requested_currency != business.primary_currency:
+            return Response(
+                {"detail": "Currency must match the Business primary currency."},
+                status=400,
+            )
+
+        currency = business.primary_currency
         payment_method = request.data.get("payment_method", "CASH")
         if (
             not category
@@ -290,9 +297,12 @@ class ExpenseDetail(BusinessScopedView):
                 return Response({"detail": "Amount must be positive."}, status=400)
             expense.amount = amount
         if "currency" in request.data:
-            if request.data["currency"] not in Expense.Currency.values:
-                return Response({"detail": "Invalid currency."}, status=400)
-            expense.currency = request.data["currency"]
+            if request.data["currency"] != business.primary_currency:
+                return Response(
+                    {"detail": "Currency must match the Business primary currency."},
+                    status=400,
+                )
+            expense.currency = business.primary_currency
         if "payment_method" in request.data:
             if request.data["payment_method"] not in PaymentMethod.values:
                 return Response({"detail": "Invalid payment method."}, status=400)

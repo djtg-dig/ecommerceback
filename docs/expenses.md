@@ -39,3 +39,5 @@ Une Purchase représente l'approvisionnement de marchandises, notamment destiné
 ## Limites actuelles
 
 Il n'existe pas encore de caisse, mouvement financier, comptabilité, conversion monétaire, gateway, API Mobile Money, justificatif, pièce jointe ou reporting financier.
+
+La devise d’une Expense est imposée par `Business.primary_currency`. Une Expense reste une charge métier ; son futur règlement réel sera séparé dans Finance par `ExpensePayment`, puis un mouvement financier.

@@ -7,3 +7,5 @@ Une Purchase commence en `DRAFT`: ses lignes, fournisseur et notes sont modifiab
 Les lignes visent exactement un Product simple ou ProductVariant, utilisent quantité `Decimal(14,3)`, coût unitaire décimal et total calculé serveur. Le total d’achat est la somme des lignes, sans TVA, remise, transport ni paiement fournisseur. Les mouvements de réception sont idempotents au niveau du statut verrouillé; les futurs achats intégrés devront renforcer cette garantie avec une clé métier.
 
 OWNER et MANAGER écrivent; EMPLOYEE lit. Aucun Supplier, achat ou article d’un autre commerce ne peut être utilisé.
+
+Les nouvelles purchases utilisent obligatoirement `Business.primary_currency`. Une devise contradictoire est refusée et aucune conversion n’est appliquée.

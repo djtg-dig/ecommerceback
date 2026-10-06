@@ -40,6 +40,15 @@ class BusinessCreateSerializer(BaseBusinessSerializer):
 
 
 class BusinessUpdateSerializer(BaseBusinessSerializer):
+    def validate(self, attrs):
+        """Reject currency changes so historical Business operations keep one currency."""
+        if self.instance and "primary_currency" in self.initial_data:
+            raise serializers.ValidationError(
+                {"primary_currency": "Business primary_currency is immutable."}
+            )
+
+        return super().validate(attrs)
+
     class Meta:
         model = Business
         fields = (

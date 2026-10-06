@@ -73,3 +73,24 @@ def test_roles_control_updates_and_member_list():
         f"/api/v1/businesses/{business.public_id}/members/"
     )
     assert employee_members_response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_primary_currency_is_immutable_after_business_creation():
+    identity = CarriIdentity.objects.create(carri_subject="currency-owner")
+    create_response = auth(identity).post(
+        "/api/v1/businesses/",
+        {"name": "USD shop", "primary_currency": "USD"},
+        format="json",
+    )
+    business_id = create_response.data["public_id"]
+
+    update_response = auth(identity).patch(
+        f"/api/v1/businesses/{business_id}/",
+        {"primary_currency": "CDF"},
+        format="json",
+    )
+
+    assert create_response.status_code == 201
+    assert update_response.status_code == 400
+    assert Business.objects.get(public_id=business_id).primary_currency == "USD"
