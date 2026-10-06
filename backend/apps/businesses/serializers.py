@@ -1,7 +1,7 @@
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from .models import Business, BusinessCategory, BusinessMember
+from .models import Business, BusinessCategory, BusinessMember, BusinessPaymentMethod
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -112,3 +112,9 @@ class BusinessMemberSerializer(serializers.ModelSerializer):
             "status",
             "joined_at",
         )
+
+class BusinessPaymentMethodSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BusinessPaymentMethod
+        fields = ("public_id", "name", "category", "is_active", "created_at", "updated_at")
+        read_only_fields = ("public_id", "created_at", "updated_at")

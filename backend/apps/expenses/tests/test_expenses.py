@@ -463,7 +463,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from apps.expenses.models import ExpensePayment
-from apps.finance.models import FinancialMovement
+from apps.finance.models import FinancialMovement, PaymentTransaction
 
 
 def expense_payments_url(business, expense):
@@ -502,6 +502,8 @@ def test_expense_payment_lifecycle_idempotency_and_permissions():
     assert movement.direction == FinancialMovement.Direction.OUTFLOW
     assert movement.amount == payment.amount == Decimal("40.00")
     assert movement.created_by_id == manager.id
+    assert movement.payment_transaction_id is not None
+    assert movement.payment_transaction.recorded_by_id == manager.id
     assert expense.paid_amount == Decimal("40.00")
     assert expense.balance == Decimal("60.00")
     assert expense.payment_status == Expense.PaymentStatus.PARTIALLY_PAID
@@ -535,6 +537,7 @@ def test_expense_payments_reverse_and_cancellation_rules_with_finance_rollback()
     assert expense.balance == Decimal("60.00")
     assert FinancialMovement.objects.filter(expense_payment__expense=expense, direction="OUTFLOW").count() == 2
     assert FinancialMovement.objects.filter(reversal_of__expense_payment__expense=expense, direction="INFLOW").count() == 1
+    assert PaymentTransaction.objects.filter(financial_movement__expense_payment__expense=expense).count() == 2
 
     rollback_expense = Expense.objects.get(public_id=create_expense(client(owner), business, category, amount="10").data["public_id"])
     with patch("apps.expenses.services.create_financial_movement", side_effect=RuntimeError("finance unavailable")):

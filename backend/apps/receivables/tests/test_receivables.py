@@ -30,7 +30,7 @@ def test_due_date_filters_and_complete_default(data):
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
-from apps.finance.models import FinancialMovement
+from apps.finance.models import FinancialMovement, PaymentTransaction
 
 
 def test_initial_and_multiple_receivable_payments_create_exact_financial_ledger(data):
@@ -52,6 +52,7 @@ def test_initial_and_multiple_receivable_payments_create_exact_financial_ledger(
     assert receivable.balance == Decimal("0.00")
     assert receivable.payments.count() == 3
     assert movements.count() == 3
+    assert PaymentTransaction.objects.filter(financial_movement__in=movements).count() == 3
     assert sum(movement.amount for movement in movements) == Decimal("100.00")
     assert set(movements.values_list("payment_method", flat=True)) == {"CASH", "MOBILE_MONEY", "BANK_TRANSFER"}
     assert not FinancialMovement.objects.filter(sale__public_id=sale_id).exists()

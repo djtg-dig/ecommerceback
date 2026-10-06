@@ -34,12 +34,13 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError
 from apps.purchases.models import SupplierPayment
 from apps.purchases.services import add_supplier_payment, reverse_supplier_payment
-from apps.finance.models import FinancialMovement
+from apps.finance.models import FinancialMovement, PaymentTransaction
 
 def test_supplier_payment_confirmed_received_reversal_and_stock_separation(ctx):
  b,o,e,p=ctx;base=f'/api/v1/businesses/{b.public_id}/';supplier=api(o).post(base+'suppliers/',{'name':'Payment supplier'},format='json').data['public_id'];purchase_id=api(o).post(base+'purchases/',{'supplier':supplier},format='json').data['public_id'];purchase=Purchase.objects.get(public_id=purchase_id)
  with pytest.raises(ValidationError):add_supplier_payment(purchase,o,Decimal('10'),'CASH')
- api(o).post(base+f'purchases/{purchase_id}/lines/',{'product':p.public_id,'quantity':'2','unit_cost':'250'},format='json');api(o).post(base+f'purchases/{purchase_id}/confirm/',{},format='json');purchase.refresh_from_db();first=add_supplier_payment(purchase,o,Decimal('200'),'MOBILE_MONEY');purchase.refresh_from_db();assert purchase.paid_amount==200 and purchase.balance==300 and purchase.payment_status=='PARTIALLY_PAID';assert FinancialMovement.objects.get(supplier_payment=first).direction=='OUTFLOW'
+ api(o).post(base+f'purchases/{purchase_id}/lines/',{'product':p.public_id,'quantity':'2','unit_cost':'250'},format='json');api(o).post(base+f'purchases/{purchase_id}/confirm/',{},format='json');purchase.refresh_from_db();first=add_supplier_payment(purchase,o,Decimal('200'),'MOBILE_MONEY');purchase.refresh_from_db();assert purchase.paid_amount==200 and purchase.balance==300 and purchase.payment_status=='PARTIALLY_PAID';movement=FinancialMovement.objects.get(supplier_payment=first);assert movement.direction=='OUTFLOW' and movement.payment_transaction_id
  api(o).post(base+f'purchases/{purchase_id}/receive/',{},format='json');stock=InventoryItem.objects.get(product=p).quantity;purchase.refresh_from_db();second=add_supplier_payment(purchase,o,Decimal('300'),'BANK_TRANSFER');purchase.refresh_from_db();assert purchase.payment_status=='PAID' and purchase.balance==0
  reverse_supplier_payment(second,o,'Correction');purchase.refresh_from_db();assert purchase.paid_amount==200 and purchase.balance==300 and InventoryItem.objects.get(product=p).quantity==stock
+ assert PaymentTransaction.objects.filter(financial_movement__supplier_payment__purchase=purchase).count()==2
  with pytest.raises(ValidationError):reverse_supplier_payment(second,o,'Again')

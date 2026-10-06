@@ -11,6 +11,7 @@ class FinancialMovementSerializer(serializers.ModelSerializer):
     expense = serializers.CharField(source="expense.public_id", read_only=True)
     expense_payment = serializers.CharField(source="expense_payment.public_id", read_only=True)
     reversal_of = serializers.CharField(source="reversal_of.public_id", read_only=True)
+    payment_transaction = serializers.CharField(source="payment_transaction.public_id", read_only=True)
 
     class Meta:
         model = FinancialMovement
@@ -28,6 +29,7 @@ class FinancialMovementSerializer(serializers.ModelSerializer):
             "expense",
             "expense_payment",
             "reversal_of",
+            "payment_transaction",
             "created_at",
         )
         read_only_fields = fields

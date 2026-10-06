@@ -3,7 +3,7 @@ from rest_framework import permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Business, BusinessCategory
+from .models import Business, BusinessCategory, BusinessPaymentMethod
 from .permissions import can_manage_business, can_view_members, membership_for
 from .serializers import (
     BusinessCreateSerializer,
@@ -11,6 +11,7 @@ from .serializers import (
     BusinessSerializer,
     BusinessUpdateSerializer,
     CategorySerializer,
+    BusinessPaymentMethodSerializer,
 )
 from .services import create_business, replace_categories
 
@@ -103,6 +104,59 @@ class BusinessMembersView(APIView):
         )
 
         return Response(serializer.data)
+
+
+class BusinessPaymentMethodsView(APIView):
+    serializer_class = BusinessPaymentMethodSerializer
+    def get_business(self, request, public_id):
+        return accessible(request.user).filter(public_id=public_id).first()
+
+    def get(self, request, public_id):
+        business = self.get_business(request, public_id)
+        if not business:
+            return Response({"detail": "Not found."}, status=404)
+        methods = business.payment_methods.all()
+        if not can_manage_business(membership_for(request.user, business)):
+            methods = methods.filter(is_active=True)
+        return Response(BusinessPaymentMethodSerializer(methods, many=True).data)
+
+    def post(self, request, public_id):
+        business = self.get_business(request, public_id)
+        if not business:
+            return Response({"detail": "Not found."}, status=404)
+        if not can_manage_business(membership_for(request.user, business)):
+            return Response({"detail": "Forbidden."}, status=403)
+        serializer = BusinessPaymentMethodSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(BusinessPaymentMethodSerializer(serializer.save(business=business)).data, status=201)
+
+
+class BusinessPaymentMethodDetailView(BusinessPaymentMethodsView):
+    serializer_class = BusinessPaymentMethodSerializer
+    http_method_names = ["get", "patch", "head", "options"]
+    def get_object(self, request, public_id, method_public_id):
+        business = self.get_business(request, public_id)
+        if not business:
+            return None, None
+        return business, business.payment_methods.filter(public_id=method_public_id).first()
+
+    def get(self, request, public_id, method_public_id):
+        business, method = self.get_object(request, public_id, method_public_id)
+        if not method:
+            return Response({"detail": "Not found."}, status=404)
+        if not method.is_active and not can_manage_business(membership_for(request.user, business)):
+            return Response({"detail": "Not found."}, status=404)
+        return Response(BusinessPaymentMethodSerializer(method).data)
+
+    def patch(self, request, public_id, method_public_id):
+        business, method = self.get_object(request, public_id, method_public_id)
+        if not method:
+            return Response({"detail": "Not found."}, status=404)
+        if not can_manage_business(membership_for(request.user, business)):
+            return Response({"detail": "Forbidden."}, status=403)
+        serializer = BusinessPaymentMethodSerializer(method, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        return Response(BusinessPaymentMethodSerializer(serializer.save()).data)
 
 
 class BusinessCategoriesView(APIView):

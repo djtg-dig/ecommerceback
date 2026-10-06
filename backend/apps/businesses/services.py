@@ -2,10 +2,19 @@
 
 from django.db import IntegrityError, transaction
 
+from apps.common.choices import PaymentMethod
+
 from .identifiers import generate_business_public_id
-from .models import Business, BusinessCategory, BusinessCategoryMembership, BusinessMember
+from .models import Business, BusinessCategory, BusinessCategoryMembership, BusinessMember, BusinessPaymentMethod
 
 MAX_PUBLIC_ID_ATTEMPTS = 5
+DEFAULT_PAYMENT_METHODS = (("Argent liquide", PaymentMethod.CASH), ("Mobile Money", PaymentMethod.MOBILE_MONEY), ("Virement bancaire", PaymentMethod.BANK_TRANSFER), ("Carte", PaymentMethod.CARD), ("Autre", PaymentMethod.OTHER))
+
+
+def ensure_default_payment_methods(business):
+    """Create standard methods when absent, without creating financial balances."""
+    for name, category in DEFAULT_PAYMENT_METHODS:
+        BusinessPaymentMethod.objects.get_or_create(business=business, name=name, defaults={"category": category})
 
 
 def create_business(identity, validated_data):
@@ -58,6 +67,7 @@ def create_business(identity, validated_data):
                 from apps.expenses.services import ensure_default_expense_categories
 
                 ensure_default_expense_categories(business)
+                ensure_default_payment_methods(business)
 
                 return business
         except IntegrityError:

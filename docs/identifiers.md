@@ -49,3 +49,6 @@ Ils utilisent le préfixe suivi de 10 caractères cryptographiquement générés
 | `EP` | ExpensePayment |
 
 | `PP` | SupplierPayment |
+
+| `PM` | BusinessPaymentMethod |
+| `PT` | PaymentTransaction |

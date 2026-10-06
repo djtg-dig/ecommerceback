@@ -5,8 +5,12 @@ from django.db import models
 from django.db.models import Q
 
 from apps.accounts.models import CarriIdentity
+from apps.common.choices import PaymentMethod
 
-from .identifiers import generate_business_public_id
+from .identifiers import (
+    generate_business_payment_method_public_id,
+    generate_business_public_id,
+)
 
 
 class Business(models.Model):
@@ -81,6 +85,28 @@ class BusinessCategory(models.Model):
 
     class Meta:
         ordering = ["name"]
+
+
+class BusinessPaymentMethod(models.Model):
+    """A Business-configured payment method, never a balance-bearing account."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    public_id = models.CharField(max_length=12, unique=True, editable=False, db_index=True)
+    business = models.ForeignKey(Business, on_delete=models.PROTECT, related_name="payment_methods")
+    name = models.CharField(max_length=120)
+    category = models.CharField(max_length=20, choices=PaymentMethod.choices)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = [models.UniqueConstraint(fields=("business", "name"), name="business_payment_method_unique_name")]
+
+    def save(self, *args, **kwargs):
+        if not self.public_id:
+            self.public_id = generate_business_payment_method_public_id()
+        return super().save(*args, **kwargs)
 
 
 class BusinessCategoryMembership(models.Model):

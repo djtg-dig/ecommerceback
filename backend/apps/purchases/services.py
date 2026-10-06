@@ -70,5 +70,5 @@ def reverse_supplier_payment(payment,actor,reason):
   m=FinancialMovement.objects.select_for_update().get(supplier_payment=pay)
   # Finance reversal accepts the supplier event using its dedicated event type.
   if not reason or not reason.strip():raise ValidationError('A reversal reason is required.')
-  FinancialMovement.objects.create(business=m.business,direction=FinancialMovement.Direction.INFLOW,amount=m.amount,currency=m.currency,payment_method=m.payment_method,event_type=FinancialMovement.EventType.SUPPLIER_PAYMENT_REVERSAL,occurred_at=timezone.now(),created_by=actor,reason=reason.strip(),reversal_of=m)
+  reverse_movement(m, created_by=actor, reason=reason)
   pay.reversed_at=timezone.now();pay.reversed_by=actor;pay.reversal_reason=reason.strip();pay.save(update_fields=('reversed_at','reversed_by','reversal_reason'));return pay

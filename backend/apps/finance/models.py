@@ -6,7 +6,41 @@ from django.db.models import Q
 
 from apps.common.choices import PaymentMethod
 
-from .identifiers import generate_financial_movement_public_id
+from .identifiers import generate_financial_movement_public_id, generate_payment_transaction_public_id
+
+
+class PaymentTransaction(models.Model):
+    """Immutable information trace for one payment, without any stored balance."""
+
+    class RecordingMode(models.TextChoices):
+        MANUAL = "MANUAL", "Manual"
+        AUTOMATIC = "AUTOMATIC", "Automatic"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    public_id = models.CharField(max_length=12, unique=True, editable=False, db_index=True)
+    business = models.ForeignKey("businesses.Business", on_delete=models.PROTECT)
+    business_payment_method = models.ForeignKey("businesses.BusinessPaymentMethod", on_delete=models.PROTECT)
+    method_name_snapshot = models.CharField(max_length=120)
+    category_snapshot = models.CharField(max_length=20, choices=PaymentMethod.choices)
+    recording_mode = models.CharField(max_length=10, choices=RecordingMode.choices)
+    transaction_reference = models.CharField(max_length=120, blank=True)
+    occurred_at = models.DateTimeField()
+    recorded_by = models.ForeignKey("accounts.CarriIdentity", null=True, blank=True, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-occurred_at", "-created_at")
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Payment transactions are immutable.")
+        if not self.public_id:
+            self.public_id = generate_payment_transaction_public_id()
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Payment transactions cannot be deleted.")
 
 
 class FinancialMovement(models.Model):
@@ -35,6 +69,9 @@ class FinancialMovement(models.Model):
     occurred_at = models.DateTimeField()
     created_by = models.ForeignKey("accounts.CarriIdentity", on_delete=models.PROTECT)
     reason = models.CharField(max_length=500, blank=True)
+    payment_transaction = models.OneToOneField(
+        PaymentTransaction, null=True, blank=True, on_delete=models.PROTECT, related_name="financial_movement"
+    )
     sale = models.ForeignKey("sales.Sale", null=True, blank=True, on_delete=models.PROTECT)
     receivable_payment = models.OneToOneField(
         "receivables.ReceivablePayment", null=True, blank=True, on_delete=models.PROTECT
