@@ -37,3 +37,6 @@ Le catalogue définit ce qui est vendable; Inventory définit combien est dispon
 ## Purchases
 
 Purchases reste séparé de Inventory: seule la réception validée appelle le service Inventory atomique; DRAFT et CONFIRMED ne changent jamais le stock.
+
+## Niveau 1 — Gestion interne
+Business, catalogue, fournisseurs, achats, inventaire, clients et ventes servent les opérations internes. Sale est une vente POS, pas un Order. Niveau 2 visibilité publique et Niveau 3 vente en ligne ne sont pas implémentés.

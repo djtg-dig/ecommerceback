@@ -35,3 +35,6 @@ Les membres actifs OWNER, MANAGER et EMPLOYEE peuvent consulter les balances et 
 ## Purchase integration
 
 La réception Purchase crée des mouvements IN système référencés PURCHASE et peut créer le premier InventoryItem à zéro.
+
+## Sales integration
+La finalisation Sale génère des mouvements SALE système via le service Inventory.

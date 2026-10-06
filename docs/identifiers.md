@@ -21,3 +21,7 @@ Chaque identifiant est son préfixe plus 10 caractères tirés cryptographiqueme
 | `SP` | Supplier |
 | `PU` | Purchase |
 | `PL` | PurchaseLine |
+
+| `CU` | Customer |
+| `SA` | Sale |
+| `SL` | SaleLine |

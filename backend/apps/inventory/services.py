@@ -66,7 +66,7 @@ def apply_stock_movement(*, inventory_item, movement_type, performed_by, quantit
     Quantity update and event insertion share one transaction, so neither can
     persist without the other.
     """
-    if movement_type not in MANUAL_MOVEMENT_TYPES:
+    if movement_type not in MANUAL_MOVEMENT_TYPES and not (movement_type == StockMovement.Type.SALE and reference_type == 'SALE'):
         raise ValidationError({"type": "Seuls IN, OUT et ADJUSTMENT sont autorisés manuellement."})
     with transaction.atomic():
         item = InventoryItem.objects.select_for_update(of=("self",)).select_related("product", "variant__product").get(pk=inventory_item.pk)

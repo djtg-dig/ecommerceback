@@ -73,3 +73,6 @@ Les champs `quantity`, `reserved_quantity`, snapshots avant/après, auteur, réf
 ## Purchases
 
 `/api/v1/businesses/{SH}/suppliers/` et `/purchases/` exposent Supplier/Purchase/PurchaseLine. OWNER/MANAGER écrivent, EMPLOYEE lit. Actions : `POST purchases/{PU}/confirm/`, `/receive/`, `/cancel/`; réception crée les mouvements IN système.
+
+## Sales
+Routes internes : `/customers/`, `/sales/`, `/sales/{SA}/lines/`, `/complete/`, `/cancel/`.

@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     "apps.catalog.apps.CatalogConfig",
     "apps.inventory.apps.InventoryConfig",
     "apps.purchases.apps.PurchasesConfig",
+    "apps.sales.apps.SalesConfig",
 ]
 
 MIDDLEWARE = [
@@ -128,5 +129,7 @@ SPECTACULAR_SETTINGS = {
         {"name": "Stock Movements", "description": "Historique immuable des entrées, sorties et ajustements."},
         {"name": "Suppliers", "description": "Fournisseurs isolés par commerce."},
         {"name": "Purchases", "description": "Approvisionnements et réceptions atomiques."},
+        {"name": "Customers", "description": "Clients internes d’un commerce."},
+        {"name": "Sales", "description": "Ventes internes/POS."},
     ],
 }

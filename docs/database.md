@@ -48,3 +48,6 @@ BusinessCategory is the platform-controlled flat commerce taxonomy. BusinessCate
 - **Supplier**: fournisseur Business, `SP` immuable.
 - **Purchase**: `PU`, workflow DRAFT/CONFIRMED/RECEIVED/CANCELLED et auteurs horodatés.
 - **PurchaseLine**: `PL`, Product XOR Variant, quantité positive, coût positif et total dérivé.
+
+## Sales
+Customer, Sale et SaleLine forment les ventes internes; SaleLine cible Product XOR Variant et conserve les snapshots.

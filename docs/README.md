@@ -12,3 +12,4 @@ Ecommerce est le backend métier multi-tenant. Carri Account fournit l'identité
 
 - [OpenAPI / Swagger](api.md#openapi--swagger)
 - [Purchases](purchases.md)
+- [Sales](sales.md)

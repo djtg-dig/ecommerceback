@@ -43,3 +43,7 @@ def generate_stock_movement_public_id() -> str:
 def generate_supplier_public_id(): return generate_public_id("SP")
 def generate_purchase_public_id(): return generate_public_id("PU")
 def generate_purchase_line_public_id(): return generate_public_id("PL")
+
+def generate_customer_public_id(): return generate_public_id("CU")
+def generate_sale_public_id(): return generate_public_id("SA")
+def generate_sale_line_public_id(): return generate_public_id("SL")
