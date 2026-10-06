@@ -1,6 +1,7 @@
 from decimal import Decimal
 from rest_framework import serializers
 from apps.catalog.models import Product,ProductVariant
+from apps.common.choices import PaymentMethod
 from .models import Customer,Sale,SaleLine
 class CustomerSerializer(serializers.ModelSerializer):
  class Meta:model=Customer;fields=('public_id','name','phone','email','address','notes','is_active');read_only_fields=('public_id',)
@@ -27,3 +28,21 @@ class LineWrite(serializers.Serializer):
   target(self.context['sale'],a.get('product'),a.get('variant'))
   if 'unit_price' not in a:a['unit_price']=a['variant'].effective_selling_price if a.get('variant') else a['product'].selling_price
   return a
+
+
+class SaleCompleteSerializer(serializers.Serializer):
+    amount_paid = serializers.DecimalField(max_digits=16, decimal_places=2, min_value=Decimal("0"))
+    payment_method = serializers.ChoiceField(
+        choices=PaymentMethod.choices,
+        required=False,
+        allow_null=True,
+    )
+
+    def validate(self, attrs):
+        amount_paid = attrs["amount_paid"]
+        payment_method = attrs.get("payment_method")
+        if amount_paid > 0 and not payment_method:
+            raise serializers.ValidationError({"payment_method": "Required when amount_paid is positive."})
+        if amount_paid == 0 and payment_method is not None:
+            raise serializers.ValidationError({"payment_method": "Must be omitted for a credit sale."})
+        return attrs

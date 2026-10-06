@@ -109,20 +109,12 @@ class Action(SD):
         if not s:
             return self.nf()
         try:
-            o = (
-                complete(
-                    s,
-                    r.user,
-                    (
-                        Decimal(str(r.data["amount_paid"]))
-                        if "amount_paid" in r.data
-                        else None
-                    ),
-                    r.data.get("payment_method", "CASH"),
-                )
-                if self.fn == "complete"
-                else cancel(s, r.user)
-            )
+            if self.fn == "complete":
+                serializer = SaleCompleteSerializer(data=r.data)
+                serializer.is_valid(raise_exception=True)
+                o = complete(s, r.user, **serializer.validated_data)
+            else:
+                o = cancel(s, r.user)
         except ValidationError as e:
             return Response({"detail": str(e)}, 400)
         return Response(SaleSerializer(o).data)
@@ -131,9 +123,15 @@ class Action(SD):
 class Complete(Action):
     fn = "complete"
 
+    def post(self, request, business_public_id, sale_public_id):
+        return super().post(request, business_public_id, sale_public_id)
+
 
 class Cancel(Action):
     fn = "cancel"
+
+    def post(self, request, business_public_id, sale_public_id):
+        return super().post(request, business_public_id, sale_public_id)
 
 
 # Schema introspection metadata for the real APIView operations.
@@ -141,7 +139,7 @@ Customers.serializer_class = CustomerSerializer
 Sales.serializer_class = SaleSerializer
 SD.serializer_class = SaleSerializer
 Lines.serializer_class = LineSerializer
-Complete.serializer_class = SaleSerializer
+Complete.serializer_class = SaleCompleteSerializer
 Cancel.serializer_class = SaleSerializer
 SD.http_method_names = ["get", "patch", "head", "options"]
 Lines.http_method_names = ["get", "post", "head", "options"]
@@ -189,3 +187,10 @@ Customers.post = extend_schema(
     request=CustomerSerializer,
     responses={201: CustomerSerializer},
 )(Customers.post)
+
+Complete.post = extend_schema(
+    tags=["Sales"],
+    operation_id="sale_complete",
+    request=SaleCompleteSerializer,
+    responses={200: SaleSerializer},
+)(Complete.post)

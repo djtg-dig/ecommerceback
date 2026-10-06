@@ -7,3 +7,9 @@ Sans `amount_paid`, complete conserve le comportement historique: paiement total
 PaymentMethod est défini canoniquement dans `apps.common.choices` et partagé avec Expenses. Ses valeurs restent des déclarations internes, sans intégration de paiement externe.
 
 La devise d’une Receivable est héritée de sa Sale et doit donc correspondre à `Business.primary_currency`.
+
+## Encaissements et idempotence
+
+Chaque `ReceivablePayment` représente un encaissement réel, est immuable et produit atomiquement un unique `FinancialMovement` `RECEIVABLE_PAYMENT`. Le moyen de paiement et l’acteur sont conservés sur le paiement et le mouvement; leurs horodatages métier sont alignés.
+
+`POST .../payments/` accepte optionnellement l’en-tête `Idempotency-Key`. Une répétition avec la même clé et le même payload retourne le paiement existant sans nouvel encaissement. La même clé avec un payload différent répond `409 Conflict`. La clé est persistée et unique par Business. Le verrou `select_for_update()` sur la créance reste en place pour éviter les dépassements du solde.

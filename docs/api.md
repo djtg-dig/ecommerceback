@@ -103,3 +103,15 @@ Les routes Finance sont consultables par les seuls OWNER et MANAGER actifs; les 
 | GET `/api/v1/businesses/{SH}/financial-summary/` | OWNER, MANAGER | Totaux inflow/outflow/net flow et ventilation par moyen de paiement. |
 
 Les filtres de date utilisent `YYYY-MM-DD`; les valeurs inconnues renvoient `400`. `FM` est une référence publique opaque, pas une autorisation.
+
+## Encaissements Sales et créances
+
+`POST /api/v1/businesses/{SH}/sales/{SA}/complete/` attend désormais :
+
+```json
+{"amount_paid": "35000.00", "payment_method": "CASH"}
+```
+
+`amount_paid` est obligatoire. S’il est positif, `payment_method` est obligatoire (`CASH`, `MOBILE_MONEY`, `BANK_TRANSFER`, `CARD`, `OTHER`). S’il vaut zéro, `payment_method` doit être absent et aucun encaissement Finance n’est créé. Ce contrat remplace la finalisation historique sans payload.
+
+`POST /api/v1/businesses/{SH}/receivables/{RC}/payments/` accepte `amount`, `payment_method`, `reference`, `notes` et l’en-tête optionnel `Idempotency-Key`. Une répétition avec la même clé et le même payload renvoie le même paiement sans duplication; un payload différent avec la même clé répond `409`.

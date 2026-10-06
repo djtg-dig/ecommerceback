@@ -93,3 +93,13 @@ def test_schema_documents_finance_as_get_only_with_its_filters(client):
     assert set(schema["paths"][summary]) >= {"get"}
     parameters = {parameter["name"] for parameter in schema["paths"][collection]["get"]["parameters"]}
     assert {"direction", "event_type", "payment_method", "date_from", "date_to"} <= parameters
+
+
+def test_schema_documents_explicit_sale_collection_and_receivable_idempotency(client):
+    schema = yaml.safe_load(client.get(reverse("openapi-schema")).content)
+    complete = "/api/v1/businesses/{business_public_id}/sales/{sale_public_id}/complete/"
+    payments = "/api/v1/businesses/{business_public_id}/receivables/{receivable_public_id}/payments/"
+    complete_schema = schema["paths"][complete]["post"]["requestBody"]["content"]["application/json"]["schema"]
+    assert "SaleComplete" in complete_schema.get("$ref", "")
+    parameter_names = {entry["name"] for entry in schema["paths"][payments]["post"]["parameters"]}
+    assert "Idempotency-Key" in parameter_names

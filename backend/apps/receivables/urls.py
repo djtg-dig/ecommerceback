@@ -1,3 +1,12 @@
 from django.urls import path
-from .views import *
-urlpatterns=[path('receivables/',List.as_view()),path('receivables/<str:receivable_public_id>/',Detail.as_view()),path('receivables/<str:receivable_public_id>/payments/',Payments.as_view())]
+
+from .views import ReceivableDetailView, ReceivableListView, ReceivablePaymentsView
+
+urlpatterns = [
+    path("receivables/", ReceivableListView.as_view()),
+    path("receivables/<str:receivable_public_id>/", ReceivableDetailView.as_view()),
+    path(
+        "receivables/<str:receivable_public_id>/payments/",
+        ReceivablePaymentsView.as_view(),
+    ),
+]

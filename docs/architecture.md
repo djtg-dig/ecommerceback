@@ -66,3 +66,7 @@ Chaque Business choisit `primary_currency` (`CDF` ou `USD`) à sa création. Cet
 ## Finance
 
 Finance est le journal financier append-only interne. `FinancialMovement` reçoit des événements métier déjà validés et ne pilote aucun gateway. Les sources Sales, Receivables et Expenses restent propriétaires de leurs workflows; leurs futures écritures Finance passeront par un service transactionnel idempotent. OWNER et MANAGER consultent les mouvements et agrégats, tandis que les employés n’accèdent pas au reporting financier.
+
+## Encaissements Sales et créances
+
+Les domaines Sales et Receivables restent propriétaires de leurs workflows. Finance reçoit les encaissements validés par leurs services centraux, dans la même transaction PostgreSQL. Cette séparation garantit qu’un acompte est représenté par le paiement de créance, pas deux fois par Sale et ReceivablePayment. Les remboursements, ExpensePayment et les comptes de caisse restent hors périmètre.

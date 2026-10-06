@@ -25,3 +25,9 @@ Les listes et le résumé acceptent `direction`, `event_type`, `payment_method`,
 Finance ne crée aucun paiement HTTP dans ce lot. Les intégrations automatiques avec Sales, Receivables, Expenses et Purchases seront ajoutées explicitement dans leurs services, avec tests d’idempotence et transactions atomiques.
 
 Décision préparée pour une évolution ultérieure : une **Expense** décrit une charge métier, un futur **ExpensePayment** décrira son règlement réel, et `FinancialMovement` décrira le mouvement financier de ce règlement. `ExpensePayment` n’existe pas dans ce lot et n’est donc ni créé ni intégré automatiquement.
+
+# Finance — Lot 3 : encaissements Sales et Receivables
+
+Le ledger n’enregistre que l’argent réellement encaissé. Une vente entièrement réglée produit un `SALE_PAYMENT`. Une vente partielle produit une créance, un paiement initial, puis un seul `RECEIVABLE_PAYMENT`; il n’existe pas de `SALE_PAYMENT` concurrent pour cet acompte. Une vente totalement à crédit ne produit aucun mouvement. Chaque paiement ultérieur de créance produit son propre `RECEIVABLE_PAYMENT`.
+
+Sales et Receivables appellent exclusivement `create_financial_movement`; ils ne créent jamais directement un `FinancialMovement`. Toutes les créations concernées sont transactionnelles avec stock, Sale, Receivable et ReceivablePayment. Les remboursements et reversals de ventes ne sont pas implémentés : une Sale complétée reste terminale selon le workflow existant.

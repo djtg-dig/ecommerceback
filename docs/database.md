@@ -63,3 +63,7 @@ Receivable est unique par Sale; ReceivablePayment est historique et immuable.
 ## Finance
 
 - **FinancialMovement** : UUID interne, identifiant public immuable `FM`, FK protégées vers Business, auteur et une unique source métier (`Sale`, `ReceivablePayment` ou `Expense`), ou vers le mouvement original pour une correction. Le montant est positif; les contraintes SQL imposent une source unique, l’unicité d’une clé d’idempotence par Business et empêchent les doublons Sale/Expense par type d’événement. `receivable_payment` est un `OneToOneField`, ce qui garantit un seul mouvement pour un paiement de créance. Les règles de correspondance événement/source, de devise et de correction sont validées par le modèle et le service.
+
+## Idempotence des paiements de créances
+
+**ReceivablePayment** est immuable après création. Il stocke une clé d’idempotence facultative et l’empreinte SHA-256 du payload. Une contrainte unique conditionnelle `(business, idempotency_key)` protège les répétitions HTTP. Son mouvement Finance est déjà garanti unique par `FinancialMovement.receivable_payment` (`OneToOneField`).
