@@ -13,13 +13,13 @@ from .models import FinancialMovement
 EVENT_SOURCE = {
     FinancialMovement.EventType.SALE_PAYMENT: "sale",
     FinancialMovement.EventType.RECEIVABLE_PAYMENT: "receivable_payment",
-    FinancialMovement.EventType.EXPENSE_PAYMENT: "expense",
+    FinancialMovement.EventType.EXPENSE_PAYMENT: "expense_payment",
 }
 
 
 def create_financial_movement(
     *, business, direction, amount, payment_method, event_type, created_by,
-    sale=None, receivable_payment=None, expense=None, occurred_at=None, reason="",
+    sale=None, receivable_payment=None, expense=None, expense_payment=None, occurred_at=None, reason="",
     idempotency_key="",
 ):
     """Append one source-backed ledger event, returning a prior idempotent event."""
@@ -29,10 +29,12 @@ def create_financial_movement(
         raise ValidationError({"amount": "Amount must be positive."})
 
     source_field = EVENT_SOURCE.get(event_type)
-    source_values = {"sale": sale, "receivable_payment": receivable_payment, "expense": expense}
+    source_values = {"sale": sale, "receivable_payment": receivable_payment, "expense": expense, "expense_payment": expense_payment}
     if source_field is None or [field for field, value in source_values.items() if value is not None] != [source_field]:
         raise ValidationError("The event type must match exactly one source.")
-    if source_values[source_field].business_id != business.id:
+    source = source_values[source_field]
+    source_business_id = source.expense.business_id if source_field == "expense_payment" else source.business_id
+    if source_business_id != business.id:
         raise ValidationError("The source must belong to the same Business.")
 
     with transaction.atomic():
@@ -47,7 +49,7 @@ def create_financial_movement(
             currency=business.primary_currency, payment_method=payment_method,
             event_type=event_type, occurred_at=occurred_at or timezone.now(),
             created_by=created_by, sale=sale, receivable_payment=receivable_payment,
-            expense=expense, reason=reason, idempotency_key=idempotency_key,
+            expense=expense, expense_payment=expense_payment, reason=reason, idempotency_key=idempotency_key,
         )
 
 

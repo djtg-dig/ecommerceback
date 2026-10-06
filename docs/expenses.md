@@ -41,3 +41,9 @@ Une Purchase représente l'approvisionnement de marchandises, notamment destiné
 Il n'existe pas encore de caisse, mouvement financier, comptabilité, conversion monétaire, gateway, API Mobile Money, justificatif, pièce jointe ou reporting financier.
 
 La devise d’une Expense est imposée par `Business.primary_currency`. Une Expense reste une charge métier ; son futur règlement réel sera séparé dans Finance par `ExpensePayment`, puis un mouvement financier.
+
+## Charge, règlement et flux financier
+
+`Expense` enregistre une charge métier et ne crée jamais de sortie de caisse par elle-même. `ExpensePayment` (`EP…`) représente le règlement réel; il crée atomiquement un `FinancialMovement` `OUTFLOW` `EXPENSE_PAYMENT`. Les paiements partiels sont possibles : `paid_amount`, `balance` et `payment_status` (`UNPAID`, `PARTIALLY_PAID`, `PAID`) sont dérivés de l’historique actif.
+
+`POST .../expenses/{EX}/payments/` attend `amount` et `payment_method`, avec l’en-tête optionnel `Idempotency-Key`. Une même clé et un même payload retournent le paiement initial; un payload différent répond `409`. Un paiement est immuable et ne peut être supprimé. `POST .../payments/{EP}/reverse/` exige un motif et crée un inflow Finance opposé; le paiement reste historique mais cesse de compter dans le solde. Une Expense avec paiement actif ne peut pas être annulée.

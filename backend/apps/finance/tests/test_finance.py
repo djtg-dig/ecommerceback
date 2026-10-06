@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
 from apps.businesses.models import Business, BusinessMember
-from apps.expenses.models import Expense, ExpenseCategory
+from apps.expenses.models import Expense, ExpenseCategory, ExpensePayment
 from apps.finance.models import FinancialMovement
 from apps.finance.services import create_financial_movement, reverse_movement
 from apps.receivables.models import Receivable, ReceivablePayment
@@ -47,14 +47,22 @@ def make_context():
 
 
 def create_expense_movement(business, owner, expense, **overrides):
+    amount = overrides.pop("amount", Decimal("25.00"))
+    payment_method = overrides.pop("payment_method", "CASH")
+    expense_payment = ExpensePayment.objects.create(
+        expense=expense,
+        amount=amount,
+        payment_method=payment_method,
+        created_by=owner,
+    )
     values = {
         "business": business,
         "direction": FinancialMovement.Direction.OUTFLOW,
-        "amount": Decimal("25.00"),
-        "payment_method": "CASH",
+        "amount": amount,
+        "payment_method": payment_method,
         "event_type": FinancialMovement.EventType.EXPENSE_PAYMENT,
         "created_by": owner,
-        "expense": expense,
+        "expense_payment": expense_payment,
     }
     values.update(overrides)
     return create_financial_movement(**values)
@@ -89,7 +97,11 @@ def test_movement_requires_matching_source_and_business_and_uses_business_curren
     )
     assert sale_movement.sale_id == sale.id
     with pytest.raises(ValidationError):
-        create_expense_movement(business, owner, expense)
+        create_financial_movement(
+            business=business, direction="OUTFLOW", amount=Decimal("25"), payment_method="CASH",
+            event_type=FinancialMovement.EventType.EXPENSE_PAYMENT, created_by=owner,
+            expense_payment=movement.expense_payment,
+        )
     with pytest.raises(ValidationError):
         create_financial_movement(
             business=business, direction="INFLOW", amount=Decimal("10"), payment_method="CASH",

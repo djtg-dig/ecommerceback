@@ -70,3 +70,7 @@ Finance est le journal financier append-only interne. `FinancialMovement` reçoi
 ## Encaissements Sales et créances
 
 Les domaines Sales et Receivables restent propriétaires de leurs workflows. Finance reçoit les encaissements validés par leurs services centraux, dans la même transaction PostgreSQL. Cette séparation garantit qu’un acompte est représenté par le paiement de créance, pas deux fois par Sale et ReceivablePayment. Les remboursements, ExpensePayment et les comptes de caisse restent hors périmètre.
+
+## Décaissements Expenses
+
+Expense, ExpensePayment et FinancialMovement sont trois responsabilités distinctes : charge métier, règlement réel et conséquence financière. Leur liaison passe par les services Expenses et Finance transactionnels; l’annulation d’une charge réglée est refusée tant que les paiements ne sont pas explicitement reversés.

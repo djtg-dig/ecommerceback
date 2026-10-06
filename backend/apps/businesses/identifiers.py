@@ -78,3 +78,8 @@ def generate_expense_category_public_id():
 
 def generate_expense_public_id():
     return generate_public_id("EX")
+
+
+def generate_expense_payment_public_id():
+    """Return an opaque public identifier for a real Expense payment."""
+    return generate_public_id("EP")

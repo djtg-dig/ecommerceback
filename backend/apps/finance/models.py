@@ -37,7 +37,11 @@ class FinancialMovement(models.Model):
     receivable_payment = models.OneToOneField(
         "receivables.ReceivablePayment", null=True, blank=True, on_delete=models.PROTECT
     )
+    # Legacy link retained for historical compatibility; new expense payments use expense_payment.
     expense = models.ForeignKey("expenses.Expense", null=True, blank=True, on_delete=models.PROTECT)
+    expense_payment = models.OneToOneField(
+        "expenses.ExpensePayment", null=True, blank=True, on_delete=models.PROTECT
+    )
     reversal_of = models.OneToOneField(
         "self", null=True, blank=True, on_delete=models.PROTECT, related_name="reversal"
     )
@@ -50,12 +54,13 @@ class FinancialMovement(models.Model):
             models.CheckConstraint(condition=Q(amount__gt=0), name="financial_movement_amount_positive"),
             models.CheckConstraint(
                 condition=(
-                    Q(reversal_of__isnull=False, sale__isnull=True, receivable_payment__isnull=True, expense__isnull=True)
+                    Q(reversal_of__isnull=False, sale__isnull=True, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=True)
                     | Q(reversal_of__isnull=True)
                     & (
-                        Q(sale__isnull=False, receivable_payment__isnull=True, expense__isnull=True)
-                        | Q(sale__isnull=True, receivable_payment__isnull=False, expense__isnull=True)
-                        | Q(sale__isnull=True, receivable_payment__isnull=True, expense__isnull=False)
+                        Q(sale__isnull=False, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=True)
+                        | Q(sale__isnull=True, receivable_payment__isnull=False, expense__isnull=True, expense_payment__isnull=True)
+                        | Q(sale__isnull=True, receivable_payment__isnull=True, expense__isnull=False, expense_payment__isnull=True)
+                        | Q(sale__isnull=True, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=False)
                     )
                 ),
                 name="financial_movement_valid_source",
@@ -89,6 +94,7 @@ class FinancialMovement(models.Model):
             "sale": self.sale,
             "receivable_payment": self.receivable_payment,
             "expense": self.expense,
+            "expense_payment": self.expense_payment,
         }
         present_sources = [name for name, value in sources.items() if value is not None]
         if self.reversal_of_id:
@@ -114,14 +120,17 @@ class FinancialMovement(models.Model):
             expected_source = {
                 self.EventType.SALE_PAYMENT: "sale",
                 self.EventType.RECEIVABLE_PAYMENT: "receivable_payment",
-                self.EventType.EXPENSE_PAYMENT: "expense",
+                self.EventType.EXPENSE_PAYMENT: "expense_payment",
             }.get(self.event_type)
             if expected_source is None:
                 errors["event_type"] = "EXPENSE_REVERSAL requires reversal_of."
             elif present_sources != [expected_source]:
                 errors["event_type"] = "The event type does not match its source."
-            elif self.business_id and sources[expected_source].business_id != self.business_id:
-                errors[expected_source] = "The source must belong to the same Business."
+            elif self.business_id:
+                source = sources[expected_source]
+                source_business_id = source.expense.business_id if expected_source == "expense_payment" else source.business_id
+                if source_business_id != self.business_id:
+                    errors[expected_source] = "The source must belong to the same Business."
         if errors:
             raise ValidationError(errors)
 

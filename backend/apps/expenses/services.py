@@ -56,6 +56,8 @@ def cancel_expense(expense, actor, reason):
         locked_expense = Expense.objects.select_for_update().get(pk=expense.pk)
         if locked_expense.status != Expense.Status.ACTIVE:
             raise ValidationError("Only active expenses can be cancelled.")
+        if locked_expense.payments.filter(reversed_at__isnull=True).exists():
+            raise ValidationError("Expense payments must be reversed before cancellation.")
 
         locked_expense.status = Expense.Status.CANCELLED
         locked_expense.cancelled_by = actor
@@ -72,3 +74,90 @@ def cancel_expense(expense, actor, reason):
         )
 
     return locked_expense
+
+import hashlib
+import json
+
+from apps.common.choices import PaymentMethod
+from apps.finance.models import FinancialMovement
+from apps.finance.services import create_financial_movement, reverse_movement
+
+
+class ExpensePaymentIdempotencyConflict(ValidationError):
+    """An idempotency key was reused with a different Expense payment intent."""
+
+
+def expense_payment_fingerprint(*, expense, amount, payment_method):
+    """Bind a retry key to the exact expense and monetary payload."""
+    payload = {
+        "expense": expense.public_id,
+        "amount": str(amount),
+        "payment_method": payment_method,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def add_expense_payment(expense, actor, amount, payment_method, idempotency_key=""):
+    """Lock an Expense and append its real outflow in the same transaction."""
+    from .models import Expense, ExpensePayment
+
+    if amount is None or amount <= 0 or payment_method not in PaymentMethod.values:
+        raise ValidationError("Invalid expense payment.")
+    with transaction.atomic():
+        locked_expense = Expense.objects.select_for_update().get(pk=expense.pk)
+        if locked_expense.status != Expense.Status.ACTIVE:
+            raise ValidationError("Only active expenses can be paid.")
+        fingerprint = expense_payment_fingerprint(
+            expense=locked_expense,
+            amount=amount,
+            payment_method=payment_method,
+        )
+        if idempotency_key:
+            existing = ExpensePayment.objects.filter(
+                expense=locked_expense,
+                idempotency_key=idempotency_key,
+            ).first()
+            if existing:
+                if existing.idempotency_fingerprint != fingerprint:
+                    raise ExpensePaymentIdempotencyConflict("Idempotency key conflicts with a different payment.")
+                return existing
+        if amount > locked_expense.balance:
+            raise ValidationError("Payment exceeds the remaining expense balance.")
+        payment = ExpensePayment.objects.create(
+            expense=locked_expense,
+            amount=amount,
+            payment_method=payment_method,
+            created_by=actor,
+            idempotency_key=idempotency_key,
+            idempotency_fingerprint=fingerprint if idempotency_key else "",
+        )
+        create_financial_movement(
+            business=locked_expense.business,
+            direction=FinancialMovement.Direction.OUTFLOW,
+            amount=payment.amount,
+            payment_method=payment.payment_method,
+            event_type=FinancialMovement.EventType.EXPENSE_PAYMENT,
+            created_by=actor,
+            expense_payment=payment,
+            occurred_at=payment.paid_at,
+        )
+        return payment
+
+
+def reverse_expense_payment(payment, actor, reason):
+    """Reverse one Expense payment without deleting historical payment evidence."""
+    from .models import ExpensePayment
+
+    if not reason or not reason.strip():
+        raise ValidationError({"reason": "A reversal reason is required."})
+    with transaction.atomic():
+        locked_payment = ExpensePayment.objects.select_for_update().select_related("expense").get(pk=payment.pk)
+        if locked_payment.is_reversed:
+            raise ValidationError("This expense payment has already been reversed.")
+        movement = FinancialMovement.objects.select_for_update().get(expense_payment=locked_payment)
+        reverse_movement(movement, created_by=actor, reason=reason)
+        locked_payment.reversed_at = timezone.now()
+        locked_payment.reversed_by = actor
+        locked_payment.reversal_reason = reason.strip()
+        locked_payment.save(update_fields=("reversed_at", "reversed_by", "reversal_reason"))
+        return locked_payment

@@ -1,5 +1,7 @@
 """Schema serializers for the Expenses HTTP contract."""
 
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from apps.common.choices import PaymentMethod
@@ -51,6 +53,9 @@ class ExpenseSerializer(serializers.Serializer):
     cancelled_by = serializers.UUIDField(read_only=True, allow_null=True)
     cancelled_at = serializers.DateTimeField(read_only=True, allow_null=True)
     cancellation_reason = serializers.CharField(read_only=True, allow_blank=True)
+    paid_amount = serializers.DecimalField(max_digits=16, decimal_places=2, read_only=True)
+    balance = serializers.DecimalField(max_digits=16, decimal_places=2, read_only=True)
+    payment_status = serializers.ChoiceField(choices=Expense.PaymentStatus.choices, read_only=True)
 
 
 class ExpenseCreateSerializer(serializers.Serializer):
@@ -81,3 +86,25 @@ class ExpenseCancelSerializer(serializers.Serializer):
     cancellation_reason = serializers.CharField(
         help_text="Motif obligatoire de l'annulation définitive.",
     )
+
+
+class ExpensePaymentSerializer(serializers.Serializer):
+    public_id = serializers.CharField(read_only=True)
+    amount = serializers.DecimalField(max_digits=16, decimal_places=2)
+    payment_method = serializers.ChoiceField(choices=PaymentMethod.choices)
+    paid_at = serializers.DateTimeField(read_only=True)
+    created_by = serializers.UUIDField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    is_reversed = serializers.BooleanField(read_only=True)
+    reversed_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    reversed_by = serializers.UUIDField(read_only=True, allow_null=True)
+    reversal_reason = serializers.CharField(read_only=True, allow_blank=True)
+
+
+class ExpensePaymentCreateSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=16, decimal_places=2, min_value=Decimal("0.01"))
+    payment_method = serializers.ChoiceField(choices=PaymentMethod.choices)
+
+
+class ExpensePaymentReverseSerializer(serializers.Serializer):
+    reason = serializers.CharField()

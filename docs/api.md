@@ -115,3 +115,13 @@ Les filtres de date utilisent `YYYY-MM-DD`; les valeurs inconnues renvoient `400
 `amount_paid` est obligatoire. S’il est positif, `payment_method` est obligatoire (`CASH`, `MOBILE_MONEY`, `BANK_TRANSFER`, `CARD`, `OTHER`). S’il vaut zéro, `payment_method` doit être absent et aucun encaissement Finance n’est créé. Ce contrat remplace la finalisation historique sans payload.
 
 `POST /api/v1/businesses/{SH}/receivables/{RC}/payments/` accepte `amount`, `payment_method`, `reference`, `notes` et l’en-tête optionnel `Idempotency-Key`. Une répétition avec la même clé et le même payload renvoie le même paiement sans duplication; un payload différent avec la même clé répond `409`.
+
+## Expense payments
+
+| Endpoint | Permission | Comportement |
+|---|---|---|
+| GET `/api/v1/businesses/{SH}/expenses/{EX}/payments/` | membre actif | Historique des règlements. |
+| POST `/api/v1/businesses/{SH}/expenses/{EX}/payments/` | OWNER, MANAGER | Crée un règlement réel et son mouvement Finance. En-tête optionnel `Idempotency-Key`. |
+| POST `/api/v1/businesses/{SH}/expenses/{EX}/payments/{EP}/reverse/` | OWNER, MANAGER | Corrige un règlement via une écriture Finance opposée, avec `reason`. |
+
+Une Expense expose `paid_amount`, `balance` et `payment_status`. Créer une Expense ne crée aucun OUTFLOW.

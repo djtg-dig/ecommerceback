@@ -103,3 +103,13 @@ def test_schema_documents_explicit_sale_collection_and_receivable_idempotency(cl
     assert "SaleComplete" in complete_schema.get("$ref", "")
     parameter_names = {entry["name"] for entry in schema["paths"][payments]["post"]["parameters"]}
     assert "Idempotency-Key" in parameter_names
+
+
+def test_schema_documents_expense_payment_and_reversal_routes(client):
+    schema = yaml.safe_load(client.get(reverse("openapi-schema")).content)
+    payments = "/api/v1/businesses/{business_public_id}/expenses/{expense_public_id}/payments/"
+    reversal = payments + "{payment_public_id}/reverse/"
+    assert set(schema["paths"][payments]) >= {"get", "post"}
+    assert "post" in schema["paths"][reversal]
+    names = {parameter["name"] for parameter in schema["paths"][payments]["post"]["parameters"]}
+    assert "Idempotency-Key" in names

@@ -2,6 +2,8 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError
+from django.db.models import DecimalField, Q, Sum, Value
+from django.db.models.functions import Coalesce
 from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -19,8 +21,16 @@ from .serializers import (
     ExpenseCreateSerializer,
     ExpenseSerializer,
     ExpenseUpdateSerializer,
+    ExpensePaymentCreateSerializer,
+    ExpensePaymentReverseSerializer,
+    ExpensePaymentSerializer,
 )
-from .services import cancel_expense
+from .services import (
+    ExpensePaymentIdempotencyConflict,
+    add_expense_payment,
+    cancel_expense,
+    reverse_expense_payment,
+)
 
 def category_data(category):
     return {
@@ -51,6 +61,9 @@ def expense_data(expense):
         "cancelled_by": str(expense.cancelled_by_id) if expense.cancelled_by_id else None,
         "cancelled_at": expense.cancelled_at.isoformat() if expense.cancelled_at else None,
         "cancellation_reason": expense.cancellation_reason,
+        "paid_amount": str(expense.paid_amount),
+        "balance": str(expense.balance),
+        "payment_status": expense.payment_status,
     }
 
 
@@ -163,7 +176,13 @@ class Expenses(BusinessScopedView):
         business = self.business_for(request, business_public_id)
         if not business:
             return self.not_found()
-        queryset = Expense.objects.select_related("category").filter(business=business)
+        queryset = Expense.objects.select_related("category").filter(business=business).annotate(
+            computed_paid_amount=Coalesce(
+                Sum("payments__amount", filter=Q(payments__reversed_at__isnull=True)),
+                Value(Decimal("0")),
+                output_field=DecimalField(max_digits=16, decimal_places=2),
+            )
+        )
         validators = {
             "status": {choice for choice, _ in Expense.Status.choices},
             "currency": {choice for choice, _ in Expense.Currency.choices},
@@ -248,10 +267,13 @@ class ExpenseDetail(BusinessScopedView):
         business = self.business_for(request, business_public_id)
         if not business:
             return None, None
-        expense = Expense.objects.select_related("category").filter(
-            business=business,
-            public_id=expense_public_id,
-        ).first()
+        expense = Expense.objects.select_related("category").annotate(
+            computed_paid_amount=Coalesce(
+                Sum("payments__amount", filter=Q(payments__reversed_at__isnull=True)),
+                Value(Decimal("0")),
+                output_field=DecimalField(max_digits=16, decimal_places=2),
+            )
+        ).filter(business=business, public_id=expense_public_id).first()
 
         return business, expense
 
@@ -342,6 +364,71 @@ class ExpenseCancel(BusinessScopedView):
         except ValidationError:
             return Response({"detail": "This expense cannot be cancelled."}, status=400)
         return Response(expense_data(expense))
+
+
+def expense_payment_data(payment):
+    return {
+        "public_id": payment.public_id,
+        "amount": str(payment.amount),
+        "payment_method": payment.payment_method,
+        "paid_at": payment.paid_at.isoformat(),
+        "created_by": str(payment.created_by_id),
+        "created_at": payment.created_at.isoformat(),
+        "is_reversed": payment.is_reversed,
+        "reversed_at": payment.reversed_at.isoformat() if payment.reversed_at else None,
+        "reversed_by": str(payment.reversed_by_id) if payment.reversed_by_id else None,
+        "reversal_reason": payment.reversal_reason,
+    }
+
+
+class ExpensePayments(BusinessScopedView):
+    def get_expense(self, request, business_public_id, expense_public_id):
+        business = self.business_for(request, business_public_id)
+        if not business:
+            return None, None
+        return business, Expense.objects.filter(business=business, public_id=expense_public_id).first()
+
+    def get(self, request, business_public_id, expense_public_id):
+        business, expense = self.get_expense(request, business_public_id, expense_public_id)
+        if not business or not expense:
+            return self.not_found()
+        return Response([expense_payment_data(payment) for payment in expense.payments.select_related("created_by", "reversed_by")])
+
+    def post(self, request, business_public_id, expense_public_id):
+        business, expense = self.get_expense(request, business_public_id, expense_public_id)
+        if not business or not expense:
+            return self.not_found()
+        if not can_manage_business(membership_for(request.user, business)):
+            return self.forbidden()
+        serializer = ExpensePaymentCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        key = request.headers.get("Idempotency-Key", "")
+        if len(key) > 255:
+            return Response({"detail": "Invalid Idempotency-Key."}, status=400)
+        try:
+            payment = add_expense_payment(expense, request.user, idempotency_key=key, **serializer.validated_data)
+        except ExpensePaymentIdempotencyConflict as error:
+            return Response({"detail": str(error)}, status=409)
+        except ValidationError as error:
+            return Response({"detail": str(error)}, status=400)
+        return Response(expense_payment_data(payment), status=201)
+
+
+class ExpensePaymentReverse(ExpensePayments):
+    def post(self, request, business_public_id, expense_public_id, payment_public_id):
+        business, expense = self.get_expense(request, business_public_id, expense_public_id)
+        payment = expense.payments.filter(public_id=payment_public_id).first() if expense else None
+        if not business or not expense or not payment:
+            return self.not_found()
+        if not can_manage_business(membership_for(request.user, business)):
+            return self.forbidden()
+        serializer = ExpensePaymentReverseSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            payment = reverse_expense_payment(payment, request.user, serializer.validated_data["reason"])
+        except ValidationError as error:
+            return Response({"detail": str(error)}, status=400)
+        return Response(expense_payment_data(payment))
 
 
 # APIViews use explicit schemas because the implementation returns plain dictionaries.
@@ -446,3 +533,10 @@ ExpenseCancel.post = extend_schema(
     responses={200: ExpenseSerializer, 400: None, 403: None, 404: None},
     description="Transition terminale ACTIVE vers CANCELLED pour OWNER et MANAGER.",
 )(ExpenseCancel.post)
+
+ExpensePayments.get = extend_schema(tags=["Expense Payments"], operation_id="expense_payment_list", responses={200: ExpensePaymentSerializer(many=True)})(ExpensePayments.get)
+ExpensePayments.post = extend_schema(tags=["Expense Payments"], operation_id="expense_payment_create", request=ExpensePaymentCreateSerializer, parameters=[OpenApiParameter("Idempotency-Key", OpenApiTypes.STR, OpenApiParameter.HEADER, required=False)], responses={201: ExpensePaymentSerializer, 400: None, 409: None})(ExpensePayments.post)
+ExpensePaymentReverse.post = extend_schema(tags=["Expense Payments"], operation_id="expense_payment_reverse", request=ExpensePaymentReverseSerializer, responses={200: ExpensePaymentSerializer, 400: None})(ExpensePaymentReverse.post)
+
+ExpensePayments.http_method_names = ["get", "post", "head", "options"]
+ExpensePaymentReverse.http_method_names = ["post", "options"]

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Expense, ExpenseCategory
+from .models import Expense, ExpenseCategory, ExpensePayment
 
 
 @admin.register(ExpenseCategory)
@@ -106,4 +106,24 @@ class ExpenseAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         """Expenses are financial history and must never be physically deleted."""
+        return False
+
+
+@admin.register(ExpensePayment)
+class ExpensePaymentAdmin(admin.ModelAdmin):
+    list_display = (
+        "public_id",
+        "expense",
+        "amount",
+        "payment_method",
+        "paid_at",
+        "created_by",
+        "reversed_at",
+    )
+    readonly_fields = tuple(field.name for field in ExpensePayment._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
         return False

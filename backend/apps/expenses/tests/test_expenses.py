@@ -458,3 +458,87 @@ def test_expense_rejects_currency_different_from_business_currency():
     )
 
     assert response.status_code == 400
+
+from decimal import Decimal
+from unittest.mock import patch
+
+from apps.expenses.models import ExpensePayment
+from apps.finance.models import FinancialMovement
+
+
+def expense_payments_url(business, expense):
+    return base_url(business) + f"expenses/{expense.public_id}/payments/"
+
+
+def test_expense_creation_is_not_a_cash_outflow_and_exposes_derived_payment_values():
+    business, owner, _, _, _ = setup_business()
+    category = ExpenseCategory.objects.get(business=business, code="RENT")
+    response = create_expense(client(owner), business, category, amount="500000.00")
+    expense = Expense.objects.get(public_id=response.data["public_id"])
+    assert response.data["paid_amount"] == "0"
+    assert response.data["balance"] == "500000.00"
+    assert response.data["payment_status"] == "UNPAID"
+    assert not ExpensePayment.objects.filter(expense=expense).exists()
+    assert not FinancialMovement.objects.filter(expense_payment__expense=expense).exists()
+
+
+def test_expense_payment_lifecycle_idempotency_and_permissions():
+    business, owner, manager, employee, outsider = setup_business()
+    category = ExpenseCategory.objects.get(business=business, code="RENT")
+    expense = Expense.objects.get(public_id=create_expense(client(owner), business, category, amount="100.00").data["public_id"])
+    url = expense_payments_url(business, expense)
+    assert client(employee).post(url, {"amount": "40", "payment_method": "CASH"}, format="json").status_code == 403
+    assert client(outsider).get(url).status_code == 404
+    headers = {"HTTP_IDEMPOTENCY_KEY": "expense-payment-retry"}
+    first = client(manager).post(url, {"amount": "40", "payment_method": "CASH"}, format="json", **headers)
+    retry = client(manager).post(url, {"amount": "40", "payment_method": "CASH"}, format="json", **headers)
+    conflict = client(manager).post(url, {"amount": "41", "payment_method": "CASH"}, format="json", **headers)
+    assert first.status_code == retry.status_code == 201
+    assert first.data["public_id"] == retry.data["public_id"]
+    assert conflict.status_code == 409
+    payment = ExpensePayment.objects.get(public_id=first.data["public_id"])
+    movement = FinancialMovement.objects.get(expense_payment=payment)
+    expense.refresh_from_db()
+    assert movement.direction == FinancialMovement.Direction.OUTFLOW
+    assert movement.amount == payment.amount == Decimal("40.00")
+    assert movement.created_by_id == manager.id
+    assert expense.paid_amount == Decimal("40.00")
+    assert expense.balance == Decimal("60.00")
+    assert expense.payment_status == Expense.PaymentStatus.PARTIALLY_PAID
+    assert client(owner).post(url, {"amount": "61", "payment_method": "CASH"}, format="json").status_code == 400
+    with pytest.raises(Exception):
+        payment.delete()
+    payment.amount = Decimal("1")
+    with pytest.raises(Exception):
+        payment.save()
+
+
+def test_expense_payments_reverse_and_cancellation_rules_with_finance_rollback():
+    business, owner, _, _, _ = setup_business()
+    category = ExpenseCategory.objects.get(business=business, code="RENT")
+    unpaid = Expense.objects.get(public_id=create_expense(client(owner), business, category, amount="100").data["public_id"])
+    cancel_url = base_url(business) + f"expenses/{unpaid.public_id}/cancel/"
+    assert client(owner).post(cancel_url, {"cancellation_reason": "Duplicate"}, format="json").status_code == 200
+
+    expense = Expense.objects.get(public_id=create_expense(client(owner), business, category, amount="100").data["public_id"])
+    url = expense_payments_url(business, expense)
+    first = client(owner).post(url, {"amount": "40", "payment_method": "CASH"}, format="json")
+    second = client(owner).post(url, {"amount": "30", "payment_method": "MOBILE_MONEY"}, format="json")
+    assert first.status_code == second.status_code == 201
+    assert client(owner).post(base_url(business) + f"expenses/{expense.public_id}/cancel/", {"cancellation_reason": "No"}, format="json").status_code == 400
+    reverse_url = url + f"{second.data['public_id']}/reverse/"
+    reversed_response = client(owner).post(reverse_url, {"reason": "Entered twice"}, format="json")
+    assert reversed_response.status_code == 200
+    assert client(owner).post(reverse_url, {"reason": "Again"}, format="json").status_code == 400
+    expense.refresh_from_db()
+    assert expense.paid_amount == Decimal("40.00")
+    assert expense.balance == Decimal("60.00")
+    assert FinancialMovement.objects.filter(expense_payment__expense=expense, direction="OUTFLOW").count() == 2
+    assert FinancialMovement.objects.filter(reversal_of__expense_payment__expense=expense, direction="INFLOW").count() == 1
+
+    rollback_expense = Expense.objects.get(public_id=create_expense(client(owner), business, category, amount="10").data["public_id"])
+    with patch("apps.expenses.services.create_financial_movement", side_effect=RuntimeError("finance unavailable")):
+        with pytest.raises(RuntimeError):
+            from apps.expenses.services import add_expense_payment
+            add_expense_payment(rollback_expense, owner, Decimal("10"), "CASH")
+    assert not ExpensePayment.objects.filter(expense=rollback_expense).exists()

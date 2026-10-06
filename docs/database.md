@@ -67,3 +67,8 @@ Receivable est unique par Sale; ReceivablePayment est historique et immuable.
 ## Idempotence des paiements de créances
 
 **ReceivablePayment** est immuable après création. Il stocke une clé d’idempotence facultative et l’empreinte SHA-256 du payload. Une contrainte unique conditionnelle `(business, idempotency_key)` protège les répétitions HTTP. Son mouvement Finance est déjà garanti unique par `FinancialMovement.receivable_payment` (`OneToOneField`).
+
+## Expense payments
+
+- **ExpensePayment** : UUID interne, identifiant public `EP`, FK protégée vers Expense et acteur, montant positif, PaymentMethod, horodatage, idempotence par `(expense, idempotency_key)` et métadonnées de reversal. Les valeurs monétaires sont immuables.
+- **FinancialMovement.expense_payment** : relation unique vers le règlement réel. La FK `expense` historique est conservée pour compatibilité mais n’est plus admise comme source des nouveaux `EXPENSE_PAYMENT`.
