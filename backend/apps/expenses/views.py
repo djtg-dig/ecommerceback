@@ -1,38 +1,279 @@
 from datetime import date
-from decimal import Decimal
-from rest_framework.views import APIView
+from decimal import Decimal, InvalidOperation
+
+from django.core.exceptions import ValidationError
 from rest_framework.response import Response
+from rest_framework.views import APIView
+
 from apps.businesses.models import Business
-from apps.businesses.permissions import can_manage_business,membership_for
-from .models import ExpenseCategory,Expense
-class V(APIView):
- def b(self,r,x):return Business.objects.filter(public_id=x,members__identity=r.user,members__status='ACTIVE').first()
- def nf(self):return Response({'detail':'Not found.'},404)
-class Categories(V):
- def get(self,r,business_public_id):
-  b=self.b(r,business_public_id);return Response([{'public_id':x.public_id,'code':x.code,'name':x.name,'is_system':x.is_system,'is_active':x.is_active} for x in ExpenseCategory.objects.filter(business=b)]) if b else self.nf()
- def post(self,r,business_public_id):
-  b=self.b(r,business_public_id)
-  if not b:return self.nf()
-  if not can_manage_business(membership_for(r.user,b)):return Response({'detail':'Forbidden'},403)
-  code=r.data.get('code') or r.data.get('name','').upper().replace(' ','_');x=ExpenseCategory.objects.create(business=b,code=code,name=r.data.get('name'),description=r.data.get('description',''));return Response({'public_id':x.public_id,'code':x.code,'name':x.name},201)
-class Expenses(V):
- def get(self,r,business_public_id):
-  b=self.b(r,business_public_id)
-  if not b:return self.nf()
-  q=Expense.objects.filter(business=b)
-  for field,param in [('status','status'),('currency','currency'),('payment_method','payment_method')]:
-   if r.query_params.get(param):q=q.filter(**{field:r.query_params[param]})
-  if r.query_params.get('category'):q=q.filter(category__public_id=r.query_params['category'])
-  if r.query_params.get('date_from'):q=q.filter(expense_date__gte=r.query_params['date_from'])
-  if r.query_params.get('date_to'):q=q.filter(expense_date__lte=r.query_params['date_to'])
-  return Response([{'public_id':x.public_id,'category':x.category.public_id,'amount':str(x.amount),'currency':x.currency,'status':x.status,'expense_date':x.expense_date} for x in q])
- def post(self,r,business_public_id):
-  b=self.b(r,business_public_id)
-  if not b:return self.nf()
-  if not can_manage_business(membership_for(r.user,b)):return Response({'detail':'Forbidden'},403)
-  c=ExpenseCategory.objects.filter(business=b,public_id=r.data.get('category'),is_active=True).first()
-  try:amount=Decimal(str(r.data.get('amount')))
-  except:amount=0
-  if not c or amount<=0:return Response({'detail':'Invalid expense'},400)
-  x=Expense.objects.create(business=b,category=c,amount=amount,currency=r.data.get('currency',b.primary_currency),payment_method=r.data.get('payment_method','CASH'),expense_date=r.data.get('expense_date',date.today()),description=r.data.get('description',''),reference=r.data.get('reference',''),created_by=r.user);return Response({'public_id':x.public_id},201)
+from apps.businesses.permissions import can_manage_business, membership_for
+
+from .models import Expense, ExpenseCategory
+from .services import cancel_expense
+
+PAYMENT_METHODS = {"CASH", "MOBILE_MONEY", "BANK_TRANSFER", "CARD", "OTHER"}
+
+
+def category_data(category):
+    return {
+        "public_id": category.public_id,
+        "code": category.code,
+        "name": category.name,
+        "description": category.description,
+        "is_system": category.is_system,
+        "is_active": category.is_active,
+        "sort_order": category.sort_order,
+    }
+
+
+def expense_data(expense):
+    return {
+        "public_id": expense.public_id,
+        "category": expense.category.public_id,
+        "amount": str(expense.amount),
+        "currency": expense.currency,
+        "payment_method": expense.payment_method,
+        "expense_date": expense.expense_date.isoformat(),
+        "description": expense.description,
+        "reference": expense.reference,
+        "status": expense.status,
+        "cancelled_by": str(expense.cancelled_by_id) if expense.cancelled_by_id else None,
+        "cancelled_at": expense.cancelled_at.isoformat() if expense.cancelled_at else None,
+        "cancellation_reason": expense.cancellation_reason,
+    }
+
+
+class BusinessScopedView(APIView):
+    def business_for(self, request, public_id):
+        return Business.objects.filter(
+            public_id=public_id,
+            members__identity=request.user,
+            members__status="ACTIVE",
+        ).first()
+
+    @staticmethod
+    def not_found():
+        return Response({"detail": "Not found."}, status=404)
+
+    @staticmethod
+    def forbidden():
+        return Response({"detail": "Forbidden."}, status=403)
+
+    def manageable_business(self, request, public_id):
+        business = self.business_for(request, public_id)
+        if not business:
+            return None
+        return business if can_manage_business(membership_for(request.user, business)) else False
+
+
+class Categories(BusinessScopedView):
+    def get(self, request, business_public_id):
+        business = self.business_for(request, business_public_id)
+        if not business:
+            return self.not_found()
+        return Response(category_data(category) for category in ExpenseCategory.objects.filter(business=business))
+
+    def post(self, request, business_public_id):
+        business = self.manageable_business(request, business_public_id)
+        if business is None:
+            return self.not_found()
+        if business is False:
+            return self.forbidden()
+        name = request.data.get("name")
+        if not isinstance(name, str) or not name.strip():
+            return Response({"detail": "A category name is required."}, status=400)
+        code = request.data.get("code") or name.upper().replace(" ", "_")
+        try:
+            category = ExpenseCategory.objects.create(
+                business=business,
+                code=code,
+                name=name,
+                description=request.data.get("description", ""),
+                sort_order=request.data.get("sort_order", 0),
+            )
+        except ValidationError as error:
+            return Response({"detail": error.message_dict if hasattr(error, "message_dict") else error.messages}, status=400)
+        return Response(category_data(category), status=201)
+
+
+class CategoryDetail(BusinessScopedView):
+    def get_object(self, request, business_public_id, category_public_id):
+        business = self.business_for(request, business_public_id)
+        if not business:
+            return None, None
+        return business, ExpenseCategory.objects.filter(business=business, public_id=category_public_id).first()
+
+    def get(self, request, business_public_id, category_public_id):
+        business, category = self.get_object(request, business_public_id, category_public_id)
+        if not business or not category:
+            return self.not_found()
+        return Response(category_data(category))
+
+    def patch(self, request, business_public_id, category_public_id):
+        business, category = self.get_object(request, business_public_id, category_public_id)
+        if not business or not category:
+            return self.not_found()
+        if not can_manage_business(membership_for(request.user, business)):
+            return self.forbidden()
+        immutable_fields = {"public_id", "business", "is_system"}
+        if category.is_system:
+            immutable_fields.update({"code", "name", "description", "sort_order"})
+        if any(field in request.data for field in immutable_fields):
+            return Response({"detail": "This category field is immutable."}, status=400)
+        allowed_fields = {"code", "name", "description", "is_active", "sort_order"}
+        for field in allowed_fields.intersection(request.data):
+            setattr(category, field, request.data[field])
+        try:
+            category.save()
+        except ValidationError as error:
+            return Response({"detail": error.message_dict if hasattr(error, "message_dict") else error.messages}, status=400)
+        return Response(category_data(category))
+
+
+class Expenses(BusinessScopedView):
+    def get(self, request, business_public_id):
+        business = self.business_for(request, business_public_id)
+        if not business:
+            return self.not_found()
+        queryset = Expense.objects.select_related("category").filter(business=business)
+        validators = {
+            "status": {choice for choice, _ in Expense.Status.choices},
+            "currency": {choice for choice, _ in Expense.Currency.choices},
+            "payment_method": PAYMENT_METHODS,
+        }
+        for parameter, permitted in validators.items():
+            value = request.query_params.get(parameter)
+            if value:
+                if value not in permitted:
+                    return Response({"detail": f"Invalid {parameter}."}, status=400)
+                queryset = queryset.filter(**{parameter: value})
+        category = request.query_params.get("category")
+        if category:
+            if not ExpenseCategory.objects.filter(business=business, public_id=category).exists():
+                return Response({"detail": "Invalid category."}, status=400)
+            queryset = queryset.filter(category__public_id=category)
+        for parameter, lookup in (("date_from", "expense_date__gte"), ("date_to", "expense_date__lte")):
+            value = request.query_params.get(parameter)
+            if value:
+                try:
+                    parsed_date = date.fromisoformat(value)
+                except ValueError:
+                    return Response({"detail": f"Invalid {parameter}."}, status=400)
+                queryset = queryset.filter(**{lookup: parsed_date})
+        return Response([expense_data(expense) for expense in queryset])
+
+    def post(self, request, business_public_id):
+        business = self.manageable_business(request, business_public_id)
+        if business is None:
+            return self.not_found()
+        if business is False:
+            return self.forbidden()
+        category = ExpenseCategory.objects.filter(
+            business=business, public_id=request.data.get("category"), is_active=True
+        ).first()
+        try:
+            amount = Decimal(str(request.data.get("amount")))
+        except (InvalidOperation, TypeError, ValueError):
+            amount = Decimal(0)
+        currency = request.data.get("currency", business.primary_currency)
+        payment_method = request.data.get("payment_method", "CASH")
+        if not category or amount <= 0 or currency not in Expense.Currency.values or payment_method not in PAYMENT_METHODS:
+            return Response({"detail": "Invalid expense."}, status=400)
+        try:
+            expense_date = date.fromisoformat(request.data.get("expense_date", date.today().isoformat()))
+        except (TypeError, ValueError):
+            return Response({"detail": "Invalid expense date."}, status=400)
+        expense = Expense.objects.create(
+            business=business,
+            category=category,
+            amount=amount,
+            currency=currency,
+            payment_method=payment_method,
+            expense_date=expense_date,
+            description=request.data.get("description", ""),
+            reference=request.data.get("reference", ""),
+            created_by=request.user,
+        )
+        return Response(expense_data(expense), status=201)
+
+
+class ExpenseDetail(BusinessScopedView):
+    def get_object(self, request, business_public_id, expense_public_id):
+        business = self.business_for(request, business_public_id)
+        if not business:
+            return None, None
+        return business, Expense.objects.select_related("category").filter(
+            business=business, public_id=expense_public_id
+        ).first()
+
+    def get(self, request, business_public_id, expense_public_id):
+        business, expense = self.get_object(request, business_public_id, expense_public_id)
+        if not business or not expense:
+            return self.not_found()
+        return Response(expense_data(expense))
+
+    def patch(self, request, business_public_id, expense_public_id):
+        business, expense = self.get_object(request, business_public_id, expense_public_id)
+        if not business or not expense:
+            return self.not_found()
+        if not can_manage_business(membership_for(request.user, business)):
+            return self.forbidden()
+        if expense.status != Expense.Status.ACTIVE:
+            return Response({"detail": "Cancelled expenses are immutable."}, status=400)
+        allowed_fields = {"category", "amount", "currency", "payment_method", "expense_date", "description", "reference"}
+        unknown_fields = set(request.data).difference(allowed_fields)
+        if unknown_fields:
+            return Response({"detail": "One or more fields cannot be changed."}, status=400)
+        if "category" in request.data:
+            category = ExpenseCategory.objects.filter(
+                business=business, public_id=request.data["category"], is_active=True
+            ).first()
+            if not category:
+                return Response({"detail": "Invalid category."}, status=400)
+            expense.category = category
+        if "amount" in request.data:
+            try:
+                amount = Decimal(str(request.data["amount"]))
+            except (InvalidOperation, TypeError, ValueError):
+                amount = Decimal(0)
+            if amount <= 0:
+                return Response({"detail": "Amount must be positive."}, status=400)
+            expense.amount = amount
+        if "currency" in request.data:
+            if request.data["currency"] not in Expense.Currency.values:
+                return Response({"detail": "Invalid currency."}, status=400)
+            expense.currency = request.data["currency"]
+        if "payment_method" in request.data:
+            if request.data["payment_method"] not in PAYMENT_METHODS:
+                return Response({"detail": "Invalid payment method."}, status=400)
+            expense.payment_method = request.data["payment_method"]
+        if "expense_date" in request.data:
+            try:
+                expense.expense_date = date.fromisoformat(request.data["expense_date"])
+            except (TypeError, ValueError):
+                return Response({"detail": "Invalid expense date."}, status=400)
+        for field in ("description", "reference"):
+            if field in request.data:
+                setattr(expense, field, request.data[field])
+        try:
+            expense.save()
+        except ValidationError as error:
+            return Response({"detail": error.message_dict if hasattr(error, "message_dict") else error.messages}, status=400)
+        return Response(expense_data(expense))
+
+
+class ExpenseCancel(BusinessScopedView):
+    def post(self, request, business_public_id, expense_public_id):
+        business, expense = ExpenseDetail().get_object(request, business_public_id, expense_public_id)
+        if not business or not expense:
+            return self.not_found()
+        if not can_manage_business(membership_for(request.user, business)):
+            return self.forbidden()
+        reason = request.data.get("cancellation_reason", "")
+        if not isinstance(reason, str) or not reason.strip():
+            return Response({"detail": "A cancellation reason is required."}, status=400)
+        try:
+            expense = cancel_expense(expense, request.user, reason)
+        except ValidationError:
+            return Response({"detail": "This expense cannot be cancelled."}, status=400)
+        return Response(expense_data(expense))
