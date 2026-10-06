@@ -50,3 +50,6 @@ def generate_sale_line_public_id(): return generate_public_id("SL")
 
 def generate_receivable_public_id(): return generate_public_id("RC")
 def generate_receivable_payment_public_id(): return generate_public_id("RP")
+
+def generate_expense_category_public_id(): return generate_public_id("EC")
+def generate_expense_public_id(): return generate_public_id("EX")

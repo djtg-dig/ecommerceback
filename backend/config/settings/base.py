@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     "apps.purchases.apps.PurchasesConfig",
     "apps.sales.apps.SalesConfig",
     "apps.receivables.apps.ReceivablesConfig",
+    "apps.expenses.apps.ExpensesConfig",
 ]
 
 MIDDLEWARE = [
@@ -133,5 +134,7 @@ SPECTACULAR_SETTINGS = {
         {"name": "Customers", "description": "Clients internes d’un commerce."},
         {"name": "Sales", "description": "Ventes internes/POS."},
         {"name": "Receivables", "description": "Créances clients et paiements internes."},
+        {"name": "Expense Categories", "description": "Catégories de dépenses par commerce."},
+        {"name": "Expenses", "description": "Dépenses internes du commerce."},
     ],
 }
