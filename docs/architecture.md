@@ -33,3 +33,7 @@ Business is the legal/operational tenant; a future BusinessLocation may represen
 ## Inventory
 
 Le catalogue définit ce qui est vendable; Inventory définit combien est disponible. `InventoryItem` est le solde transactionnel d’un Product simple ou d’un ProductVariant, et `StockMovement` est son journal immuable. Les mutations prennent un verrou de ligne PostgreSQL avant le calcul du solde. La future évolution `Business -> BusinessLocation -> InventoryItem` ajoutera des emplacements sans mélanger inventaire et catalogue.
+
+## Purchases
+
+Purchases reste séparé de Inventory: seule la réception validée appelle le service Inventory atomique; DRAFT et CONFIRMED ne changent jamais le stock.

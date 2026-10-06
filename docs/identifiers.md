@@ -17,3 +17,7 @@ Products use immutable `PR` plus ten random characters and variants use `PV` plu
 | `SM` | StockMovement |
 
 Chaque identifiant est son préfixe plus 10 caractères tirés cryptographiquement de `23456789ABCDEFGHJKLMNPQRSTUVWXYZ`.
+
+| `SP` | Supplier |
+| `PU` | Purchase |
+| `PL` | PurchaseLine |

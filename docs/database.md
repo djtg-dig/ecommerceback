@@ -42,3 +42,9 @@ BusinessCategory is the platform-controlled flat commerce taxonomy. BusinessCate
 
 - **InventoryItem**: UUID interne, index unique `IV`, FK protégée vers Business et exactement une FK protégée vers Product ou ProductVariant. Quantités `Decimal(14,3)`, seuil bas et timestamps. Contraintes PostgreSQL : XOR Product/Variant, unicité conditionnelle par Product/Variant, quantité/réservé/seuil non négatifs et `reserved_quantity <= quantity`.
 - **StockMovement**: UUID interne, index unique `SM`, FK protégées vers Business, InventoryItem et CarriIdentity. Événement immuable avec type, delta, avant/après, motif et date. Les contraintes empêchent des snapshots négatifs.
+
+## Purchases
+
+- **Supplier**: fournisseur Business, `SP` immuable.
+- **Purchase**: `PU`, workflow DRAFT/CONFIRMED/RECEIVED/CANCELLED et auteurs horodatés.
+- **PurchaseLine**: `PL`, Product XOR Variant, quantité positive, coût positif et total dérivé.

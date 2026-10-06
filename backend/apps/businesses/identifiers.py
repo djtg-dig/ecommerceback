@@ -38,3 +38,8 @@ def generate_inventory_item_public_id() -> str:
 def generate_stock_movement_public_id() -> str:
     """Return an ``SM`` immutable stock-movement identifier."""
     return generate_public_id("SM")
+
+
+def generate_supplier_public_id(): return generate_public_id("SP")
+def generate_purchase_public_id(): return generate_public_id("PU")
+def generate_purchase_line_public_id(): return generate_public_id("PL")

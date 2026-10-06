@@ -31,3 +31,7 @@ Les opérations manuelles ne reçoivent pas encore de clé d’idempotence. Les 
 ## Permissions
 
 Les membres actifs OWNER, MANAGER et EMPLOYEE peuvent consulter les balances et l’historique. Seuls OWNER et MANAGER peuvent créer un InventoryItem ou appliquer un mouvement manuel. Les produits ou variantes archivés ne peuvent recevoir aucune nouvelle opération normale; leur historique reste lisible.
+
+## Purchase integration
+
+La réception Purchase crée des mouvements IN système référencés PURCHASE et peut créer le premier InventoryItem à zéro.

@@ -1,0 +1,3 @@
+from django.urls import path
+from .views import *
+urlpatterns=[path('suppliers/',Suppliers.as_view()),path('suppliers/<str:supplier_public_id>/',SupplierDetail.as_view()),path('purchases/',Purchases.as_view()),path('purchases/<str:purchase_public_id>/',PurchaseDetail.as_view()),path('purchases/<str:purchase_public_id>/confirm/',Confirm.as_view()),path('purchases/<str:purchase_public_id>/receive/',Receive.as_view()),path('purchases/<str:purchase_public_id>/cancel/',Cancel.as_view()),path('purchases/<str:purchase_public_id>/lines/',Lines.as_view()),path('purchases/<str:purchase_public_id>/lines/<str:line_public_id>/',LineDetail.as_view())]

@@ -58,7 +58,7 @@ def create_inventory_item(*, business, product=None, variant=None, low_stock_thr
     raise RuntimeError("Impossible de générer un identifiant inventaire unique.")
 
 
-def apply_stock_movement(*, inventory_item, movement_type, performed_by, quantity=None, target_quantity=None, reason=""):
+def apply_stock_movement(*, inventory_item, movement_type, performed_by, quantity=None, target_quantity=None, reason="", reference_type=None, reference_id=None):
     """Atomically update one balance and append its immutable movement event.
 
     The row lock is acquired before reading the balance. ``IN`` and ``OUT``
@@ -95,5 +95,5 @@ def apply_stock_movement(*, inventory_item, movement_type, performed_by, quantit
         return StockMovement.objects.create(
             business=item.business, inventory_item=item, movement_type=movement_type,
             quantity=delta, quantity_before=before, quantity_after=after,
-            reason=reason or "", performed_by=performed_by,
+            reason=reason or "", performed_by=performed_by, reference_type=reference_type, reference_id=reference_id,
         )
