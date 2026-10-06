@@ -10,15 +10,16 @@ MAX_PUBLIC_ID_ATTEMPTS = 5
 
 def create_business(identity, validated_data):
     """
-    Create a Business, its first active owner and its owned reference data atomically.
+    Create a Business, its active OWNER and its reference data as one transaction.
 
-    Expense categories are initialized here, instead of from a signal, so a caller
-    never observes a newly created Business without its standard expense taxonomy.
-    An integrity error rolls back the complete unit of work before the public-ID
-    allocation is retried.
+    The Expenses service initializes the standard expense categories inside the
+    same transaction. Any failure during that initialization rolls back the
+    Business, OWNER and category memberships together; callers never receive a
+    partially initialized Business.
     """
     categories = validated_data.pop("categories", [])
     primary_category = validated_data.pop("primary_category", None)
+
     active_categories = {
         category.code: category
         for category in BusinessCategory.objects.filter(
@@ -38,12 +39,14 @@ def create_business(identity, validated_data):
                     public_id=generate_business_public_id(),
                     **validated_data,
                 )
+
                 BusinessMember.objects.create(
                     business=business,
                     identity=identity,
                     role=BusinessMember.Role.OWNER,
                     status=BusinessMember.Status.ACTIVE,
                 )
+
                 for code, category in active_categories.items():
                     BusinessCategoryMembership.objects.create(
                         business=business,
@@ -51,10 +54,11 @@ def create_business(identity, validated_data):
                         is_primary=code == primary_category,
                     )
 
-                # The Expenses app owns the taxonomy; Businesses only orchestrates it.
+                # A local import avoids coupling module import order across apps.
                 from apps.expenses.services import ensure_default_expense_categories
 
                 ensure_default_expense_categories(business)
+
                 return business
         except IntegrityError:
             continue
@@ -63,7 +67,7 @@ def create_business(identity, validated_data):
 
 
 def replace_categories(business, codes, primary_category):
-    """Replace a Business's selected commercial categories as one transaction."""
+    """Replace a Business's selected commercial categories in one transaction."""
     active_categories = {
         category.code: category
         for category in BusinessCategory.objects.filter(
@@ -78,6 +82,7 @@ def replace_categories(business, codes, primary_category):
 
     with transaction.atomic():
         BusinessCategoryMembership.objects.filter(business=business).delete()
+
         for code, category in active_categories.items():
             BusinessCategoryMembership.objects.create(
                 business=business,
