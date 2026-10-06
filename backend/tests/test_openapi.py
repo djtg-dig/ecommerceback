@@ -78,3 +78,18 @@ def test_schema_documents_all_expense_routes_and_filters(client):
 
     cancel_schema = schema["paths"][cancel]["post"]["requestBody"]["content"]
     assert "application/json" in cancel_schema
+
+
+def test_schema_documents_finance_as_get_only_with_its_filters(client):
+    schema = yaml.safe_load(client.get(reverse("openapi-schema")).content)
+    collection = "/api/v1/businesses/{business_public_id}/financial-movements/"
+    detail = collection + "{movement_public_id}/"
+    summary = "/api/v1/businesses/{business_public_id}/financial-summary/"
+
+    assert set(schema["paths"][collection]) >= {"get"}
+    assert "post" not in schema["paths"][collection]
+    assert set(schema["paths"][detail]) >= {"get"}
+    assert "patch" not in schema["paths"][detail]
+    assert set(schema["paths"][summary]) >= {"get"}
+    parameters = {parameter["name"] for parameter in schema["paths"][collection]["get"]["parameters"]}
+    assert {"direction", "event_type", "payment_method", "date_from", "date_to"} <= parameters

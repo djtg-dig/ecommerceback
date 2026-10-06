@@ -8,6 +8,7 @@ from apps.businesses.views import BusinessCategoriesView
 
 urlpatterns = [
     path("businesses/<str:business_public_id>/", include("apps.expenses.urls")),
+    path("businesses/<str:business_public_id>/", include("apps.finance.urls")),
     path("businesses/<str:business_public_id>/", include("apps.receivables.urls")),
     path("businesses/<str:business_public_id>/", include("apps.sales.urls")),
     path("businesses/<str:business_public_id>/", include("apps.purchases.urls")),

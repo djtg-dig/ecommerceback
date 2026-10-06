@@ -62,3 +62,7 @@ Expenses est un domaine Niveau 1 séparé de Purchases et de Receivables. Il pos
 ## Devise financière unique
 
 Chaque Business choisit `primary_currency` (`CDF` ou `USD`) à sa création. Cette valeur est immuable : Sale, Purchase, Expense et Receivable conservent une devise snapshot imposée par le Business. Aucune conversion, taux ou frais de conversion n’est géré dans les domaines opérationnels ; un domaine séparé les traitera ultérieurement.
+
+## Finance
+
+Finance est le journal financier append-only interne. `FinancialMovement` reçoit des événements métier déjà validés et ne pilote aucun gateway. Les sources Sales, Receivables et Expenses restent propriétaires de leurs workflows; leurs futures écritures Finance passeront par un service transactionnel idempotent. OWNER et MANAGER consultent les mouvements et agrégats, tandis que les employés n’accèdent pas au reporting financier.

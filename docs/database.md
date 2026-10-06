@@ -59,3 +59,7 @@ Receivable est unique par Sale; ReceivablePayment est historique et immuable.
 
 - **ExpenseCategory** : UUID interne, identifiant public immuable `EC`, FK protégée vers Business, code unique par `(business, code)`, catégorie système ou personnalisée, activation et ordre d'affichage.
 - **Expense** : UUID interne, identifiant public immuable `EX`, FK protégées vers Business, ExpenseCategory et auteur. Le montant est strictement positif par contrainte PostgreSQL. La validation métier exige que la catégorie appartienne au même Business. Le workflow est `ACTIVE` puis éventuellement `CANCELLED`, avec audit d'annulation.
+
+## Finance
+
+- **FinancialMovement** : UUID interne, identifiant public immuable `FM`, FK protégées vers Business, auteur et une unique source métier (`Sale`, `ReceivablePayment` ou `Expense`), ou vers le mouvement original pour une correction. Le montant est positif; les contraintes SQL imposent une source unique, l’unicité d’une clé d’idempotence par Business et empêchent les doublons Sale/Expense par type d’événement. `receivable_payment` est un `OneToOneField`, ce qui garantit un seul mouvement pour un paiement de créance. Les règles de correspondance événement/source, de devise et de correction sont validées par le modèle et le service.

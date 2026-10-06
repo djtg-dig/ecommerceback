@@ -5,3 +5,23 @@ Chaque Business utilise une seule devise financière, choisie à la création pu
 Le futur ledger `FinancialMovement` suivra la même règle. Finance ne contiendra ni taux de change, ni conversion implicite, ni frais de conversion : ce sujet appartient à un futur domaine séparé.
 
 Une Expense est une charge métier. Le futur domaine distinguera une Expense de son règlement réel (`ExpensePayment`) et du mouvement financier OUTFLOW qui en résultera.
+
+# Finance — Lot 2 : journal financier interne
+
+`FinancialMovement` est un journal append-only interne par `Business`. Il ne remplace ni une intégration bancaire ni une passerelle de paiement. Chaque entrée contient un montant positif, la devise primaire immuable du Business, un sens (`INFLOW` ou `OUTFLOW`), le moyen déclaré, l’événement source, l’horodatage et l’auteur.
+
+Les événements actuellement admis sont `SALE_PAYMENT`, `RECEIVABLE_PAYMENT`, `EXPENSE_PAYMENT` et `EXPENSE_REVERSAL`. Les trois premiers doivent référencer exactement une source du type correspondant et de la même entreprise. `ReceivablePayment` est relié par une relation unique : un même paiement ne peut donc produire qu’un seul mouvement. Les opérations de création future devront appeler `create_financial_movement`, dans leur transaction métier, avec une clé d’idempotence stable lorsqu’elles peuvent être rejouées.
+
+Une entrée ne se modifie ni ne se supprime. Cette version permet la correction d’un `EXPENSE_PAYMENT` par une unique écriture `EXPENSE_REVERSAL` opposée, avec motif obligatoire; elle ne modifie jamais l’original et interdit les chaînes de corrections.
+
+La consultation est réservée aux OWNER et MANAGER actifs. Les endpoints lecture seule sont :
+
+- `GET /api/v1/businesses/{SH}/financial-movements/`
+- `GET /api/v1/businesses/{SH}/financial-movements/{FM}/`
+- `GET /api/v1/businesses/{SH}/financial-summary/`
+
+Les listes et le résumé acceptent `direction`, `event_type`, `payment_method`, `date_from` et `date_to` (`YYYY-MM-DD`). Le résumé retourne les totaux d’entrées, sorties, le flux net et le détail par moyen de paiement. Ce flux net est une information de reporting, pas un solde bancaire ni une réconciliation de caisse.
+
+Finance ne crée aucun paiement HTTP dans ce lot. Les intégrations automatiques avec Sales, Receivables, Expenses et Purchases seront ajoutées explicitement dans leurs services, avec tests d’idempotence et transactions atomiques.
+
+Décision préparée pour une évolution ultérieure : une **Expense** décrit une charge métier, un futur **ExpensePayment** décrira son règlement réel, et `FinancialMovement` décrira le mouvement financier de ce règlement. `ExpensePayment` n’existe pas dans ce lot et n’est donc ni créé ni intégré automatiquement.

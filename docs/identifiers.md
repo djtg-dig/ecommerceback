@@ -37,3 +37,11 @@ Chaque identifiant est son préfixe plus 10 caractères tirés cryptographiqueme
 | `EX` | Expense |
 
 Ils utilisent le préfixe suivi de 10 caractères cryptographiquement générés du même alphabet public.
+
+## Finance identifiers
+
+| Prefix | Resource |
+|---|---|
+| `FM` | FinancialMovement |
+
+`FM` utilise le même suffixe aléatoire de 10 caractères que les autres identifiants publics.

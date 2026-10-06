@@ -91,3 +91,15 @@ GET `/receivables/`, detail, PATCH metadata et GET/POST `/payments/`.
 | POST `/api/v1/businesses/{SH}/expenses/{EX}/cancel/` | OWNER, MANAGER | Annule définitivement une dépense avec `cancellation_reason`. |
 
 Les filtres de dépenses sont `category`, `status`, `payment_method`, `currency`, `date_from` et `date_to`; les dates sont au format `YYYY-MM-DD`. Les montants sont positifs, les devises sont `CDF` ou `USD` sans conversion automatique. `payment_method` accepte `CASH`, `MOBILE_MONEY`, `BANK_TRANSFER`, `CARD` et `OTHER` comme classification déclarative, sans gateway.
+
+## Finance
+
+Les routes Finance sont consultables par les seuls OWNER et MANAGER actifs; les autres membres et tenants reçoivent `404`. Elles sont GET-only : aucun endpoint public ne crée, modifie ou supprime un mouvement dans ce lot.
+
+| Endpoint | Permission | Comportement |
+|---|---|---|
+| GET `/api/v1/businesses/{SH}/financial-movements/` | OWNER, MANAGER | Journal Finance, filtres `direction`, `event_type`, `payment_method`, `date_from`, `date_to`. |
+| GET `/api/v1/businesses/{SH}/financial-movements/{FM}/` | OWNER, MANAGER | Détail d’une écriture appartenant au Business. |
+| GET `/api/v1/businesses/{SH}/financial-summary/` | OWNER, MANAGER | Totaux inflow/outflow/net flow et ventilation par moyen de paiement. |
+
+Les filtres de date utilisent `YYYY-MM-DD`; les valeurs inconnues renvoient `400`. `FM` est une référence publique opaque, pas une autorisation.
