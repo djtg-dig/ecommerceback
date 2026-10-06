@@ -61,8 +61,18 @@ def test_category_detail_permissions_system_immutability_and_custom_disable():
     detail_url = base_url(business) + f"expense-categories/{system_category.public_id}/"
 
     assert employee_client.get(detail_url).status_code == 200
-    assert employee_client.patch(detail_url, {"name": "Changed"}, format="json").status_code == 403
-    assert owner_client.patch(detail_url, {"name": "Changed"}, format="json").status_code == 400
+    employee_update = employee_client.patch(
+        detail_url,
+        {"name": "Changed"},
+        format="json",
+    )
+    assert employee_update.status_code == 403
+    system_update = owner_client.patch(
+        detail_url,
+        {"name": "Changed"},
+        format="json",
+    )
+    assert system_update.status_code == 400
 
     custom = owner_client.post(
         base_url(business) + "expense-categories/",
@@ -71,7 +81,12 @@ def test_category_detail_permissions_system_immutability_and_custom_disable():
     )
     assert custom.status_code == 201
     custom_url = base_url(business) + f"expense-categories/{custom.data['public_id']}/"
-    assert manager_client.patch(custom_url, {"is_active": False}, format="json").status_code == 200
+    custom_update = manager_client.patch(
+        custom_url,
+        {"is_active": False},
+        format="json",
+    )
+    assert custom_update.status_code == 200
     assert owner_client.post(
         base_url(business) + "expenses/",
         {"category": custom.data["public_id"], "amount": "1", "description": "Invalid"},
@@ -86,7 +101,12 @@ def test_expense_detail_update_and_cancel_workflow():
     detail_url = base_url(business) + f"expenses/{created.data['public_id']}/"
 
     assert client(employee).get(detail_url).status_code == 200
-    assert client(employee).patch(detail_url, {"amount": "11"}, format="json").status_code == 403
+    employee_update = client(employee).patch(
+        detail_url,
+        {"amount": "11"},
+        format="json",
+    )
+    assert employee_update.status_code == 403
     changed = client(manager).patch(
         detail_url,
         {"amount": "11.50", "reference": "INV-42", "expense_date": "2026-10-02"},
@@ -95,13 +115,29 @@ def test_expense_detail_update_and_cancel_workflow():
     assert changed.status_code == 200
     assert changed.data["amount"] == "11.50"
 
-    cancelled = client(owner).post(detail_url + "cancel/", {"cancellation_reason": "Duplicate"}, format="json")
+    cancelled = client(owner).post(
+        detail_url + "cancel/",
+        {"cancellation_reason": "Duplicate"},
+        format="json",
+    )
     assert cancelled.status_code == 200
     assert cancelled.data["status"] == "CANCELLED"
     expense = Expense.objects.get(public_id=created.data["public_id"])
-    assert expense.cancelled_by == owner and expense.cancelled_at and expense.cancellation_reason == "Duplicate"
-    assert client(owner).post(detail_url + "cancel/", {"cancellation_reason": "Again"}, format="json").status_code == 400
-    assert client(manager).patch(detail_url, {"reference": "changed"}, format="json").status_code == 400
+    assert expense.cancelled_by == owner
+    assert expense.cancelled_at
+    assert expense.cancellation_reason == "Duplicate"
+    repeated_cancel = client(owner).post(
+        detail_url + "cancel/",
+        {"cancellation_reason": "Again"},
+        format="json",
+    )
+    assert repeated_cancel.status_code == 400
+    cancelled_update = client(manager).patch(
+        detail_url,
+        {"reference": "changed"},
+        format="json",
+    )
+    assert cancelled_update.status_code == 400
 
 
 def test_expense_category_and_expense_are_tenant_scoped():
@@ -114,7 +150,10 @@ def test_expense_category_and_expense_are_tenant_scoped():
     other_category = ExpenseCategory.objects.get(business=other_business, code="RENT")
     created = create_expense(client(owner), business, category)
 
-    assert client(other_owner).get(base_url(other_business) + f"expenses/{created.data['public_id']}/").status_code == 404
+    cross_tenant_detail = client(other_owner).get(
+        base_url(other_business) + f"expenses/{created.data['public_id']}/"
+    )
+    assert cross_tenant_detail.status_code == 404
     assert client(owner).post(
         base_url(business) + "expenses/",
         {"category": other_category.public_id, "amount": "1", "description": "Cross tenant"},
@@ -127,12 +166,30 @@ def test_expense_filters_validate_values_and_apply_all_supported_filters():
     business, owner, _, _, _ = setup_business()
     rent = ExpenseCategory.objects.get(business=business, code="RENT")
     transport = ExpenseCategory.objects.get(business=business, code="TRANSPORT")
-    create_expense(client(owner), business, rent, amount="10", payment_method="CASH", expense_date="2026-10-01")
+    create_expense(
+        client(owner),
+        business,
+        rent,
+        amount="10",
+        payment_method="CASH",
+        expense_date="2026-10-01",
+    )
     second = create_expense(
-        client(owner), business, transport, amount="20", currency="USD", payment_method="CARD", expense_date="2026-10-03"
+        client(owner),
+        business,
+        transport,
+        amount="20",
+        currency="USD",
+        payment_method="CARD",
+        expense_date="2026-10-03",
     )
     detail_url = base_url(business) + f"expenses/{second.data['public_id']}/cancel/"
-    assert client(owner).post(detail_url, {"cancellation_reason": "Cancelled"}, format="json").status_code == 200
+    cancellation = client(owner).post(
+        detail_url,
+        {"cancellation_reason": "Cancelled"},
+        format="json",
+    )
+    assert cancellation.status_code == 200
     url = base_url(business) + "expenses/"
     response = client(owner).get(
         url,
@@ -145,8 +202,18 @@ def test_expense_filters_validate_values_and_apply_all_supported_filters():
             "date_to": "2026-10-04",
         },
     )
-    assert response.status_code == 200 and [row["public_id"] for row in response.data] == [second.data["public_id"]]
-    for query in ({"status": "UNKNOWN"}, {"currency": "EUR"}, {"payment_method": "CRYPTO"}, {"date_from": "bad-date"}, {"category": "EC0000000000"}):
+    assert response.status_code == 200
+    assert [row["public_id"] for row in response.data] == [
+        second.data["public_id"]
+    ]
+    invalid_queries = (
+        {"status": "UNKNOWN"},
+        {"currency": "EUR"},
+        {"payment_method": "CRYPTO"},
+        {"date_from": "bad-date"},
+        {"category": "EC0000000000"},
+    )
+    for query in invalid_queries:
         assert client(owner).get(url, query).status_code == 400
 
 
@@ -331,3 +398,45 @@ def test_expense_api_rejects_non_canonical_payment_method():
     )
 
     assert response.status_code == 400
+
+
+def test_expense_admin_preserves_financial_history():
+    from django.contrib import admin
+
+    from apps.expenses.admin import ExpenseAdmin
+
+    business, owner, _, _, _ = setup_business()
+    category = ExpenseCategory.objects.get(business=business, code="RENT")
+    created = create_expense(client(owner), business, category)
+    expense = Expense.objects.get(public_id=created.data["public_id"])
+    expense_admin = ExpenseAdmin(Expense, admin.site)
+
+    assert expense_admin.has_delete_permission(None, expense) is False
+    assert "status" in expense_admin.get_readonly_fields(None, expense)
+
+    expense.status = Expense.Status.CANCELLED
+    assert set(field.name for field in expense._meta.fields).issubset(
+        expense_admin.get_readonly_fields(None, expense)
+    )
+
+
+def test_expense_category_admin_preserves_system_categories():
+    from django.contrib import admin
+
+    from apps.expenses.admin import ExpenseCategoryAdmin
+
+    business, _, _, _, _ = setup_business()
+    system_category = ExpenseCategory.objects.get(business=business, code="RENT")
+    custom_category = ExpenseCategory.objects.create(
+        business=business,
+        code="CUSTOM_ADMIN",
+        name="Custom admin category",
+    )
+    category_admin = ExpenseCategoryAdmin(ExpenseCategory, admin.site)
+
+    assert category_admin.has_delete_permission(None, system_category) is False
+    assert category_admin.has_delete_permission(None, custom_category) is False
+    assert {"business", "code", "name", "description", "sort_order"}.issubset(
+        category_admin.get_readonly_fields(None, system_category)
+    )
+    assert "code" not in category_admin.get_readonly_fields(None, custom_category)

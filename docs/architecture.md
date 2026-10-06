@@ -42,3 +42,19 @@ Purchases reste séparé de Inventory: seule la réception validée appelle le s
 Business, catalogue, fournisseurs, achats, inventaire, clients et ventes servent les opérations internes. Sale est une vente POS, pas un Order. Niveau 2 visibilité publique et Niveau 3 vente en ligne ne sont pas implémentés.
 
 Créances fait partie du Niveau 1 interne; aucun gateway, caisse ou marketplace n’est implémenté.
+
+## Expenses
+
+Expenses est un domaine Niveau 1 séparé de Purchases et de Receivables. Il possède ses catégories par Business et conserve un historique d'annulation. Les catégories standards sont orchestrées par le service Business dans la même transaction que la création du tenant.
+
+## Niveau 1 — Gestion interne
+
+- ✓ Business / membres
+- ✓ Catalogue, produits / variantes
+- ✓ Inventaire
+- ✓ Fournisseurs et achats
+- ✓ Clients et ventes POS
+- ✓ Créances
+- ✓ Dépenses
+
+À venir : caisse / flux financiers et reporting / dashboard. Les niveaux 2 (visibilité publique) et 3 (vente en ligne) ne sont pas implémentés.

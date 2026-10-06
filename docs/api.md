@@ -79,3 +79,15 @@ Routes internes : `/customers/`, `/sales/`, `/sales/{SA}/lines/`, `/complete/`, 
 
 ## Receivables
 GET `/receivables/`, detail, PATCH metadata et GET/POST `/payments/`.
+
+## Expenses
+
+| Endpoint | Permission | Comportement |
+|---|---|---|
+| GET/POST `/api/v1/businesses/{SH}/expense-categories/` | membre actif / OWNER, MANAGER | Liste ou crée une catégorie propre au Business. |
+| GET/PATCH `/api/v1/businesses/{SH}/expense-categories/{EC}/` | membre actif / OWNER, MANAGER | Les catégories système protègent leurs champs métier. |
+| GET/POST `/api/v1/businesses/{SH}/expenses/` | membre actif / OWNER, MANAGER | Liste ou crée une dépense ACTIVE. |
+| GET/PATCH `/api/v1/businesses/{SH}/expenses/{EX}/` | membre actif / OWNER, MANAGER | Une dépense CANCELLED est immuable. |
+| POST `/api/v1/businesses/{SH}/expenses/{EX}/cancel/` | OWNER, MANAGER | Annule définitivement une dépense avec `cancellation_reason`. |
+
+Les filtres de dépenses sont `category`, `status`, `payment_method`, `currency`, `date_from` et `date_to`; les dates sont au format `YYYY-MM-DD`. Les montants sont positifs, les devises sont `CDF` ou `USD` sans conversion automatique. `payment_method` accepte `CASH`, `MOBILE_MONEY`, `BANK_TRANSFER`, `CARD` et `OTHER` comme classification déclarative, sans gateway.

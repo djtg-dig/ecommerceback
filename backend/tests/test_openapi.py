@@ -45,3 +45,36 @@ def test_schema_lists_real_routes_and_ecommerce_bearer_security(client):
     assert schema["paths"]["/api/v1/auth/me/"]["get"]["security"] == [{"EcommerceJWT": []}]
     assert "parameters" not in schema["paths"]["/api/v1/auth/carri/callback/"]["get"]
     assert schema["paths"]["/api/v1/product-categories/"]["get"].get("security") is None
+
+
+def test_schema_documents_all_expense_routes_and_filters(client):
+    """Expenses routes keep their published methods and query contract."""
+    schema = yaml.safe_load(client.get(reverse("openapi-schema")).content)
+
+    collection = "/api/v1/businesses/{business_public_id}/expenses/"
+    detail = "/api/v1/businesses/{business_public_id}/expenses/{expense_public_id}/"
+    cancel = detail + "cancel/"
+    category_collection = "/api/v1/businesses/{business_public_id}/expense-categories/"
+    category_detail = category_collection + "{category_public_id}/"
+
+    assert set(schema["paths"][category_collection]) >= {"get", "post"}
+    assert set(schema["paths"][category_detail]) >= {"get", "patch"}
+    assert set(schema["paths"][collection]) >= {"get", "post"}
+    assert set(schema["paths"][detail]) >= {"get", "patch"}
+    assert set(schema["paths"][cancel]) >= {"post"}
+
+    parameters = {
+        parameter["name"]
+        for parameter in schema["paths"][collection]["get"]["parameters"]
+    }
+    assert {
+        "category",
+        "status",
+        "payment_method",
+        "currency",
+        "date_from",
+        "date_to",
+    } <= parameters
+
+    cancel_schema = schema["paths"][cancel]["post"]["requestBody"]["content"]
+    assert "application/json" in cancel_schema

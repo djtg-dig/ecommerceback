@@ -54,3 +54,8 @@ Customer, Sale et SaleLine forment les ventes internes; SaleLine cible Product X
 
 ## Receivables
 Receivable est unique par Sale; ReceivablePayment est historique et immuable.
+
+## Expenses
+
+- **ExpenseCategory** : UUID interne, identifiant public immuable `EC`, FK protégée vers Business, code unique par `(business, code)`, catégorie système ou personnalisée, activation et ordre d'affichage.
+- **Expense** : UUID interne, identifiant public immuable `EX`, FK protégées vers Business, ExpenseCategory et auteur. Le montant est strictement positif par contrainte PostgreSQL. La validation métier exige que la catégorie appartienne au même Business. Le workflow est `ACTIVE` puis éventuellement `CANCELLED`, avec audit d'annulation.

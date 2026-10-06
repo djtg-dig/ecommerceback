@@ -28,3 +28,12 @@ Chaque identifiant est son préfixe plus 10 caractères tirés cryptographiqueme
 
 | `RC` | Receivable |
 | `RP` | ReceivablePayment |
+
+## Expenses identifiers
+
+| Prefix | Resource |
+|---|---|
+| `EC` | ExpenseCategory |
+| `EX` | Expense |
+
+Ils utilisent le préfixe suivi de 10 caractères cryptographiquement générés du même alphabet public.
