@@ -129,3 +129,7 @@ Une Expense expose `paid_amount`, `balance` et `payment_status`. Créer une Expe
 ## Supplier payments
 
 GET/POST `/api/v1/businesses/{SH}/purchases/{PU}/payments/` et POST `/payments/{PP}/reverse/` sont réservés OWNER/MANAGER. Le POST accepte `amount`, `payment_method` et l'en-tête optionnel `Idempotency-Key`.
+
+### Financial summary
+
+`GET /businesses/{SH}/financial-summary/` accepte `date_from`, `date_to`, `payment_method`, `event_type`, `business_payment_method` et `recording_mode`. La réponse conserve `total_inflow`, `total_outflow`, `net_flow` et `by_payment_method`; elle ajoute les ventilations `by_category`, `by_business_payment_method` et `by_recording_mode`.

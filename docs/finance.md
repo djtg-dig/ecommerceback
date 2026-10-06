@@ -39,3 +39,7 @@ Une `Expense` est une charge reconnue, sans mouvement de trésorerie implicite. 
 ## Supplier payments
 
 `SUPPLIER_PAYMENT` est un OUTFLOW lié à SupplierPayment. Son reversal est un `SUPPLIER_PAYMENT_REVERSAL` INFLOW relié à l'écriture originale. Réception fournisseur et paiement sont volontairement deux journaux distincts : Inventory pour les marchandises, Finance pour l'argent.
+
+## Caisse vendeur et synthèse financière
+
+`financial-summary` est la projection de caisse vendeur du ledger `FinancialMovement` : elle agrège les entrées, sorties et net enregistrés dans l'application. Elle ne représente ni wallet, ni compte bancaire, ni solde Mobile Money réel. Les filtres de période utilisent `occurred_at` avec des bornes inclusives. Les mouvements historiques sans `PaymentTransaction` restent dans les totaux et catégories, et apparaissent sous `UNCLASSIFIED` pour la ventilation par mode.

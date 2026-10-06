@@ -76,3 +76,5 @@ Les domaines Sales et Receivables restent propriétaires de leurs workflows. Fin
 Expense, ExpensePayment et FinancialMovement sont trois responsabilités distinctes : charge métier, règlement réel et conséquence financière. Leur liaison passe par les services Expenses et Finance transactionnels; l’annulation d’une charge réglée est refusée tant que les paiements ne sont pas explicitement reversés.
 
 Purchase peut recevoir des marchandises via Inventory IN et recevoir séparément des SupplierPayment qui génèrent des OUTFLOW Finance. Reverser un paiement ne modifie jamais le stock.
+
+La caisse vendeur est une projection calculée depuis `FinancialMovement`; aucun solde financier persistant n'est stocké sur Business ou sur une méthode de paiement.

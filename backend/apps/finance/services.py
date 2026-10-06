@@ -43,8 +43,8 @@ def create_financial_movement(
         raise ValidationError("Invalid business payment method.")
     if business_payment_method is None:
         raise ValidationError("No active payment method is available.")
-    if recording_mode != PaymentTransaction.RecordingMode.MANUAL:
-        raise ValidationError("Automatic payment recording is reserved for server integrations.")
+    if recording_mode not in PaymentTransaction.RecordingMode.values:
+        raise ValidationError("Invalid payment recording mode.")
     payment_method = business_payment_method.category
     occurred_at = parse_datetime(occurred_at) if isinstance(occurred_at, str) else (occurred_at or timezone.now())
     if occurred_at is None:
@@ -118,31 +118,36 @@ def reverse_movement(movement, *, created_by, reason, occurred_at=None):
 
 
 def financial_summary(queryset):
-    """Return informational inflow/outflow totals, including payment-method groups."""
+    """Aggregate the immutable ledger, including historical movements without traces."""
     totals = queryset.values("direction").annotate(total=Sum("amount"))
     values = {row["direction"]: row["total"] or Decimal("0") for row in totals}
     inflow = values.get(FinancialMovement.Direction.INFLOW, Decimal("0"))
     outflow = values.get(FinancialMovement.Direction.OUTFLOW, Decimal("0"))
 
-    grouped = {
-        method: {
-            "payment_method": method,
-            "total_inflow": Decimal("0"),
-            "total_outflow": Decimal("0"),
-            "net_flow": Decimal("0"),
-        }
-        for method in PaymentMethod.values
-    }
-    for row in queryset.values("payment_method", "direction").annotate(total=Sum("amount")):
-        entry = grouped[row["payment_method"]]
-        key = "total_inflow" if row["direction"] == FinancialMovement.Direction.INFLOW else "total_outflow"
-        entry[key] = row["total"] or Decimal("0")
-    for entry in grouped.values():
-        entry["net_flow"] = entry["total_inflow"] - entry["total_outflow"]
+    def groups(rows, key, defaults):
+        data = {value: {key: value, "inflow": Decimal("0"), "outflow": Decimal("0"), "net": Decimal("0")} for value in defaults}
+        for row in rows:
+            value = row[key]
+            entry = data.setdefault(value, {key: value, "inflow": Decimal("0"), "outflow": Decimal("0"), "net": Decimal("0")})
+            entry["inflow" if row["direction"] == "INFLOW" else "outflow"] = row["total"] or Decimal("0")
+        for entry in data.values(): entry["net"] = entry["inflow"] - entry["outflow"]
+        return list(data.values())
 
-    return {
-        "total_inflow": inflow,
-        "total_outflow": outflow,
-        "net_flow": inflow - outflow,
-        "by_payment_method": list(grouped.values()),
-    }
+    by_category = groups(queryset.values("payment_method", "direction").annotate(total=Sum("amount")), "payment_method", PaymentMethod.values)
+    for row in by_category:
+        row["category"] = row.pop("payment_method")
+    mode_rows = []
+    for row in queryset.values("payment_transaction__recording_mode", "direction").annotate(total=Sum("amount")):
+        mode_rows.append({"mode": row["payment_transaction__recording_mode"] or "UNCLASSIFIED", "direction": row["direction"], "total": row["total"]})
+    by_mode = groups(mode_rows, "mode", ("MANUAL", "AUTOMATIC", "UNCLASSIFIED"))
+    methods = []
+    for row in queryset.filter(payment_transaction__isnull=False).values("payment_transaction__business_payment_method__public_id", "payment_transaction__business_payment_method__name", "payment_transaction__method_name_snapshot", "payment_transaction__category_snapshot", "direction").annotate(total=Sum("amount")):
+        key = row["payment_transaction__business_payment_method__public_id"]
+        entry = next((x for x in methods if x["payment_method"] == key), None)
+        if not entry:
+            entry = {"payment_method": key, "current_name": row["payment_transaction__business_payment_method__name"], "category": row["payment_transaction__category_snapshot"], "snapshots": [], "inflow": Decimal("0"), "outflow": Decimal("0"), "net": Decimal("0")}; methods.append(entry)
+        if row["payment_transaction__method_name_snapshot"] not in entry["snapshots"]: entry["snapshots"].append(row["payment_transaction__method_name_snapshot"])
+        entry["inflow" if row["direction"] == "INFLOW" else "outflow"] += row["total"] or Decimal("0")
+    for entry in methods: entry["net"] = entry["inflow"] - entry["outflow"]
+    legacy_methods = [{"payment_method": row["category"], "total_inflow": row["inflow"], "total_outflow": row["outflow"], "net_flow": row["net"]} for row in by_category]
+    return {"total_inflow": inflow, "total_outflow": outflow, "net_flow": inflow - outflow, "by_payment_method": legacy_methods, "by_category": by_category, "by_business_payment_method": methods, "by_recording_mode": by_mode}

@@ -147,3 +147,25 @@ def test_default_payment_method_backfill_is_idempotent_for_existing_businesses()
     create_default_payment_methods(django_apps, None)
 
     assert business.payment_methods.count() == 5
+
+
+def test_summary_groups_categories_modes_methods_and_legacy_movements():
+    from apps.finance.services import financial_summary
+
+    business, owner, _, _ = business_with_members()
+    first = create_sale_movement(business, owner)
+    historical_sale = sale_for(business, owner)
+    FinancialMovement.objects.create(
+        business=business, direction="INFLOW", amount=Decimal("20"), currency="CDF",
+        payment_method="MOBILE_MONEY", event_type="SALE_PAYMENT",
+        occurred_at=timezone.now(), created_by=owner, sale=historical_sale,
+    )
+    summary = financial_summary(FinancialMovement.objects.filter(business=business))
+    categories = {row["category"]: row for row in summary["by_category"]}
+    modes = {row["mode"]: row for row in summary["by_recording_mode"]}
+    assert summary["total_inflow"] == Decimal("30")
+    assert categories["CASH"]["inflow"] == Decimal("10")
+    assert categories["MOBILE_MONEY"]["inflow"] == Decimal("20")
+    assert modes["MANUAL"]["inflow"] == Decimal("10")
+    assert modes["UNCLASSIFIED"]["inflow"] == Decimal("20")
+    assert summary["by_business_payment_method"][0]["payment_method"] == first.payment_transaction.business_payment_method.public_id
