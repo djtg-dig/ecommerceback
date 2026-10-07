@@ -7,10 +7,13 @@ from .views import HealthCheckView
 from apps.businesses.views import BusinessCategoriesView
 from apps.dashboard_views import DashboardView
 from apps.profitability_views import ProfitabilitySummaryView
+from apps.sales_report_views import ProductReportView, SalesReportView
 
 urlpatterns = [
     path("businesses/<str:business_public_id>/dashboard/", DashboardView.as_view()),
     path("businesses/<str:business_public_id>/profitability-summary/", ProfitabilitySummaryView.as_view()),
+    path("businesses/<str:business_public_id>/reports/sales/", SalesReportView.as_view()),
+    path("businesses/<str:business_public_id>/reports/products/", ProductReportView.as_view()),
     path("businesses/<str:business_public_id>/", include("apps.expenses.urls")),
     path("businesses/<str:business_public_id>/", include("apps.finance.urls")),
     path("businesses/<str:business_public_id>/", include("apps.receivables.urls")),
