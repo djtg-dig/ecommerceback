@@ -4,8 +4,10 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
 
+from apps.businesses.models import BusinessPaymentMethod
 from apps.common.choices import PaymentMethod
 from apps.finance.models import FinancialMovement
 from apps.finance.services import create_financial_movement
@@ -19,7 +21,7 @@ class SaleReturnIdempotencyConflict(ValidationError):
     """Raised when a return key is reused with another business intent."""
 
 
-def sale_return_fingerprint(*, sale, reason, returned_at, lines):
+def sale_return_fingerprint(*, sale, reason, returned_at, lines, refund_payment_method=None):
     """Hash normalized return intent independently from client line ordering."""
     def canonical_quantity(value):
         quantity = Decimal(str(value))
@@ -29,6 +31,9 @@ def sale_return_fingerprint(*, sale, reason, returned_at, lines):
         "sale": sale.public_id,
         "reason": reason or "",
         "returned_at": returned_at.isoformat(),
+        "refund_payment_method": (
+            refund_payment_method.public_id if refund_payment_method else None
+        ),
         "lines": sorted(
             ({"sale_line": line_id, "quantity": canonical_quantity(quantity)} for line_id, quantity in lines),
             key=lambda value: value["sale_line"],
@@ -37,7 +42,16 @@ def sale_return_fingerprint(*, sale, reason, returned_at, lines):
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def create_sale_return(*, sale, actor, reason, returned_at, lines, idempotency_key):
+def create_sale_return(
+    *,
+    sale,
+    actor,
+    reason,
+    returned_at,
+    lines,
+    idempotency_key,
+    refund_payment_method=None,
+):
     """Append immutable return lines from locked sale snapshots in one transaction."""
     if not idempotency_key:
         raise ValidationError("Idempotency-Key is required.")
@@ -50,7 +64,13 @@ def create_sale_return(*, sale, actor, reason, returned_at, lines, idempotency_k
         raise ValidationError("A sale line may appear only once per return.")
     with transaction.atomic():
         locked_sale = Sale.objects.select_for_update().get(pk=sale.pk)
-        fingerprint = sale_return_fingerprint(sale=locked_sale, reason=reason, returned_at=returned_at, lines=normalized)
+        fingerprint = sale_return_fingerprint(
+            sale=locked_sale,
+            reason=reason,
+            returned_at=returned_at,
+            lines=normalized,
+            refund_payment_method=refund_payment_method,
+        )
         existing = SaleReturn.objects.select_for_update().filter(business=locked_sale.business, idempotency_key=idempotency_key).first()
         if existing:
             if existing.idempotency_fingerprint != fingerprint:
@@ -85,6 +105,54 @@ def create_sale_return(*, sale, actor, reason, returned_at, lines, idempotency_k
             if receivable is not None
             else Decimal("0.00")
         )
+        collected_amount = (
+            FinancialMovement.objects.filter(
+                sale=locked_sale,
+                event_type=FinancialMovement.EventType.SALE_PAYMENT,
+                direction=FinancialMovement.Direction.INFLOW,
+            ).aggregate(total=Sum("amount"))["total"]
+            or Decimal("0.00")
+        )
+        if receivable is not None:
+            collected_amount += (
+                FinancialMovement.objects.filter(
+                    receivable_payment__receivable=receivable,
+                    event_type=FinancialMovement.EventType.RECEIVABLE_PAYMENT,
+                    direction=FinancialMovement.Direction.INFLOW,
+                ).aggregate(total=Sum("amount"))["total"]
+                or Decimal("0.00")
+            )
+        already_refunded_amount = (
+            FinancialMovement.objects.filter(
+                sale_return__sale=locked_sale,
+                event_type=FinancialMovement.EventType.SALE_RETURN_REFUND,
+                direction=FinancialMovement.Direction.OUTFLOW,
+            ).aggregate(total=Sum("amount"))["total"]
+            or Decimal("0.00")
+        )
+        refundable_collected_amount = max(
+            collected_amount - already_refunded_amount,
+            Decimal("0.00"),
+        )
+        refund_amount = min(
+            return_total - receivable_credit_amount,
+            refundable_collected_amount,
+        )
+        locked_refund_payment_method = None
+        if refund_amount > 0:
+            if refund_payment_method is None:
+                raise ValidationError("An active refund payment method is required.")
+            locked_refund_payment_method = (
+                BusinessPaymentMethod.objects.select_for_update()
+                .filter(
+                    pk=refund_payment_method.pk,
+                    business=locked_sale.business,
+                    is_active=True,
+                )
+                .first()
+            )
+            if locked_refund_payment_method is None:
+                raise ValidationError("Invalid refund payment method.")
         sale_return = SaleReturn.objects.create(
             business=locked_sale.business,
             sale=locked_sale,
@@ -95,6 +163,8 @@ def create_sale_return(*, sale, actor, reason, returned_at, lines, idempotency_k
             idempotency_key=idempotency_key,
             idempotency_fingerprint=fingerprint,
             receivable_credit_amount=receivable_credit_amount,
+            refund_amount=refund_amount,
+            refund_payment_method=locked_refund_payment_method,
         )
         for line_id, quantity in normalized:
             line = locked_lines[line_id]
@@ -121,6 +191,19 @@ def create_sale_return(*, sale, actor, reason, returned_at, lines, idempotency_k
                 receivable.status = Receivable.Status.OPEN
                 receivable.settled_at = None
             receivable.save(update_fields=("status", "settled_at", "updated_at"))
+        if refund_amount > 0:
+            create_financial_movement(
+                business=locked_sale.business,
+                direction=FinancialMovement.Direction.OUTFLOW,
+                amount=refund_amount,
+                payment_method=locked_refund_payment_method.category,
+                business_payment_method=locked_refund_payment_method,
+                event_type=FinancialMovement.EventType.SALE_RETURN_REFUND,
+                created_by=actor,
+                sale_return=sale_return,
+                occurred_at=returned_at,
+                idempotency_key=f"sale-return-refund:{sale_return.public_id}",
+            )
         return sale_return
 
 

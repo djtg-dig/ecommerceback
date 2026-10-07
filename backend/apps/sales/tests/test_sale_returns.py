@@ -4,14 +4,18 @@ from decimal import Decimal
 import pytest
 from unittest.mock import patch
 from django.core.exceptions import ValidationError
+from django.db.models import Sum
 from django.utils import timezone
 
 from apps.accounts.models import CarriIdentity
-from apps.businesses.models import Business, BusinessMember
+from apps.businesses.models import Business, BusinessMember, BusinessPaymentMethod
 from apps.catalog.models import Product, ProductCategory, ProductVariant
+from apps.finance.models import FinancialMovement
+from apps.finance.services import create_financial_movement
 from apps.inventory.models import InventoryItem, StockMovement
 from apps.inventory.services import apply_stock_movement
 from apps.receivables.models import Receivable, ReceivableAdjustment, ReceivablePayment
+from apps.receivables.services import add_payment
 from apps.sales.models import Customer, Sale, SaleLine, SaleReturn, SaleReturnLine
 from apps.sales.services import SaleReturnIdempotencyConflict, create_sale_return, sale_return_fingerprint
 
@@ -34,15 +38,36 @@ def context():
     return business, actor, product, variant, sale, first, second
 
 
-def make_return(sale, actor, lines, key="key", reason="r", returned_at=None):
-    return create_sale_return(sale=sale, actor=actor, reason=reason, returned_at=returned_at or timezone.now(), lines=lines, idempotency_key=key)
+def make_return(
+    sale,
+    actor,
+    lines,
+    key="key",
+    reason="r",
+    returned_at=None,
+    refund_payment_method=None,
+):
+    return create_sale_return(
+        sale=sale,
+        actor=actor,
+        reason=reason,
+        returned_at=returned_at or timezone.now(),
+        lines=lines,
+        idempotency_key=key,
+        refund_payment_method=refund_payment_method,
+    )
 
 
-def receivable_context(paid_amount=Decimal("0.00")):
+def hundred_sale_context():
     business, actor, product, _, sale, line, second = context()
     second.delete()
     line.quantity = Decimal("10.000")
     line.save(update_fields=("quantity", "line_total", "updated_at"))
+    return business, actor, product, sale, line
+
+
+def receivable_context(paid_amount=Decimal("0.00")):
+    business, actor, product, sale, line = hundred_sale_context()
     customer = Customer.objects.create(
         business=business,
         name="Return customer",
@@ -63,14 +88,34 @@ def receivable_context(paid_amount=Decimal("0.00")):
     )
     payment = None
     if paid_amount:
-        payment = ReceivablePayment.objects.create(
-            business=business,
-            receivable=receivable,
-            amount=paid_amount,
-            payment_method="CASH",
-            received_by=actor,
+        payment = add_payment(
+            receivable,
+            actor,
+            paid_amount,
+            "CASH",
         )
     return actor, product, sale, line, receivable, payment
+
+
+def cash_method(business):
+    return BusinessPaymentMethod.objects.get(
+        business=business,
+        category="CASH",
+        is_active=True,
+    )
+
+
+def record_direct_collection(sale, actor, amount=Decimal("100.00")):
+    movement = create_financial_movement(
+        business=sale.business,
+        direction=FinancialMovement.Direction.INFLOW,
+        amount=amount,
+        payment_method="CASH",
+        event_type=FinancialMovement.EventType.SALE_PAYMENT,
+        created_by=actor,
+        sale=sale,
+    )
+    return movement.payment_transaction.business_payment_method
 
 
 def test_return_quantities_snapshots_totals_and_catalog_changes():
@@ -180,6 +225,10 @@ def test_unpaid_sale_return_credits_receivable():
     assert receivable.balance == Decimal("70.00")
     assert receivable.status == Receivable.Status.OPEN
     assert receivable.original_amount == Decimal("100.00")
+    assert not FinancialMovement.objects.filter(
+        event_type=FinancialMovement.EventType.SALE_RETURN_REFUND,
+        sale_return=sale_return,
+    ).exists()
 
 
 def test_partially_paid_sale_return_credits_remaining_receivable():
@@ -201,45 +250,77 @@ def test_partially_paid_sale_return_credits_remaining_receivable():
     assert receivable.original_amount == Decimal("100.00")
     assert ReceivablePayment.objects.filter(receivable=receivable).count() == 1
     assert (payment.pk, payment.amount, payment.payment_method, payment.paid_at) == payment_values
+    assert sale_return.refund_amount == Decimal("0.00")
+    assert not FinancialMovement.objects.filter(
+        event_type=FinancialMovement.EventType.SALE_RETURN_REFUND,
+        sale_return=sale_return,
+    ).exists()
 
 
 def test_receivable_credit_is_capped_at_outstanding_balance():
     actor, _, sale, line, receivable, payment = receivable_context(Decimal("40.00"))
+    refund_method = cash_method(sale.business)
 
     sale_return = make_return(
         sale,
         actor,
         [{"sale_line_public_id": line.public_id, "quantity": "7"}],
         key="capped-credit",
+        refund_payment_method=refund_method,
     )
 
     receivable.refresh_from_db()
     assert sale_return.receivable_credit_amount == Decimal("60.00")
-    assert sale_return.refund_amount == Decimal("0.00")
+    assert sale_return.refund_amount == Decimal("10.00")
     assert receivable.balance == Decimal("0.00")
     assert receivable.status == Receivable.Status.PAID
     assert receivable.settled_at is not None
     assert receivable.original_amount == Decimal("100.00")
     assert ReceivablePayment.objects.get(pk=payment.pk).amount == Decimal("40.00")
+    refund = FinancialMovement.objects.get(sale_return=sale_return)
+    assert refund.direction == FinancialMovement.Direction.OUTFLOW
+    assert refund.amount == Decimal("10.00")
 
 
 def test_fully_paid_sale_without_receivable_creates_no_adjustment():
-    _, actor, _, _, sale, line, _ = context()
+    _, actor, _, sale, line = hundred_sale_context()
+    refund_method = record_direct_collection(sale, actor)
+    stamp = timezone.now()
 
     sale_return = make_return(
         sale,
         actor,
         [{"sale_line_public_id": line.public_id, "quantity": "3"}],
         key="fully-paid",
+        returned_at=stamp,
+        refund_payment_method=refund_method,
+    )
+    retry = make_return(
+        sale,
+        actor,
+        [{"sale_line_public_id": line.public_id, "quantity": "3.000"}],
+        key="fully-paid",
+        returned_at=stamp,
+        refund_payment_method=refund_method,
     )
 
+    assert retry.pk == sale_return.pk
     assert sale_return.receivable_credit_amount == Decimal("0.00")
-    assert sale_return.refund_amount == Decimal("0.00")
+    assert sale_return.refund_amount == Decimal("30.00")
     assert not ReceivableAdjustment.objects.filter(sale_return=sale_return).exists()
+    refund = FinancialMovement.objects.get(sale_return=sale_return)
+    assert refund.direction == FinancialMovement.Direction.OUTFLOW
+    assert refund.amount == Decimal("30.00")
+    assert refund.payment_transaction.business_payment_method == refund_method
+    assert FinancialMovement.objects.filter(
+        event_type=FinancialMovement.EventType.SALE_RETURN_REFUND,
+        sale_return=sale_return,
+    ).count() == 1
 
 
 def test_receivable_credit_is_idempotent_and_uses_remaining_balance():
     actor, _, sale, line, receivable, _ = receivable_context(Decimal("40.00"))
+    refund_method = cash_method(sale.business)
     stamp = timezone.now()
     first = make_return(
         sale,
@@ -260,12 +341,14 @@ def test_receivable_credit_is_idempotent_and_uses_remaining_balance():
         actor,
         [{"sale_line_public_id": line.public_id, "quantity": "5"}],
         key="credit-two",
+        refund_payment_method=refund_method,
     )
 
     receivable.refresh_from_db()
     assert retry.pk == first.pk
     assert first.receivable_credit_amount == Decimal("30.00")
     assert second.receivable_credit_amount == Decimal("30.00")
+    assert second.refund_amount == Decimal("20.00")
     assert ReceivableAdjustment.objects.filter(receivable=receivable).count() == 2
     assert receivable.balance == Decimal("0.00")
 
@@ -296,3 +379,105 @@ def test_receivable_failure_rolls_back_return_and_inventory():
         inventory_item__product=product,
     ).exists()
     assert receivable.balance == Decimal("100.00")
+
+
+def test_refund_requires_active_payment_method_from_same_business():
+    business, actor, product, sale, line = hundred_sale_context()
+    record_direct_collection(sale, actor)
+    inactive = BusinessPaymentMethod.objects.create(
+        business=business,
+        name="Inactive refund",
+        category="CASH",
+        is_active=False,
+    )
+    other_business = Business.objects.create(name="Other refund business")
+    foreign = BusinessPaymentMethod.objects.create(
+        business=other_business,
+        name="Foreign refund",
+        category="CASH",
+    )
+    stock_before = InventoryItem.objects.get(product=product).quantity
+
+    for key, method in (
+        ("missing-refund-method", None),
+        ("inactive-refund-method", inactive),
+        ("foreign-refund-method", foreign),
+    ):
+        with pytest.raises(ValidationError):
+            make_return(
+                sale,
+                actor,
+                [{"sale_line_public_id": line.public_id, "quantity": "3"}],
+                key=key,
+                refund_payment_method=method,
+            )
+
+    assert not SaleReturn.objects.filter(sale=sale).exists()
+    assert InventoryItem.objects.get(product=product).quantity == stock_before
+    assert not FinancialMovement.objects.filter(
+        event_type=FinancialMovement.EventType.SALE_RETURN_REFUND,
+        sale_return__sale=sale,
+    ).exists()
+
+
+def test_successive_refunds_never_exceed_collected_amount():
+    _, actor, _, sale, line = hundred_sale_context()
+    refund_method = record_direct_collection(sale, actor)
+
+    first = make_return(
+        sale,
+        actor,
+        [{"sale_line_public_id": line.public_id, "quantity": "7"}],
+        key="refund-one",
+        refund_payment_method=refund_method,
+    )
+    second = make_return(
+        sale,
+        actor,
+        [{"sale_line_public_id": line.public_id, "quantity": "3"}],
+        key="refund-two",
+        refund_payment_method=refund_method,
+    )
+
+    refunds = FinancialMovement.objects.filter(
+        event_type=FinancialMovement.EventType.SALE_RETURN_REFUND,
+        sale_return__sale=sale,
+    )
+    assert first.refund_amount == Decimal("70.00")
+    assert second.refund_amount == Decimal("30.00")
+    assert refunds.count() == 2
+    assert refunds.aggregate(total=Sum("amount"))["total"] == Decimal("100.00")
+
+
+def test_finance_failure_rolls_back_return_inventory_and_receivable_credit():
+    actor, product, sale, line, receivable, _ = receivable_context(Decimal("40.00"))
+    refund_method = cash_method(sale.business)
+    stock_before = InventoryItem.objects.get(product=product).quantity
+
+    with patch(
+        "apps.sales.services.create_financial_movement",
+        side_effect=RuntimeError("finance unavailable"),
+    ):
+        with pytest.raises(RuntimeError, match="finance unavailable"):
+            make_return(
+                sale,
+                actor,
+                [{"sale_line_public_id": line.public_id, "quantity": "7"}],
+                key="finance-rollback",
+                refund_payment_method=refund_method,
+            )
+
+    receivable.refresh_from_db()
+    assert not SaleReturn.objects.filter(idempotency_key="finance-rollback").exists()
+    assert not SaleReturnLine.objects.filter(sale_line=line).exists()
+    assert not ReceivableAdjustment.objects.filter(receivable=receivable).exists()
+    assert InventoryItem.objects.get(product=product).quantity == stock_before
+    assert not StockMovement.objects.filter(
+        movement_type=StockMovement.Type.RETURN,
+        inventory_item__product=product,
+    ).exists()
+    assert not FinancialMovement.objects.filter(
+        event_type=FinancialMovement.EventType.SALE_RETURN_REFUND,
+        sale_return__sale=sale,
+    ).exists()
+    assert receivable.balance == Decimal("60.00")

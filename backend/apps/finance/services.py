@@ -16,6 +16,7 @@ from .models import FinancialMovement, PaymentTransaction
 
 EVENT_SOURCE = {
     FinancialMovement.EventType.SALE_PAYMENT: "sale",
+    FinancialMovement.EventType.SALE_RETURN_REFUND: "sale_return",
     FinancialMovement.EventType.RECEIVABLE_PAYMENT: "receivable_payment",
     FinancialMovement.EventType.EXPENSE_PAYMENT: "expense_payment",
     FinancialMovement.EventType.SUPPLIER_PAYMENT: "supplier_payment",
@@ -24,7 +25,7 @@ EVENT_SOURCE = {
 
 def create_financial_movement(
     *, business, direction, amount, payment_method, event_type, created_by,
-    sale=None, receivable_payment=None, expense=None, expense_payment=None, supplier_payment=None, occurred_at=None, reason="",
+    sale=None, sale_return=None, receivable_payment=None, expense=None, expense_payment=None, supplier_payment=None, occurred_at=None, reason="",
     idempotency_key="", business_payment_method=None, transaction_reference="", recording_mode=PaymentTransaction.RecordingMode.MANUAL, recorded_by=None,
 ):
     """Append one source-backed ledger event, returning a prior idempotent event."""
@@ -57,7 +58,7 @@ def create_financial_movement(
         raise ValidationError({"amount": "Amount must be positive."})
 
     source_field = EVENT_SOURCE.get(event_type)
-    source_values = {"sale": sale, "receivable_payment": receivable_payment, "expense": expense, "expense_payment": expense_payment, "supplier_payment": supplier_payment}
+    source_values = {"sale": sale, "sale_return": sale_return, "receivable_payment": receivable_payment, "expense": expense, "expense_payment": expense_payment, "supplier_payment": supplier_payment}
     if source_field is None or [field for field, value in source_values.items() if value is not None] != [source_field]:
         raise ValidationError("The event type must match exactly one source.")
     source = source_values[source_field]
@@ -86,7 +87,7 @@ def create_financial_movement(
             business=business, direction=direction, amount=amount,
             currency=business.primary_currency, payment_method=payment_method,
             event_type=event_type, occurred_at=occurred_at,
-            created_by=created_by, payment_transaction=payment_transaction, sale=sale, receivable_payment=receivable_payment,
+            created_by=created_by, payment_transaction=payment_transaction, sale=sale, sale_return=sale_return, receivable_payment=receivable_payment,
             expense=expense, expense_payment=expense_payment, supplier_payment=supplier_payment, reason=reason, idempotency_key=idempotency_key,
         )
 
