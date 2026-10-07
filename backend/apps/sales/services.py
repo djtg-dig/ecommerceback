@@ -45,6 +45,18 @@ def complete(sale, actor, amount_paid, payment_method=None):
         lines = list(
             locked_sale.lines.select_related("product", "variant__product").order_by("public_id")
         )
+        snapshots = {}
+
+        for line in lines:
+            unit_cost_snapshot = (
+                line.variant.effective_cost_price if line.variant else line.product.cost_price
+            )
+            if unit_cost_snapshot is None:
+                raise ValidationError(
+                    "A historical unit cost is required before completing a sale."
+                )
+            snapshots[line.pk] = unit_cost_snapshot
+
         for line in lines:
             target(locked_sale, line.product, line.variant)
             inventory_item = (
@@ -54,9 +66,7 @@ def complete(sale, actor, amount_paid, payment_method=None):
             )
             if not inventory_item:
                 raise ValidationError("Inventory item missing.")
-            line.unit_cost_snapshot = (
-                line.variant.effective_cost_price if line.variant else line.product.cost_price
-            )
+            line.unit_cost_snapshot = snapshots[line.pk]
             line.save(update_fields=("unit_cost_snapshot", "updated_at"))
             apply_stock_movement(
                 inventory_item=inventory_item,

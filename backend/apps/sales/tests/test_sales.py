@@ -7,7 +7,7 @@ from apps.inventory.models import InventoryItem,StockMovement
 from apps.sales.models import Customer, Sale
 pytestmark=pytest.mark.django_db
 def test_internal_sale():
- c=ProductCategory.objects.create(code='SALECAT',name='Sale',slug='salecat');b=Business.objects.create(name='B');u=CarriIdentity.objects.create(carri_subject='seller');BusinessMember.objects.create(business=b,identity=u,role='EMPLOYEE');p=Product.objects.create(business=b,category=c,name='P',selling_price='5',currency='CDF',attributes={});i=InventoryItem.objects.create(business=b,product=p);from apps.inventory.services import apply_stock_movement;apply_stock_movement(inventory_item=i,movement_type='IN',performed_by=u,quantity=10)
+ c=ProductCategory.objects.create(code='SALECAT',name='Sale',slug='salecat');b=Business.objects.create(name='B');u=CarriIdentity.objects.create(carri_subject='seller');BusinessMember.objects.create(business=b,identity=u,role='EMPLOYEE');p=Product.objects.create(business=b,category=c,name='P',selling_price='5',cost_price='3',currency='CDF',attributes={});i=InventoryItem.objects.create(business=b,product=p);from apps.inventory.services import apply_stock_movement;apply_stock_movement(inventory_item=i,movement_type='IN',performed_by=u,quantity=10)
  a=APIClient();a.force_authenticate(user=u);base=f'/api/v1/businesses/{b.public_id}/';s=a.post(base+'sales/',{},format='json');assert s.status_code==201 and s.data['public_id'].startswith('SA');sa=s.data['public_id'];l=a.post(base+f'sales/{sa}/lines/',{'product':p.public_id,'quantity':'2.000'},format='json');assert l.status_code==201 and l.data['unit_price']=='5.00';r=a.post(base+f'sales/{sa}/complete/',{'amount_paid':'10.00','payment_method':'CASH'},format='json');assert r.status_code==200 and r.data['status']=='COMPLETED';assert InventoryItem.objects.get(pk=i.pk).quantity==8;assert StockMovement.objects.filter(movement_type='SALE').exists(); movement = FinancialMovement.objects.get(sale__public_id=sa); assert movement.payment_transaction_id and movement.payment_transaction.recording_mode == 'MANUAL'
 
 
@@ -37,7 +37,7 @@ def build_sale_context(customer=True):
     employee, _ = CarriIdentity.objects.get_or_create(carri_subject="sales-lot3-employee")
     BusinessMember.objects.create(business=business, identity=employee, role="EMPLOYEE")
     product = Product.objects.create(
-        business=business, category=category, name="Item", selling_price="100.00", currency="CDF", attributes={}
+        business=business, category=category, name="Item", selling_price="100.00", cost_price="60.00", currency="CDF", attributes={}
     )
     inventory = InventoryItem.objects.create(business=business, product=product)
     from apps.inventory.services import apply_stock_movement
