@@ -27,3 +27,26 @@ class SaleLine(models.Model):
   from apps.businesses.identifiers import generate_sale_line_public_id
   if not self.public_id:self.public_id=generate_sale_line_public_id()
   self.line_total=self.quantity*self.unit_price;return super().save(*a,**kw)
+
+
+class SaleReturn(models.Model):
+ class Status(models.TextChoices): POSTED='POSTED','Posted'
+ id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False);public_id=models.CharField(max_length=12,unique=True,editable=False,db_index=True);sale=models.ForeignKey(Sale,on_delete=models.PROTECT,related_name='returns');business=models.ForeignKey('businesses.Business',on_delete=models.PROTECT);customer=models.ForeignKey(Customer,null=True,blank=True,on_delete=models.PROTECT);status=models.CharField(max_length=12,choices=Status.choices,default=Status.POSTED);reason=models.TextField(blank=True);returned_at=models.DateTimeField();created_by=models.ForeignKey('accounts.CarriIdentity',on_delete=models.PROTECT);idempotency_key=models.CharField(max_length=255);idempotency_fingerprint=models.CharField(max_length=64);receivable_credit_amount=models.DecimalField(max_digits=16,decimal_places=2,default=0);refund_amount=models.DecimalField(max_digits=16,decimal_places=2,default=0);refund_payment_method=models.ForeignKey('businesses.BusinessPaymentMethod',null=True,blank=True,on_delete=models.PROTECT);created_at=models.DateTimeField(auto_now_add=True);updated_at=models.DateTimeField(auto_now=True)
+ class Meta:
+  ordering=('-returned_at','-created_at');constraints=[models.CheckConstraint(condition=Q(receivable_credit_amount__gte=0)&Q(refund_amount__gte=0),name='sale_return_amounts_nonnegative'),models.UniqueConstraint(fields=('business','idempotency_key'),name='sale_return_business_idempotency_key')]
+ def save(self,*a,**kw):
+  from apps.businesses.identifiers import generate_sale_return_public_id
+  if not self._state.adding:raise ValidationError('Sale returns are immutable.')
+  if not self.public_id:self.public_id=generate_sale_return_public_id()
+  self.full_clean();return super().save(*a,**kw)
+ def delete(self,*a,**kw):raise ValidationError('Sale returns cannot be deleted.')
+
+class SaleReturnLine(models.Model):
+ id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False);public_id=models.CharField(max_length=12,unique=True,editable=False,db_index=True);sale_return=models.ForeignKey(SaleReturn,on_delete=models.PROTECT,related_name='lines');sale_line=models.ForeignKey(SaleLine,on_delete=models.PROTECT,related_name='return_lines');quantity=models.DecimalField(max_digits=14,decimal_places=3);unit_price_snapshot=models.DecimalField(max_digits=14,decimal_places=2);unit_cost_snapshot=models.DecimalField(max_digits=14,decimal_places=2,null=True,blank=True);line_total=models.DecimalField(max_digits=16,decimal_places=2);created_at=models.DateTimeField(auto_now_add=True)
+ class Meta:constraints=[models.CheckConstraint(condition=Q(quantity__gt=0),name='sale_return_line_quantity_positive'),models.UniqueConstraint(fields=('sale_return','sale_line'),name='sale_return_one_line_per_sale_line')]
+ def save(self,*a,**kw):
+  from apps.businesses.identifiers import generate_sale_return_line_public_id
+  if not self._state.adding:raise ValidationError('Sale return lines are immutable.')
+  if not self.public_id:self.public_id=generate_sale_return_line_public_id()
+  self.full_clean();return super().save(*a,**kw)
+ def delete(self,*a,**kw):raise ValidationError('Sale return lines cannot be deleted.')

@@ -10,7 +10,7 @@ from .models import InventoryItem, StockMovement
 MANUAL_MOVEMENT_TYPES = {StockMovement.Type.IN, StockMovement.Type.OUT, StockMovement.Type.ADJUSTMENT}
 
 
-def validate_inventory_target(*, business, product=None, variant=None) -> None:
+def validate_inventory_target(*, business, product=None, variant=None, allow_archived_target=False) -> None:
     """Ensure exactly one active sellable target belongs to ``business``.
 
     A simple product cannot own stock while it has active variants. This avoids
@@ -23,14 +23,14 @@ def validate_inventory_target(*, business, product=None, variant=None) -> None:
     if product:
         if product.business_id != business.id:
             raise ValidationError({"product": "Le produit n'appartient pas à ce commerce."})
-        if product.status == "ARCHIVED":
+        if product.status == "ARCHIVED" and not allow_archived_target:
             raise ValidationError({"product": "Un produit archivé ne peut pas recevoir de stock."})
         if product.variants.filter(status="ACTIVE").exists():
             raise ValidationError({"product": "Un produit avec variantes actives doit être stocké par variante."})
     if variant:
         if variant.product.business_id != business.id:
             raise ValidationError({"variant": "La variante n'appartient pas à ce commerce."})
-        if variant.status == "ARCHIVED" or variant.product.status == "ARCHIVED":
+        if (variant.status == "ARCHIVED" or variant.product.status == "ARCHIVED") and not allow_archived_target:
             raise ValidationError({"variant": "Une variante archivée ne peut pas recevoir de stock."})
 
 
@@ -58,7 +58,7 @@ def create_inventory_item(*, business, product=None, variant=None, low_stock_thr
     raise RuntimeError("Impossible de générer un identifiant inventaire unique.")
 
 
-def apply_stock_movement(*, inventory_item, movement_type, performed_by, quantity=None, target_quantity=None, reason="", reference_type=None, reference_id=None):
+def apply_stock_movement(*, inventory_item, movement_type, performed_by, quantity=None, target_quantity=None, reason="", reference_type=None, reference_id=None, allow_archived_target=False):
     """Atomically update one balance and append its immutable movement event.
 
     The row lock is acquired before reading the balance. ``IN`` and ``OUT``
@@ -66,12 +66,12 @@ def apply_stock_movement(*, inventory_item, movement_type, performed_by, quantit
     Quantity update and event insertion share one transaction, so neither can
     persist without the other.
     """
-    if movement_type not in MANUAL_MOVEMENT_TYPES and not (movement_type == StockMovement.Type.SALE and reference_type == 'SALE'):
+    if movement_type not in MANUAL_MOVEMENT_TYPES and not (movement_type == StockMovement.Type.SALE and reference_type == 'SALE') and not (movement_type == StockMovement.Type.RETURN and reference_type == 'SALE_RETURN_LINE'):
         raise ValidationError({"type": "Seuls IN, OUT et ADJUSTMENT sont autorisés manuellement."})
     with transaction.atomic():
         item = InventoryItem.objects.select_for_update(of=("self",)).select_related("product", "variant__product").get(pk=inventory_item.pk)
         target = item.variant or item.product
-        validate_inventory_target(business=item.business, product=item.product, variant=item.variant)
+        validate_inventory_target(business=item.business, product=item.product, variant=item.variant, allow_archived_target=allow_archived_target)
         before = item.quantity
         available = item.available_quantity
         if movement_type == StockMovement.Type.ADJUSTMENT:
@@ -82,7 +82,7 @@ def apply_stock_movement(*, inventory_item, movement_type, performed_by, quantit
         else:
             if quantity is None or quantity <= 0:
                 raise ValidationError({"quantity": "La quantité doit être strictement positive."})
-            if movement_type == StockMovement.Type.IN:
+            if movement_type in {StockMovement.Type.IN, StockMovement.Type.RETURN}:
                 after, delta = before + quantity, quantity
             else:
                 if quantity > available:
@@ -91,7 +91,10 @@ def apply_stock_movement(*, inventory_item, movement_type, performed_by, quantit
         if after < item.reserved_quantity:
             raise ValidationError({"quantity": "L'opération descend sous la quantité réservée."})
         item.quantity = after
-        item.save(update_fields=("quantity", "updated_at"))
+        if allow_archived_target and movement_type == StockMovement.Type.RETURN:
+            InventoryItem.objects.filter(pk=item.pk).update(quantity=after)
+        else:
+            item.save(update_fields=("quantity", "updated_at"))
         return StockMovement.objects.create(
             business=item.business, inventory_item=item, movement_type=movement_type,
             quantity=delta, quantity_before=before, quantity_after=after,

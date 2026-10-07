@@ -52,6 +52,7 @@ class FinancialMovement(models.Model):
 
     class EventType(models.TextChoices):
         SALE_PAYMENT = "SALE_PAYMENT", "Sale payment"
+        SALE_RETURN_REFUND = "SALE_RETURN_REFUND", "Sale return refund"
         RECEIVABLE_PAYMENT = "RECEIVABLE_PAYMENT", "Receivable payment"
         EXPENSE_PAYMENT = "EXPENSE_PAYMENT", "Expense payment"
         EXPENSE_REVERSAL = "EXPENSE_REVERSAL", "Expense reversal"
@@ -73,6 +74,7 @@ class FinancialMovement(models.Model):
         PaymentTransaction, null=True, blank=True, on_delete=models.PROTECT, related_name="financial_movement"
     )
     sale = models.ForeignKey("sales.Sale", null=True, blank=True, on_delete=models.PROTECT)
+    sale_return = models.OneToOneField("sales.SaleReturn", null=True, blank=True, on_delete=models.PROTECT, related_name="refund_financial_movement")
     receivable_payment = models.OneToOneField(
         "receivables.ReceivablePayment", null=True, blank=True, on_delete=models.PROTECT
     )
@@ -94,14 +96,15 @@ class FinancialMovement(models.Model):
             models.CheckConstraint(condition=Q(amount__gt=0), name="financial_movement_amount_positive"),
             models.CheckConstraint(
                 condition=(
-                    Q(reversal_of__isnull=False, sale__isnull=True, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=True, supplier_payment__isnull=True)
+                    Q(reversal_of__isnull=False, sale__isnull=True, sale_return__isnull=True, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=True, supplier_payment__isnull=True)
                     | Q(reversal_of__isnull=True)
                     & (
-                        Q(sale__isnull=False, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=True, supplier_payment__isnull=True)
-                        | Q(sale__isnull=True, receivable_payment__isnull=False, expense__isnull=True, expense_payment__isnull=True, supplier_payment__isnull=True)
-                        | Q(sale__isnull=True, receivable_payment__isnull=True, expense__isnull=False, expense_payment__isnull=True, supplier_payment__isnull=True)
-                        | Q(sale__isnull=True, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=False, supplier_payment__isnull=True)
-                        | Q(sale__isnull=True, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=True, supplier_payment__isnull=False)
+                        Q(sale__isnull=False, sale_return__isnull=True, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=True, supplier_payment__isnull=True)
+                        | Q(sale__isnull=True, sale_return__isnull=False, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=True, supplier_payment__isnull=True)
+                        | Q(sale__isnull=True, sale_return__isnull=True, receivable_payment__isnull=False, expense__isnull=True, expense_payment__isnull=True, supplier_payment__isnull=True)
+                        | Q(sale__isnull=True, sale_return__isnull=True, receivable_payment__isnull=True, expense__isnull=False, expense_payment__isnull=True, supplier_payment__isnull=True)
+                        | Q(sale__isnull=True, sale_return__isnull=True, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=False, supplier_payment__isnull=True)
+                        | Q(sale__isnull=True, sale_return__isnull=True, receivable_payment__isnull=True, expense__isnull=True, expense_payment__isnull=True, supplier_payment__isnull=False)
                     )
                 ),
                 name="financial_movement_valid_source",
@@ -133,6 +136,7 @@ class FinancialMovement(models.Model):
 
         sources = {
             "sale": self.sale,
+            "sale_return": self.sale_return,
             "receivable_payment": self.receivable_payment,
             "expense": self.expense,
             "expense_payment": self.expense_payment,
@@ -165,6 +169,7 @@ class FinancialMovement(models.Model):
         else:
             expected_source = {
                 self.EventType.SALE_PAYMENT: "sale",
+                self.EventType.SALE_RETURN_REFUND: "sale_return",
                 self.EventType.RECEIVABLE_PAYMENT: "receivable_payment",
                 self.EventType.EXPENSE_PAYMENT: "expense_payment",
                 self.EventType.SUPPLIER_PAYMENT: "supplier_payment",

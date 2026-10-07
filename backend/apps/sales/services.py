@@ -1,3 +1,7 @@
+import hashlib
+import json
+from decimal import Decimal
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
@@ -8,7 +12,69 @@ from apps.finance.services import create_financial_movement
 from apps.inventory.models import InventoryItem, StockMovement
 from apps.inventory.services import apply_stock_movement, validate_inventory_target
 
-from .models import Sale
+from .models import Sale, SaleLine, SaleReturn, SaleReturnLine
+
+
+class SaleReturnIdempotencyConflict(ValidationError):
+    """Raised when a return key is reused with another business intent."""
+
+
+def sale_return_fingerprint(*, sale, reason, returned_at, lines):
+    """Hash normalized return intent independently from client line ordering."""
+    def canonical_quantity(value):
+        quantity = Decimal(str(value))
+        return format(quantity.normalize(), "f")
+
+    payload = {
+        "sale": sale.public_id,
+        "reason": reason or "",
+        "returned_at": returned_at.isoformat(),
+        "lines": sorted(
+            ({"sale_line": line_id, "quantity": canonical_quantity(quantity)} for line_id, quantity in lines),
+            key=lambda value: value["sale_line"],
+        ),
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def create_sale_return(*, sale, actor, reason, returned_at, lines, idempotency_key):
+    """Append immutable return lines from locked sale snapshots in one transaction."""
+    if not idempotency_key:
+        raise ValidationError("Idempotency-Key is required.")
+    if not lines:
+        raise ValidationError("At least one return line is required.")
+    normalized = [(str(line["sale_line_public_id"]), Decimal(str(line["quantity"]))) for line in lines]
+    if any(quantity <= 0 for _, quantity in normalized):
+        raise ValidationError("Return quantities must be positive.")
+    if len({line_id for line_id, _ in normalized}) != len(normalized):
+        raise ValidationError("A sale line may appear only once per return.")
+    with transaction.atomic():
+        locked_sale = Sale.objects.select_for_update().get(pk=sale.pk)
+        fingerprint = sale_return_fingerprint(sale=locked_sale, reason=reason, returned_at=returned_at, lines=normalized)
+        existing = SaleReturn.objects.select_for_update().filter(business=locked_sale.business, idempotency_key=idempotency_key).first()
+        if existing:
+            if existing.idempotency_fingerprint != fingerprint:
+                raise SaleReturnIdempotencyConflict("Idempotency key conflicts with a different return.")
+            return existing
+        if locked_sale.status != Sale.Status.COMPLETED:
+            raise ValidationError("Only completed sales can be returned.")
+        locked_lines = {line.public_id: line for line in SaleLine.objects.select_for_update().filter(sale=locked_sale, public_id__in=[line_id for line_id, _ in normalized])}
+        if len(locked_lines) != len(normalized):
+            raise ValidationError("Return line does not belong to this sale.")
+        returned = {}
+        for line in SaleReturnLine.objects.select_for_update().filter(sale_line__in=locked_lines.values(), sale_return__status=SaleReturn.Status.POSTED):
+            returned[line.sale_line_id] = returned.get(line.sale_line_id, Decimal("0.000")) + line.quantity
+        for line_id, quantity in normalized:
+            line = locked_lines[line_id]
+            if returned.get(line.pk, Decimal("0.000")) + quantity > line.quantity:
+                raise ValidationError("Return quantity exceeds sold quantity.")
+        sale_return = SaleReturn.objects.create(business=locked_sale.business, sale=locked_sale, customer=locked_sale.customer, reason=reason or "", returned_at=returned_at, created_by=actor, idempotency_key=idempotency_key, idempotency_fingerprint=fingerprint)
+        for line_id, quantity in normalized:
+            line = locked_lines[line_id]
+            return_line = SaleReturnLine.objects.create(sale_return=sale_return, sale_line=line, quantity=quantity, unit_price_snapshot=line.unit_price, unit_cost_snapshot=line.unit_cost_snapshot, line_total=quantity * line.unit_price)
+            inventory_item = InventoryItem.objects.select_for_update().get(product=line.product) if line.product_id else InventoryItem.objects.select_for_update().get(variant=line.variant)
+            apply_stock_movement(inventory_item=inventory_item, movement_type=StockMovement.Type.RETURN, performed_by=actor, quantity=quantity, reference_type="SALE_RETURN_LINE", reference_id=return_line.public_id, allow_archived_target=True)
+        return sale_return
 
 
 def target(sale, product=None, variant=None):

@@ -3,6 +3,7 @@ from decimal import Decimal
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
@@ -11,7 +12,7 @@ from apps.expenses.models import Expense, ExpenseCategory, ExpensePayment
 from apps.finance.models import FinancialMovement
 from apps.finance.services import create_financial_movement, reverse_movement
 from apps.receivables.models import Receivable, ReceivablePayment
-from apps.sales.models import Customer, Sale
+from apps.sales.models import Customer, Sale, SaleReturn
 
 pytestmark = pytest.mark.django_db
 
@@ -239,3 +240,43 @@ def test_detail_rejects_all_public_mutation_methods():
     assert client.patch(detail, {}, format="json").status_code == 405
     assert client.put(detail, {}, format="json").status_code == 405
     assert client.delete(detail).status_code == 405
+
+
+def test_sale_return_refund_source_integrity_and_uniqueness():
+    business, owner, _, _, _, expense, sale, _ = make_context()
+    sale.status = Sale.Status.COMPLETED
+    sale.save(update_fields=("status",))
+    sale_return = SaleReturn.objects.create(
+        business=business,
+        sale=sale,
+        customer=sale.customer,
+        returned_at=timezone.now(),
+        created_by=owner,
+        idempotency_key="finance-return",
+        idempotency_fingerprint="a" * 64,
+    )
+    values = {
+        "business": business,
+        "direction": FinancialMovement.Direction.OUTFLOW,
+        "amount": Decimal("1.00"),
+        "currency": business.primary_currency,
+        "payment_method": "CASH",
+        "event_type": FinancialMovement.EventType.SALE_RETURN_REFUND,
+        "occurred_at": timezone.now(),
+        "created_by": owner,
+    }
+    movement = FinancialMovement.objects.create(**values, sale_return=sale_return)
+    assert movement.sale_return_id == sale_return.id
+    assert movement.direction == FinancialMovement.Direction.OUTFLOW
+    with pytest.raises(ValidationError):
+        FinancialMovement.objects.create(**values)
+    with pytest.raises(ValidationError):
+        FinancialMovement.objects.create(**values, sale_return=sale_return, sale=sale)
+    with pytest.raises(ValidationError):
+        FinancialMovement.objects.create(
+            **{**values, "event_type": FinancialMovement.EventType.EXPENSE_PAYMENT},
+            sale_return=sale_return,
+        )
+    with pytest.raises(Exception):
+        FinancialMovement.objects.create(**values, sale_return=sale_return)
+    assert FinancialMovement.objects.filter(expense=expense).count() == 0
