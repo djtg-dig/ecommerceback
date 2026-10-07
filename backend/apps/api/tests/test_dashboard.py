@@ -2,6 +2,8 @@ from django.utils import timezone
 from datetime import timedelta
 from decimal import Decimal
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 from apps.accounts.models import CarriIdentity
 from apps.businesses.models import Business, BusinessMember
@@ -162,3 +164,118 @@ def test_dashboard_receivables_inventory_and_purchases_are_sql_aggregated():
     assert data['receivables']['outstanding_amount'] == Decimal('50000')
     assert data['inventory']['out_of_stock_count'] == 1
     assert data['purchases']['outstanding_amount'] == Decimal('50000')
+
+
+def test_dashboard_query_cost_is_stable_for_enriched_dataset(capsys):
+    """Measure the existing compact dashboard projection without pinning a magic count."""
+    from apps.catalog.models import Product, ProductCategory
+    from apps.finance.models import FinancialMovement
+    from apps.finance.services import create_financial_movement
+    from apps.inventory.models import InventoryItem
+    from apps.purchases.models import Purchase, PurchaseLine, SupplierPayment
+    from apps.receivables.models import Receivable, ReceivablePayment
+    from apps.sales.models import Customer, Sale, SaleLine
+
+    def client_for(business, subject):
+        owner = CarriIdentity.objects.create(carri_subject=subject)
+        BusinessMember.objects.create(business=business, identity=owner, role='OWNER')
+        client = APIClient()
+        client.force_authenticate(user=owner)
+        return owner, client
+
+    def measure(client, business):
+        url = f'/api/v1/businesses/{business.public_id}/dashboard/?period=last_30_days'
+        with CaptureQueriesContext(connection) as queries:
+            response = client.get(url)
+        assert response.status_code == 200
+        return len(queries), response, list(queries.captured_queries)
+
+    small_business = Business.objects.create(name='Dashboard measurement small')
+    _, small_client = client_for(small_business, 'dashboard-measurement-small')
+    small_query_count, _, _ = measure(small_client, small_business)
+
+    business = Business.objects.create(name='Dashboard measurement enriched')
+    owner, client = client_for(business, 'dashboard-measurement-enriched')
+    category = ProductCategory.objects.create(
+        code='DASHMEASURE', name='Dashboard measurement', slug='dashboard-measurement'
+    )
+    customer = Customer.objects.create(business=business, name='Measurement customer')
+    products = [
+        Product.objects.create(
+            business=business, category=category, name=f'Measurement product {index}',
+            selling_price=Decimal('1000'), currency='CDF', attributes={}
+        )
+        for index in range(12)
+    ]
+    for index, product in enumerate(products):
+        InventoryItem.objects.create(
+            business=business, product=product, quantity=Decimal('10'),
+            reserved_quantity=Decimal('10') if index % 3 == 0 else Decimal('2'),
+        )
+
+    now = timezone.now()
+    sales = []
+    for index in range(6):
+        sale = Sale.objects.create(
+            business=business, customer=customer, currency='CDF', created_by=owner,
+            status='COMPLETED', completed_at=now,
+        )
+        for product in products[index * 2:index * 2 + 2]:
+            SaleLine.objects.create(
+                sale=sale, product=product, quantity=Decimal('1'), unit_price=Decimal('1000')
+            )
+        sales.append(sale)
+        create_financial_movement(
+            business=business, direction=FinancialMovement.Direction.INFLOW,
+            amount=Decimal('2000'), payment_method='CASH',
+            event_type=FinancialMovement.EventType.SALE_PAYMENT, created_by=owner,
+            sale=sale, occurred_at=now,
+        )
+
+    for sale in sales[:4]:
+        receivable = Receivable.objects.create(
+            business=business, sale=sale, customer=customer, currency='CDF',
+            original_amount=Decimal('2000'), status='PARTIALLY_PAID',
+        )
+        for amount in (Decimal('400'), Decimal('600')):
+            payment = ReceivablePayment.objects.create(
+                business=business, receivable=receivable, amount=amount,
+                payment_method='CASH', received_by=owner,
+            )
+            create_financial_movement(
+                business=business, direction=FinancialMovement.Direction.INFLOW,
+                amount=amount, payment_method='CASH',
+                event_type=FinancialMovement.EventType.RECEIVABLE_PAYMENT,
+                created_by=owner, receivable_payment=payment, occurred_at=now,
+            )
+
+    for purchase_index in range(3):
+        purchase = Purchase.objects.create(
+            business=business, currency='CDF', created_by=owner, status='CONFIRMED'
+        )
+        for product in products[purchase_index * 4:purchase_index * 4 + 4]:
+            PurchaseLine.objects.create(
+                purchase=purchase, product=product, quantity=Decimal('1'), unit_cost=Decimal('500')
+            )
+        for amount in (Decimal('500'), Decimal('700')):
+            payment = SupplierPayment.objects.create(
+                purchase=purchase, amount=amount, payment_method='CASH', created_by=owner,
+            )
+            create_financial_movement(
+                business=business, direction=FinancialMovement.Direction.OUTFLOW,
+                amount=amount, payment_method='CASH',
+                event_type=FinancialMovement.EventType.SUPPLIER_PAYMENT,
+                created_by=owner, supplier_payment=payment, occurred_at=now,
+            )
+
+    large_query_count, response, queries = measure(client, business)
+    payload_bytes = len(response.content)
+    query_sql = '\n'.join(query['sql'] for query in queries)
+    capsys.readouterr()  # Keep setup output out of the measurement report.
+    print(
+        f'RESULT small_query_count={small_query_count} '
+        f'large_query_count={large_query_count} payload_bytes={payload_bytes} '
+        f'payload_kilobytes={payload_bytes / 1024:.6f}'
+    )
+    print('CAPTURED_SQL\n' + query_sql)
+    assert small_query_count == large_query_count
