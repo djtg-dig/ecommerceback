@@ -6,9 +6,11 @@ from django.urls import path
 from .views import HealthCheckView
 from apps.businesses.views import BusinessCategoriesView
 from apps.dashboard_views import DashboardView
+from apps.profitability_views import ProfitabilitySummaryView
 
 urlpatterns = [
     path("businesses/<str:business_public_id>/dashboard/", DashboardView.as_view()),
+    path("businesses/<str:business_public_id>/profitability-summary/", ProfitabilitySummaryView.as_view()),
     path("businesses/<str:business_public_id>/", include("apps.expenses.urls")),
     path("businesses/<str:business_public_id>/", include("apps.finance.urls")),
     path("businesses/<str:business_public_id>/", include("apps.receivables.urls")),
