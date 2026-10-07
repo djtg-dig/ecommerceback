@@ -68,12 +68,59 @@ def create_sale_return(*, sale, actor, reason, returned_at, lines, idempotency_k
             line = locked_lines[line_id]
             if returned.get(line.pk, Decimal("0.000")) + quantity > line.quantity:
                 raise ValidationError("Return quantity exceeds sold quantity.")
-        sale_return = SaleReturn.objects.create(business=locked_sale.business, sale=locked_sale, customer=locked_sale.customer, reason=reason or "", returned_at=returned_at, created_by=actor, idempotency_key=idempotency_key, idempotency_fingerprint=fingerprint)
+
+        from apps.receivables.models import Receivable, ReceivableAdjustment
+
+        return_total = sum(
+            (locked_lines[line_id].unit_price * quantity for line_id, quantity in normalized),
+            Decimal("0.00"),
+        )
+        receivable = (
+            Receivable.objects.select_for_update()
+            .filter(sale=locked_sale)
+            .first()
+        )
+        receivable_credit_amount = (
+            min(return_total, receivable.balance)
+            if receivable is not None
+            else Decimal("0.00")
+        )
+        sale_return = SaleReturn.objects.create(
+            business=locked_sale.business,
+            sale=locked_sale,
+            customer=locked_sale.customer,
+            reason=reason or "",
+            returned_at=returned_at,
+            created_by=actor,
+            idempotency_key=idempotency_key,
+            idempotency_fingerprint=fingerprint,
+            receivable_credit_amount=receivable_credit_amount,
+        )
         for line_id, quantity in normalized:
             line = locked_lines[line_id]
             return_line = SaleReturnLine.objects.create(sale_return=sale_return, sale_line=line, quantity=quantity, unit_price_snapshot=line.unit_price, unit_cost_snapshot=line.unit_cost_snapshot, line_total=quantity * line.unit_price)
             inventory_item = InventoryItem.objects.select_for_update().get(product=line.product) if line.product_id else InventoryItem.objects.select_for_update().get(variant=line.variant)
             apply_stock_movement(inventory_item=inventory_item, movement_type=StockMovement.Type.RETURN, performed_by=actor, quantity=quantity, reference_type="SALE_RETURN_LINE", reference_id=return_line.public_id, allow_archived_target=True)
+
+        if receivable_credit_amount > 0:
+            ReceivableAdjustment.objects.create(
+                business=locked_sale.business,
+                receivable=receivable,
+                sale_return=sale_return,
+                adjustment_type=ReceivableAdjustment.Type.RETURN_CREDIT,
+                amount=receivable_credit_amount,
+                created_by=actor,
+            )
+            if receivable.balance == 0:
+                receivable.status = Receivable.Status.PAID
+                receivable.settled_at = timezone.now()
+            elif receivable.paid_amount > 0:
+                receivable.status = Receivable.Status.PARTIALLY_PAID
+                receivable.settled_at = None
+            else:
+                receivable.status = Receivable.Status.OPEN
+                receivable.settled_at = None
+            receivable.save(update_fields=("status", "settled_at", "updated_at"))
         return sale_return
 
 

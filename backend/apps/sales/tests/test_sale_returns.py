@@ -11,7 +11,8 @@ from apps.businesses.models import Business, BusinessMember
 from apps.catalog.models import Product, ProductCategory, ProductVariant
 from apps.inventory.models import InventoryItem, StockMovement
 from apps.inventory.services import apply_stock_movement
-from apps.sales.models import Sale, SaleLine, SaleReturn, SaleReturnLine
+from apps.receivables.models import Receivable, ReceivableAdjustment, ReceivablePayment
+from apps.sales.models import Customer, Sale, SaleLine, SaleReturn, SaleReturnLine
 from apps.sales.services import SaleReturnIdempotencyConflict, create_sale_return, sale_return_fingerprint
 
 
@@ -35,6 +36,41 @@ def context():
 
 def make_return(sale, actor, lines, key="key", reason="r", returned_at=None):
     return create_sale_return(sale=sale, actor=actor, reason=reason, returned_at=returned_at or timezone.now(), lines=lines, idempotency_key=key)
+
+
+def receivable_context(paid_amount=Decimal("0.00")):
+    business, actor, product, _, sale, line, second = context()
+    second.delete()
+    line.quantity = Decimal("10.000")
+    line.save(update_fields=("quantity", "line_total", "updated_at"))
+    customer = Customer.objects.create(
+        business=business,
+        name="Return customer",
+    )
+    sale.customer = customer
+    sale.save(update_fields=("customer", "updated_at"))
+    receivable = Receivable.objects.create(
+        business=business,
+        sale=sale,
+        customer=customer,
+        currency=sale.currency,
+        original_amount=Decimal("100.00"),
+        status=(
+            Receivable.Status.PARTIALLY_PAID
+            if paid_amount
+            else Receivable.Status.OPEN
+        ),
+    )
+    payment = None
+    if paid_amount:
+        payment = ReceivablePayment.objects.create(
+            business=business,
+            receivable=receivable,
+            amount=paid_amount,
+            payment_method="CASH",
+            received_by=actor,
+        )
+    return actor, product, sale, line, receivable, payment
 
 
 def test_return_quantities_snapshots_totals_and_catalog_changes():
@@ -123,3 +159,140 @@ def test_inventory_failure_rolls_back_return_and_stock():
     assert not SaleReturnLine.objects.filter(sale_line=first).exists()
     assert InventoryItem.objects.get(product=product).quantity == before
     assert not StockMovement.objects.filter(movement_type="RETURN", inventory_item__product=product).exists()
+
+
+def test_unpaid_sale_return_credits_receivable():
+    actor, _, sale, line, receivable, _ = receivable_context()
+
+    sale_return = make_return(
+        sale,
+        actor,
+        [{"sale_line_public_id": line.public_id, "quantity": "3"}],
+        key="unpaid-credit",
+    )
+
+    adjustment = ReceivableAdjustment.objects.get(sale_return=sale_return)
+    receivable.refresh_from_db()
+    assert sale_return.receivable_credit_amount == Decimal("30.00")
+    assert sale_return.refund_amount == Decimal("0.00")
+    assert adjustment.adjustment_type == ReceivableAdjustment.Type.RETURN_CREDIT
+    assert adjustment.amount == Decimal("30.00")
+    assert receivable.balance == Decimal("70.00")
+    assert receivable.status == Receivable.Status.OPEN
+    assert receivable.original_amount == Decimal("100.00")
+
+
+def test_partially_paid_sale_return_credits_remaining_receivable():
+    actor, _, sale, line, receivable, payment = receivable_context(Decimal("40.00"))
+    payment_values = (payment.pk, payment.amount, payment.payment_method, payment.paid_at)
+
+    sale_return = make_return(
+        sale,
+        actor,
+        [{"sale_line_public_id": line.public_id, "quantity": "3"}],
+        key="partial-credit",
+    )
+
+    receivable.refresh_from_db()
+    payment.refresh_from_db()
+    assert sale_return.receivable_credit_amount == Decimal("30.00")
+    assert receivable.balance == Decimal("30.00")
+    assert receivable.status == Receivable.Status.PARTIALLY_PAID
+    assert receivable.original_amount == Decimal("100.00")
+    assert ReceivablePayment.objects.filter(receivable=receivable).count() == 1
+    assert (payment.pk, payment.amount, payment.payment_method, payment.paid_at) == payment_values
+
+
+def test_receivable_credit_is_capped_at_outstanding_balance():
+    actor, _, sale, line, receivable, payment = receivable_context(Decimal("40.00"))
+
+    sale_return = make_return(
+        sale,
+        actor,
+        [{"sale_line_public_id": line.public_id, "quantity": "7"}],
+        key="capped-credit",
+    )
+
+    receivable.refresh_from_db()
+    assert sale_return.receivable_credit_amount == Decimal("60.00")
+    assert sale_return.refund_amount == Decimal("0.00")
+    assert receivable.balance == Decimal("0.00")
+    assert receivable.status == Receivable.Status.PAID
+    assert receivable.settled_at is not None
+    assert receivable.original_amount == Decimal("100.00")
+    assert ReceivablePayment.objects.get(pk=payment.pk).amount == Decimal("40.00")
+
+
+def test_fully_paid_sale_without_receivable_creates_no_adjustment():
+    _, actor, _, _, sale, line, _ = context()
+
+    sale_return = make_return(
+        sale,
+        actor,
+        [{"sale_line_public_id": line.public_id, "quantity": "3"}],
+        key="fully-paid",
+    )
+
+    assert sale_return.receivable_credit_amount == Decimal("0.00")
+    assert sale_return.refund_amount == Decimal("0.00")
+    assert not ReceivableAdjustment.objects.filter(sale_return=sale_return).exists()
+
+
+def test_receivable_credit_is_idempotent_and_uses_remaining_balance():
+    actor, _, sale, line, receivable, _ = receivable_context(Decimal("40.00"))
+    stamp = timezone.now()
+    first = make_return(
+        sale,
+        actor,
+        [{"sale_line_public_id": line.public_id, "quantity": "3"}],
+        key="credit-one",
+        returned_at=stamp,
+    )
+    retry = make_return(
+        sale,
+        actor,
+        [{"sale_line_public_id": line.public_id, "quantity": "3.000"}],
+        key="credit-one",
+        returned_at=stamp,
+    )
+    second = make_return(
+        sale,
+        actor,
+        [{"sale_line_public_id": line.public_id, "quantity": "5"}],
+        key="credit-two",
+    )
+
+    receivable.refresh_from_db()
+    assert retry.pk == first.pk
+    assert first.receivable_credit_amount == Decimal("30.00")
+    assert second.receivable_credit_amount == Decimal("30.00")
+    assert ReceivableAdjustment.objects.filter(receivable=receivable).count() == 2
+    assert receivable.balance == Decimal("0.00")
+
+
+def test_receivable_failure_rolls_back_return_and_inventory():
+    actor, product, sale, line, receivable, _ = receivable_context()
+    stock_before = InventoryItem.objects.get(product=product).quantity
+
+    with patch(
+        "apps.receivables.models.ReceivableAdjustment.objects.create",
+        side_effect=RuntimeError("receivables unavailable"),
+    ):
+        with pytest.raises(RuntimeError, match="receivables unavailable"):
+            make_return(
+                sale,
+                actor,
+                [{"sale_line_public_id": line.public_id, "quantity": "3"}],
+                key="receivable-rollback",
+            )
+
+    receivable.refresh_from_db()
+    assert not SaleReturn.objects.filter(idempotency_key="receivable-rollback").exists()
+    assert not SaleReturnLine.objects.filter(sale_line=line).exists()
+    assert not ReceivableAdjustment.objects.filter(receivable=receivable).exists()
+    assert InventoryItem.objects.get(product=product).quantity == stock_before
+    assert not StockMovement.objects.filter(
+        movement_type=StockMovement.Type.RETURN,
+        inventory_item__product=product,
+    ).exists()
+    assert receivable.balance == Decimal("100.00")
