@@ -145,3 +145,18 @@ class ProductVariantWriteSerializer(serializers.ModelSerializer):
         except DjangoValidationError as exc:
             raise serializers.ValidationError(exc.message_dict if hasattr(exc, "message_dict") else {"detail": exc.messages}) from exc
         return attrs
+
+
+class PosSearchResultSerializer(serializers.Serializer):
+    """Compact sellable projection consumed by the mobile POS."""
+
+    type = serializers.ChoiceField(choices=("PRODUCT", "VARIANT"))
+    public_id = serializers.CharField()
+    product_public_id = serializers.CharField()
+    name = serializers.CharField()
+    variant_label = serializers.CharField(allow_null=True)
+    internal_reference = serializers.CharField(allow_null=True)
+    barcode = serializers.CharField(allow_null=True)
+    effective_price = serializers.DecimalField(max_digits=14, decimal_places=2)
+    currency = serializers.ChoiceField(choices=("CDF", "USD"))
+    available_quantity = serializers.DecimalField(max_digits=14, decimal_places=3)

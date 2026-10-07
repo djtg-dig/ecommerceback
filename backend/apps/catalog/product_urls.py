@@ -2,10 +2,18 @@
 
 from django.urls import path
 
-from .views import ProductArchiveView, ProductDetailView, ProductListCreateView, ProductVariantDetailView, ProductVariantListCreateView
+from .views import (
+    PosSearchView,
+    ProductArchiveView,
+    ProductDetailView,
+    ProductListCreateView,
+    ProductVariantDetailView,
+    ProductVariantListCreateView,
+)
 
 urlpatterns = [
     path("", ProductListCreateView.as_view(), name="product-list-create"),
+    path("pos/search/", PosSearchView.as_view(), name="pos-product-search"),
     path("<str:product_public_id>/", ProductDetailView.as_view(), name="product-detail"),
     path("<str:product_public_id>/archive/", ProductArchiveView.as_view(), name="product-archive"),
     path("<str:product_public_id>/variants/", ProductVariantListCreateView.as_view(), name="product-variant-list-create"),

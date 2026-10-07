@@ -1,8 +1,13 @@
 """Public taxonomy reads and authenticated multi-tenant product APIs."""
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from decimal import Decimal
+
 from django.db import IntegrityError
+from django.db.models import DecimalField, Exists, F, OuterRef, Subquery, Value
+from django.db.models.functions import Coalesce, Trim, Upper
 from rest_framework import generics, permissions, status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -17,8 +22,22 @@ from .serializers import (
     ProductVariantOutputSerializer,
     ProductVariantWriteSerializer,
     ProductWriteSerializer,
+    PosSearchResultSerializer,
 )
 from .services import create_product, create_variant, effective_attributes
+
+
+class PosPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 50
+
+
+def _variant_label(attributes):
+    """Render variant axes as a stable, small label without exposing raw JSON."""
+    if not attributes:
+        return None
+    return " · ".join(f"{key}: {value}" for key, value in sorted(attributes.items()))
 
 
 class ProductCategoryListView(generics.ListAPIView):
@@ -97,6 +116,129 @@ class ProductListCreateView(BusinessProductMixin, APIView):
         except IntegrityError:
             return Response({"detail": "Conflit de référence interne."}, status=400)
         return Response(ProductOutputSerializer(product).data, status=status.HTTP_201_CREATED)
+
+
+class PosSearchView(BusinessProductMixin, APIView):
+    """Search currently sellable catalog targets in one compact POS projection."""
+
+    serializer_class = PosSearchResultSerializer
+
+    def _products(self, business):
+        from apps.inventory.models import InventoryItem
+
+        active_variants = ProductVariant.objects.filter(
+            product_id=OuterRef("pk"),
+            status=ProductVariant.Status.ACTIVE,
+        )
+        available_stock = InventoryItem.objects.filter(product_id=OuterRef("pk")).annotate(
+            available=F("quantity") - F("reserved_quantity")
+        ).values("available")[:1]
+        return Product.objects.filter(business=business, status=Product.Status.ACTIVE).annotate(
+            has_active_variant=Exists(active_variants),
+            pos_available_quantity=Coalesce(
+                Subquery(available_stock, output_field=DecimalField(max_digits=14, decimal_places=3)),
+                Value(Decimal("0.000")),
+                output_field=DecimalField(max_digits=14, decimal_places=3),
+            ),
+        ).filter(has_active_variant=False)
+
+    def _variants(self, business):
+        from apps.inventory.models import InventoryItem
+
+        available_stock = InventoryItem.objects.filter(variant_id=OuterRef("pk")).annotate(
+            available=F("quantity") - F("reserved_quantity")
+        ).values("available")[:1]
+        return ProductVariant.objects.filter(
+            product__business=business,
+            product__status=Product.Status.ACTIVE,
+            status=ProductVariant.Status.ACTIVE,
+        ).select_related("product").annotate(
+            pos_available_quantity=Coalesce(
+                Subquery(available_stock, output_field=DecimalField(max_digits=14, decimal_places=3)),
+                Value(Decimal("0.000")),
+                output_field=DecimalField(max_digits=14, decimal_places=3),
+            )
+        )
+
+    @staticmethod
+    def _serialize(items):
+        rows = []
+        for item in items:
+            if isinstance(item, Product):
+                rows.append(
+                    {
+                        "type": "PRODUCT",
+                        "public_id": item.public_id,
+                        "product_public_id": item.public_id,
+                        "name": item.name,
+                        "variant_label": None,
+                        "internal_reference": item.internal_reference,
+                        "barcode": item.barcode,
+                        "effective_price": item.selling_price,
+                        "currency": item.currency,
+                        "available_quantity": item.pos_available_quantity,
+                    }
+                )
+            else:
+                rows.append(
+                    {
+                        "type": "VARIANT",
+                        "public_id": item.public_id,
+                        "product_public_id": item.product.public_id,
+                        "name": item.product.name,
+                        "variant_label": _variant_label(item.attributes),
+                        "internal_reference": item.internal_reference,
+                        "barcode": item.barcode,
+                        "effective_price": item.effective_selling_price,
+                        "currency": item.product.currency,
+                        "available_quantity": item.pos_available_quantity,
+                    }
+                )
+        return rows
+
+    def _result_data(self, items):
+        return self.serializer_class(self._serialize(items), many=True).data
+
+    @staticmethod
+    def _exact(products, variants, field, value):
+        if field == "public_id":
+            return list(products.filter(public_id=value)) + list(variants.filter(public_id=value))
+        expression = Trim(field) if field == "barcode" else Upper(Trim("internal_reference"))
+        normalized = value if field == "barcode" else value.upper()
+        return (
+            list(products.annotate(pos_exact=expression).filter(pos_exact=normalized))
+            + list(variants.annotate(pos_exact=expression).filter(pos_exact=normalized))
+        )
+
+    def get(self, request, business_public_id):
+        business = self.get_business(request, business_public_id)
+        if not business:
+            return self.not_found()
+        raw_query = request.query_params.get("q")
+        if raw_query is None or not raw_query.strip():
+            return Response({"q": ["This query parameter is required."]}, status=status.HTTP_400_BAD_REQUEST)
+        query = raw_query.strip()
+        products, variants = self._products(business), self._variants(business)
+        for field, code, detail in (
+            ("public_id", None, None),
+            ("barcode", "pos_barcode_conflict", "Multiple sellable items use this barcode."),
+            ("sku", "pos_sku_conflict", "Multiple sellable items use this SKU."),
+        ):
+            matches = self._exact(products, variants, field, query)
+            if len(matches) > 1:
+                return Response({"code": code, "detail": detail}, status=status.HTTP_409_CONFLICT)
+            if matches:
+                return Response(
+                    {"count": 1, "next": None, "previous": None, "results": self._result_data(matches)}
+                )
+        results = self._result_data(
+            list(products.filter(name__icontains=query))
+            + list(variants.filter(product__name__icontains=query))
+        )
+        results.sort(key=lambda row: (row["name"].casefold(), row["type"], row["public_id"]))
+        paginator = PosPagination()
+        page = paginator.paginate_queryset(results, request)
+        return paginator.get_paginated_response(page)
 
 
 class ProductDetailView(BusinessProductMixin, APIView):
@@ -209,6 +351,18 @@ ProductCategoryListView.get = extend_schema(tags=["Product Categories"], operati
 ProductCategoryAttributesView.get = extend_schema(tags=["Product Categories"], operation_id="product_category_effective_attributes", auth=[], parameters=[_category_code], responses={200: EffectiveAttributeSerializer(many=True), 404: None})(ProductCategoryAttributesView.get)
 ProductListCreateView.get = extend_schema(tags=["Products"], operation_id="product_list", parameters=[_business_public_id, OpenApiParameter("status", str, OpenApiParameter.QUERY), OpenApiParameter("category", str, OpenApiParameter.QUERY), OpenApiParameter("search", str, OpenApiParameter.QUERY)], responses={200: ProductOutputSerializer(many=True), 404: None})(ProductListCreateView.get)
 ProductListCreateView.post = extend_schema(tags=["Products"], operation_id="product_create", parameters=[_business_public_id], request=ProductWriteSerializer, responses={201: ProductOutputSerializer, 400: None, 403: None, 404: None})(ProductListCreateView.post)
+PosSearchView.get = extend_schema(
+    tags=["Products"],
+    operation_id="pos_product_search",
+    parameters=[
+        _business_public_id,
+        OpenApiParameter("q", str, OpenApiParameter.QUERY, required=True),
+        OpenApiParameter("page", int, OpenApiParameter.QUERY),
+        OpenApiParameter("page_size", int, OpenApiParameter.QUERY),
+    ],
+    responses={200: PosSearchResultSerializer(many=True), 400: None, 404: None, 409: None},
+    description="Compact POS search: public ID, trimmed barcode, normalized SKU, then name search.",
+)(PosSearchView.get)
 ProductDetailView.get = extend_schema(tags=["Products"], operation_id="product_retrieve", parameters=[_business_public_id, _product_public_id], responses={200: ProductOutputSerializer, 404: None})(ProductDetailView.get)
 ProductDetailView.patch = extend_schema(tags=["Products"], operation_id="product_update", parameters=[_business_public_id, _product_public_id], request=ProductWriteSerializer, responses={200: ProductOutputSerializer, 400: None, 403: None, 404: None})(ProductDetailView.patch)
 ProductArchiveView.post = extend_schema(tags=["Products"], operation_id="product_archive", parameters=[_business_public_id, _product_public_id], request=None, responses={200: ProductOutputSerializer, 403: None, 404: None})(ProductArchiveView.post)
