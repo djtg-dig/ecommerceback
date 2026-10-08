@@ -20,13 +20,13 @@ L’API manuelle n’accepte que :
 - `OUT` avec `quantity` strictement positive : retire du stock disponible; une sortie au-delà du disponible est refusée.
 - `ADJUSTMENT` avec `target_quantity` : fixe une quantité absolue non négative et conserve le delta signé dans le mouvement.
 
-`SALE`, `RETURN` et `TRANSFER` existent comme types réservés aux futurs services internes; le client ne peut pas les fabriquer. `reference_type` et `reference_id` sont également réservés aux futurs services Purchase/Sale/Return/Transfer et ne sont pas acceptés par l’API manuelle.
+`SALE` et `RETURN` sont des types réservés aux services internes actuels; `TRANSFER` reste réservé à une évolution future. Le client ne peut pas les fabriquer. `reference_type` et `reference_id` sont également réservés aux services système Purchase/Sale/Return et ne sont pas acceptés par l’API manuelle.
 
 ## Atomicité et concurrence
 
 Toutes les mutations passent par `apply_stock_movement`. Une transaction `atomic` verrouille d’abord la ligne InventoryItem avec `select_for_update(of=("self",))`, calcule les valeurs avant/après, met à jour le solde et crée le mouvement dans la même transaction. Deux sorties concurrentes ne peuvent donc pas dépenser le même stock. Si l’une des deux écritures échoue, la transaction entière est annulée.
 
-Les opérations manuelles ne reçoivent pas encore de clé d’idempotence. Les futurs mouvements automatiques issus de Sale, Purchase, Return ou paiement devront être idempotents avant leur introduction.
+Les opérations manuelles ne reçoivent pas de clé d’idempotence. Les mouvements automatiques de retour sont protégés par l’idempotence du `SaleReturn` qui les crée.
 
 ## Permissions
 
@@ -38,3 +38,9 @@ La réception Purchase crée des mouvements IN système référencés PURCHASE e
 
 ## Sales integration
 La finalisation Sale génère des mouvements SALE système via le service Inventory.
+
+## Sale Returns integration
+
+Chaque `SaleReturnLine` réintègre exactement la quantité retournée sur l’`InventoryItem` du Product ou du ProductVariant enregistré par la `SaleLine`. Une variante crédite uniquement son propre stock, jamais celui de son Product parent. Le mouvement immuable est de type `RETURN`, avec `reference_type="SALE_RETURN_LINE"` et `reference_id` égal au `public_id` de la ligne de retour.
+
+Un Product ou ProductVariant archivé après la vente reste retournable afin de corriger le stock historique exact; son statut ne change pas. Cet opt-in est réservé au workflow Sale Return : les mutations Inventory ordinaires sur une cible archivée restent refusées. Le mouvement et le solde sont écrits dans la transaction atomique du retour; une erreur Inventory, Receivables ou Finance les annule avec le retour entier.

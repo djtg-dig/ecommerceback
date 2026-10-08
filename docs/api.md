@@ -75,7 +75,36 @@ Les champs `quantity`, `reserved_quantity`, snapshots avant/après, auteur, réf
 `/api/v1/businesses/{SH}/suppliers/` et `/purchases/` exposent Supplier/Purchase/PurchaseLine. OWNER/MANAGER écrivent, EMPLOYEE lit. Actions : `POST purchases/{PU}/confirm/`, `/receive/`, `/cancel/`; réception crée les mouvements IN système.
 
 ## Sales
-Routes internes : `/customers/`, `/sales/`, `/sales/{SA}/lines/`, `/complete/`, `/cancel/`.
+Routes internes : `/customers/`, `/sales/`, `/sales/{SA}/lines/`, `/complete/`, `/cancel/` et `/sales/{SA}/returns/`.
+
+### Sale Returns
+
+`GET/POST /api/v1/businesses/{SH}/sales/{SA}/returns/` est réservé aux OWNER et MANAGER actifs. Un EMPLOYEE reçoit `403`; un utilisateur sans accès au Business ou une Sale hors de ce Business reçoit `404`.
+
+Le POST exécute en un seul appel le retour, la réintégration stock, le crédit de créance et l’éventuel remboursement. L’en-tête HTTP `Idempotency-Key` est obligatoire; son absence répond `400`. La même clé avec le même payload retourne le même `SaleReturn` sans dupliquer aucun effet. La même clé avec un payload différent répond `409`.
+
+```http
+Idempotency-Key: mobile-return-42
+```
+
+```json
+{
+  "reason": "Article non conforme",
+  "returned_at": "2026-10-08T09:30:00+01:00",
+  "refund_payment_method": "PMXXXXXXXXXX",
+  "lines": [
+    {"sale_line": "SLXXXXXXXXXX", "quantity": "2.000"}
+  ]
+}
+```
+
+`refund_payment_method` est facultatif et nullable lorsque le montant calculé du remboursement est zéro. Lorsqu’un remboursement est dû, il doit référencer une méthode active du même Business. Les erreurs de quantité, statut de vente, appartenance de ligne ou moyen de remboursement répondent `400`.
+
+La réponse compacte contient `public_id`, `status`, `reason`, `returned_at`, `return_total`, `receivable_credit_amount`, `refund_amount`, la référence publique `refund_payment_method` ou `null`, et les lignes avec leurs identifiants publics, quantité, snapshots prix/coût et `line_total`. Le GET retourne la même projection dans une pagination `count/next/previous/results`, avec 20 éléments par défaut et un `page_size` maximal de 50. Il ne liste que les retours de la Sale demandée et précharge leurs relations pour éviter les requêtes N+1.
+
+Les retours peuvent être partiels, totaux et successifs dans la limite cumulée de la quantité vendue. Une cible Product ou ProductVariant archivée après la vente reste retournable sans être réactivée. Il n’existe pas d’endpoint de modification, suppression ou reversal du retour dans le Lot 1.
+
+Les données de Dashboard, profitability-summary et reports ne déduisent pas encore les retours; leur mise à jour est prévue au Lot 2.
 
 ## Receivables
 GET `/receivables/`, detail, PATCH metadata et GET/POST `/payments/`.
