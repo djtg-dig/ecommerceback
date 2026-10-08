@@ -5,8 +5,8 @@ from rest_framework import serializers, status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from apps.businesses.models import Business
-from apps.businesses.permissions import can_manage_business, membership_for
+from apps.businesses.models import Business, BusinessMemberPermission
+from apps.businesses.permissions import require_permission
 from .models import Customer, Sale, SaleLine, SaleReturn
 from .serializers import *
 from .services import SaleReturnIdempotencyConflict, cancel, complete, create_sale_return
@@ -20,6 +20,20 @@ class M:
 
     def nf(self):
         return Response({"detail": "Not found."}, 404)
+
+    def authorized_business(self, request, public_id, permission, *, write=True):
+        """Resolve a tenant and enforce one server-defined Business permission."""
+        business = Business.objects.filter(public_id=public_id).first()
+        if business is None:
+            return None
+
+        require_permission(
+            request.user,
+            business,
+            permission,
+            write=write,
+        )
+        return business
 
 
 class Customers(M, APIView):
@@ -52,7 +66,11 @@ class Sales(M, APIView):
         )
 
     def post(self, r, business_public_id):
-        b = self.b(r, business_public_id)
+        b = self.authorized_business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.USE_POS,
+        )
         if not b:
             return self.nf()
         s = SaleWrite(data=r.data, context={"business": b})
@@ -71,7 +89,11 @@ class SD(Sales):
         return Response(SaleSerializer(o).data) if o else self.nf()
 
     def patch(self, r, business_public_id, sale_public_id):
-        b = self.b(r, business_public_id)
+        b = self.authorized_business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.USE_POS,
+        )
         o = self.o(b, sale_public_id) if b else None
         if not o:
             return self.nf()
@@ -92,7 +114,11 @@ class Lines(SD):
         )
 
     def post(self, r, business_public_id, sale_public_id):
-        b = self.b(r, business_public_id)
+        b = self.authorized_business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.USE_POS,
+        )
         s = self.o(b, sale_public_id) if b else None
         if not s:
             return self.nf()
@@ -108,7 +134,16 @@ class Action(SD):
     fn = None
 
     def post(self, r, business_public_id, sale_public_id):
-        b = self.b(r, business_public_id)
+        permission = (
+            BusinessMemberPermission.Permission.USE_POS
+            if self.fn == "complete"
+            else BusinessMemberPermission.Permission.MANAGE_SALES
+        )
+        b = self.authorized_business(
+            r,
+            business_public_id,
+            permission,
+        )
         s = self.o(b, sale_public_id) if b else None
         if not s:
             return self.nf()
@@ -150,29 +185,28 @@ class SaleReturns(M, APIView):
     serializer_class = SaleReturnSerializer
 
     def _scope(self, request, business_public_id, sale_public_id):
-        business = self.b(request, business_public_id)
+        business = self.authorized_business(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.MANAGE_SALE_RETURNS,
+            write=request.method != "GET",
+        )
         if not business:
-            return None, None, None
-        member = membership_for(request.user, business)
+            return None, None
         sale = Sale.objects.filter(
             business=business,
             public_id=sale_public_id,
         ).first()
-        return business, member, sale
+        return business, sale
 
     def get(self, request, business_public_id, sale_public_id):
-        business, member, sale = self._scope(
+        business, sale = self._scope(
             request,
             business_public_id,
             sale_public_id,
         )
         if not business or not sale:
             return self.nf()
-        if not can_manage_business(member):
-            return Response(
-                {"detail": "Forbidden."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
         queryset = (
             SaleReturn.objects.filter(business=business, sale=sale)
             .select_related("refund_payment_method")
@@ -185,18 +219,13 @@ class SaleReturns(M, APIView):
         )
 
     def post(self, request, business_public_id, sale_public_id):
-        business, member, sale = self._scope(
+        business, sale = self._scope(
             request,
             business_public_id,
             sale_public_id,
         )
         if not business or not sale:
             return self.nf()
-        if not can_manage_business(member):
-            return Response(
-                {"detail": "Forbidden."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
         idempotency_key = request.headers.get("Idempotency-Key", "").strip()
         if not idempotency_key:
             return Response(
@@ -265,7 +294,7 @@ Sales.post = extend_schema(
     tags=["Sales"],
     operation_id="sale_create",
     request=SaleWrite,
-    responses={201: SaleSerializer},
+    responses={201: SaleSerializer, 403: None, 404: None},
 )(Sales.post)
 SD.get = extend_schema(
     tags=["Sales"], operation_id="sale_retrieve", responses={200: SaleSerializer}
@@ -274,7 +303,7 @@ SD.patch = extend_schema(
     tags=["Sales"],
     operation_id="sale_update",
     request=SaleWrite,
-    responses={200: SaleSerializer},
+    responses={200: SaleSerializer, 400: None, 403: None, 404: None},
 )(SD.patch)
 Lines.get = extend_schema(
     tags=["Sales"],
@@ -285,7 +314,7 @@ Lines.post = extend_schema(
     tags=["Sales"],
     operation_id="sale_line_create",
     request=LineWrite,
-    responses={201: LineSerializer},
+    responses={201: LineSerializer, 400: None, 403: None, 404: None},
 )(Lines.post)
 Customers.get = extend_schema(
     tags=["Customers"],
@@ -303,8 +332,14 @@ Complete.post = extend_schema(
     tags=["Sales"],
     operation_id="sale_complete",
     request=SaleCompleteSerializer,
-    responses={200: SaleSerializer},
+    responses={200: SaleSerializer, 400: None, 403: None, 404: None},
 )(Complete.post)
+Cancel.post = extend_schema(
+    tags=["Sales"],
+    operation_id="sale_cancel",
+    request=None,
+    responses={200: SaleSerializer, 400: None, 403: None, 404: None},
+)(Cancel.post)
 
 _idempotency_key = OpenApiParameter(
     name="Idempotency-Key",

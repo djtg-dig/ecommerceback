@@ -1,21 +1,91 @@
 import pytest
 from rest_framework.test import APIClient
 from apps.accounts.models import CarriIdentity
-from apps.businesses.models import Business,BusinessMember
+from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
 from apps.catalog.models import ProductCategory,Product
 from apps.inventory.models import InventoryItem,StockMovement
 from apps.sales.models import Customer, Sale
 pytestmark=pytest.mark.django_db
 def test_internal_sale():
- c=ProductCategory.objects.create(code='SALECAT',name='Sale',slug='salecat');b=Business.objects.create(name='B');u=CarriIdentity.objects.create(carri_subject='seller');BusinessMember.objects.create(business=b,identity=u,role='EMPLOYEE');p=Product.objects.create(business=b,category=c,name='P',selling_price='5',cost_price='3',currency='CDF',attributes={});i=InventoryItem.objects.create(business=b,product=p);from apps.inventory.services import apply_stock_movement;apply_stock_movement(inventory_item=i,movement_type='IN',performed_by=u,quantity=10)
- a=APIClient();a.force_authenticate(user=u);base=f'/api/v1/businesses/{b.public_id}/';s=a.post(base+'sales/',{},format='json');assert s.status_code==201 and s.data['public_id'].startswith('SA');sa=s.data['public_id'];l=a.post(base+f'sales/{sa}/lines/',{'product':p.public_id,'quantity':'2.000'},format='json');assert l.status_code==201 and l.data['unit_price']=='5.00';r=a.post(base+f'sales/{sa}/complete/',{'amount_paid':'10.00','payment_method':'CASH'},format='json');assert r.status_code==200 and r.data['status']=='COMPLETED';assert InventoryItem.objects.get(pk=i.pk).quantity==8;assert StockMovement.objects.filter(movement_type='SALE').exists(); movement = FinancialMovement.objects.get(sale__public_id=sa); assert movement.payment_transaction_id and movement.payment_transaction.recording_mode == 'MANUAL'
+    category = ProductCategory.objects.create(
+        code="SALECAT",
+        name="Sale",
+        slug="salecat",
+    )
+    business = Business.objects.create(name="B")
+    identity = CarriIdentity.objects.create(carri_subject="seller")
+    member = BusinessMember.objects.create(
+        business=business,
+        identity=identity,
+        role=BusinessMember.Role.EMPLOYEE,
+    )
+    BusinessMemberPermission.objects.create(
+        member=member,
+        permission=BusinessMemberPermission.Permission.USE_POS,
+    )
+    product = Product.objects.create(
+        business=business,
+        category=category,
+        name="P",
+        selling_price="5",
+        cost_price="3",
+        currency="CDF",
+        attributes={},
+    )
+    inventory = InventoryItem.objects.create(business=business, product=product)
+    from apps.inventory.services import apply_stock_movement
+
+    apply_stock_movement(
+        inventory_item=inventory,
+        movement_type="IN",
+        performed_by=identity,
+        quantity=10,
+    )
+    client = APIClient()
+    client.force_authenticate(user=identity)
+    base = f"/api/v1/businesses/{business.public_id}/"
+    sale_response = client.post(base + "sales/", {}, format="json")
+
+    assert sale_response.status_code == 201
+    assert sale_response.data["public_id"].startswith("SA")
+
+    sale_id = sale_response.data["public_id"]
+    line_response = client.post(
+        base + f"sales/{sale_id}/lines/",
+        {"product": product.public_id, "quantity": "2.000"},
+        format="json",
+    )
+    complete_response = client.post(
+        base + f"sales/{sale_id}/complete/",
+        {"amount_paid": "10.00", "payment_method": "CASH"},
+        format="json",
+    )
+
+    assert line_response.status_code == 201
+    assert line_response.data["unit_price"] == "5.00"
+    assert complete_response.status_code == 200
+    assert complete_response.data["status"] == "COMPLETED"
+    assert InventoryItem.objects.get(pk=inventory.pk).quantity == 8
+    assert StockMovement.objects.filter(movement_type="SALE").exists()
+
+    movement = FinancialMovement.objects.get(sale__public_id=sale_id)
+    assert movement.payment_transaction_id
+    assert movement.payment_transaction.recording_mode == "MANUAL"
 
 
 def test_sale_currency_is_imposed_by_business():
     category = ProductCategory.objects.create(code="SALECUR", name="Currency", slug="sale-cur")
     business = Business.objects.create(name="Currency business", primary_currency="CDF")
     identity = CarriIdentity.objects.create(carri_subject="sale-currency")
-    BusinessMember.objects.create(business=business, identity=identity, role="EMPLOYEE")
+    member = BusinessMember.objects.create(
+        business=business,
+        identity=identity,
+        role="EMPLOYEE",
+    )
+    BusinessMemberPermission.objects.create(
+        member=member,
+        permission=BusinessMemberPermission.Permission.USE_POS,
+    )
 
     client = APIClient()
     client.force_authenticate(user=identity)
@@ -35,7 +105,15 @@ def build_sale_context(customer=True):
     category, _ = ProductCategory.objects.get_or_create(code="SALELOT3", defaults={"name": "Sales", "slug": "sales-lot3"})
     business = Business.objects.create(name="Sales lot 3")
     employee, _ = CarriIdentity.objects.get_or_create(carri_subject="sales-lot3-employee")
-    BusinessMember.objects.create(business=business, identity=employee, role="EMPLOYEE")
+    member = BusinessMember.objects.create(
+        business=business,
+        identity=employee,
+        role="EMPLOYEE",
+    )
+    BusinessMemberPermission.objects.create(
+        member=member,
+        permission=BusinessMemberPermission.Permission.USE_POS,
+    )
     product = Product.objects.create(
         business=business, category=category, name="Item", selling_price="100.00", cost_price="60.00", currency="CDF", attributes={}
     )

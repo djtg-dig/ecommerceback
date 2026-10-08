@@ -28,7 +28,7 @@ def client_for(identity):
     return client
 
 
-def api_context(quantity=Decimal("10.000")):
+def api_context(quantity=Decimal("10.000"), *, manager_permission=True):
     suffix = uuid.uuid4().hex
     category, _ = ProductCategory.objects.get_or_create(
         code="RETAPI",
@@ -54,11 +54,12 @@ def api_context(quantity=Decimal("10.000")):
         identity=employee,
         role=BusinessMember.Role.EMPLOYEE,
     )
-    grant_permission(
-        owner_member,
-        manager_member,
-        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
-    )
+    if manager_permission:
+        grant_permission(
+            owner_member,
+            manager_member,
+            BusinessMemberPermission.Permission.MANAGE_SALE_RETURNS,
+        )
     product = Product.objects.create(
         business=business,
         category=category,
@@ -105,7 +106,9 @@ def payload(line, quantity="1.000", **overrides):
 
 
 def test_post_permissions_required_header_and_business_isolation():
-    business, owner, manager, employee, outsider, sale, line, _, url = api_context()
+    business, owner, manager, employee, outsider, sale, line, _, url = api_context(
+        manager_permission=False,
+    )
     request_data = payload(line)
 
     assert client_for(employee).post(
@@ -121,6 +124,21 @@ def test_post_permissions_required_header_and_business_isolation():
         HTTP_IDEMPOTENCY_KEY="outsider",
     ).status_code == 404
     assert client_for(owner).post(url, request_data, format="json").status_code == 400
+
+    assert client_for(manager).post(
+        url,
+        payload(line),
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="legacy-manager",
+    ).status_code == 403
+
+    owner_member = BusinessMember.objects.get(business=business, identity=owner)
+    manager_member = BusinessMember.objects.get(business=business, identity=manager)
+    grant_permission(
+        owner_member,
+        manager_member,
+        BusinessMemberPermission.Permission.MANAGE_SALE_RETURNS,
+    )
 
     owner_response = client_for(owner).post(
         url,

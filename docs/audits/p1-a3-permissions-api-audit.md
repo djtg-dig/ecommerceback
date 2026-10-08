@@ -115,15 +115,15 @@ obtenir les erreurs canoniques de `require_permission`.
 | GET | `/businesses/{SH}/customers/` | `Customers`; queryset | membership ACTIVE direct | permission de lecture clients absente | à clarifier |
 | POST | `/businesses/{SH}/customers/` | `Customers`; serializer | membership ACTIVE uniquement | permission de gestion clients absente | à clarifier |
 | GET | `/businesses/{SH}/sales/` | `Sales`; queryset | membership ACTIVE direct | permission de lecture ventes absente | à clarifier |
-| POST | `/businesses/{SH}/sales/` | `Sales`; serializer | membership ACTIVE uniquement | `USE_POS` | à migrer |
+| POST | `/businesses/{SH}/sales/` | `Sales`; serializer | `require_permission(..., USE_POS, write=True)` | `USE_POS` | conforme — P1-A3.2 |
 | GET | `/businesses/{SH}/sales/{SA}/` | `SD`; queryset | membership ACTIVE direct | permission de lecture ventes absente | à clarifier |
-| PATCH | `/businesses/{SH}/sales/{SA}/` | `SD`; serializer | membership ACTIVE uniquement | `USE_POS` | à migrer |
+| PATCH | `/businesses/{SH}/sales/{SA}/` | `SD`; serializer | `require_permission(..., USE_POS, write=True)` | `USE_POS` | conforme — P1-A3.2 |
 | GET | `/businesses/{SH}/sales/{SA}/lines/` | `Lines`; queryset | membership ACTIVE direct | permission de lecture ventes absente | à clarifier |
-| POST | `/businesses/{SH}/sales/{SA}/lines/` | `Lines`; modèle | membership ACTIVE uniquement | `USE_POS` | à migrer |
-| POST | `/businesses/{SH}/sales/{SA}/complete/` | `Complete`; `complete` | membership ACTIVE uniquement | `USE_POS` | à migrer |
-| POST | `/businesses/{SH}/sales/{SA}/cancel/` | `Cancel`; `cancel` | membership ACTIVE uniquement | `MANAGE_SALES` | à migrer |
-| GET | `/businesses/{SH}/sales/{SA}/returns/` | `SaleReturns`; queryset | `can_manage_business` | `MANAGE_SALE_RETURNS` | à migrer |
-| POST | `/businesses/{SH}/sales/{SA}/returns/` | `SaleReturns`; `create_sale_return` | `can_manage_business` | `MANAGE_SALE_RETURNS` | à migrer |
+| POST | `/businesses/{SH}/sales/{SA}/lines/` | `Lines`; modèle | `require_permission(..., USE_POS, write=True)` | `USE_POS` | conforme — P1-A3.2 |
+| POST | `/businesses/{SH}/sales/{SA}/complete/` | `Complete`; `complete` | `require_permission(..., USE_POS, write=True)` | `USE_POS` | conforme — P1-A3.2 |
+| POST | `/businesses/{SH}/sales/{SA}/cancel/` | `Cancel`; `cancel` | `require_permission(..., MANAGE_SALES, write=True)` | `MANAGE_SALES` | conforme — P1-A3.2 |
+| GET | `/businesses/{SH}/sales/{SA}/returns/` | `SaleReturns`; queryset | `require_permission(..., MANAGE_SALE_RETURNS)` | `MANAGE_SALE_RETURNS` | conforme — P1-A3.2 |
+| POST | `/businesses/{SH}/sales/{SA}/returns/` | `SaleReturns`; `create_sale_return` | `require_permission(..., MANAGE_SALE_RETURNS, write=True)` | `MANAGE_SALE_RETURNS` | conforme — P1-A3.2 |
 
 `USE_POS` convient aux mutations du ticket courant. Il ne suffit pas à justifier
 une lecture globale de toutes les ventes historiques, d'où la décision requise
@@ -136,9 +136,9 @@ donnerait au vendeur des droits de référentiel non explicitement décidés.
 |---|---|---|---|---|---|
 | GET | `/businesses/{SH}/receivables/` | `ReceivableListView`; queryset | membership ACTIVE direct | `VIEW_RECEIVABLES` | à migrer |
 | GET | `/businesses/{SH}/receivables/{RE}/` | `ReceivableDetailView`; queryset | membership ACTIVE direct | `VIEW_RECEIVABLES` | à migrer |
-| PATCH | `/businesses/{SH}/receivables/{RE}/` | `ReceivableDetailView`; modèle | `can_manage_business` | `MANAGE_RECEIVABLES` | à migrer |
+| PATCH | `/businesses/{SH}/receivables/{RE}/` | `ReceivableDetailView`; modèle | `require_permission(..., MANAGE_RECEIVABLES, write=True)` | `MANAGE_RECEIVABLES` | conforme — P1-A3.2 |
 | GET | `/businesses/{SH}/receivables/{RE}/payments/` | `ReceivablePaymentsView`; queryset | membership ACTIVE direct | `VIEW_RECEIVABLES` | à migrer |
-| POST | `/businesses/{SH}/receivables/{RE}/payments/` | `ReceivablePaymentsView`; `add_payment` | membership ACTIVE uniquement | `MANAGE_RECEIVABLES` | à migrer |
+| POST | `/businesses/{SH}/receivables/{RE}/payments/` | `ReceivablePaymentsView`; `add_payment` | `require_permission(..., MANAGE_RECEIVABLES, write=True)` | `MANAGE_RECEIVABLES` | conforme — P1-A3.2 |
 
 ### Expenses — 12 opérations
 
@@ -182,8 +182,8 @@ donnerait au vendeur des droits de référentiel non explicitement décidés.
 
 | Statut | Opérations |
 |---|---:|
-| Conforme | 6 |
-| À migrer | 73 |
+| Conforme | 15 |
+| À migrer | 64 |
 | À clarifier | 7 |
 | **Total** | **86** |
 
@@ -192,7 +192,7 @@ donnerait au vendeur des droits de référentiel non explicitement décidés.
 Quatre familles de contrôles doivent disparaître progressivement des vues :
 
 1. `can_manage_business`, helper transitoire fondé sur `UPDATE_BUSINESS`, protège
-   45 opérations de catalogue, stock, achats, retours, créances, dépenses,
+   42 opérations de configuration Business, catalogue, stock, achats, dépenses,
    Finance et reporting avec une permission trop générale ;
 2. les recherches directes `members__identity` + `members__status="ACTIVE"`
    sont répétées dans presque chaque mixin et contournent `membership_for` /
@@ -248,14 +248,14 @@ au modèle ni à une migration.
 
 ### Risques critiques
 
-1. **Mutations Sales sans permission** : création de client, création et édition
-   de vente/ligne, complétion et annulation sont accessibles à tout membre actif.
-   La complétion peut muter stock, créance et Finance.
-2. **Encaissement Receivable sans permission** : le POST paiement appelle
-   `add_payment` pour tout membre actif et peut créer un `FinancialMovement`.
-3. **Business inactif encore mutable sur ces chemins** : les écritures Sales et
-   paiement Receivable n'appellent pas `has_permission(..., write=True)` ; elles
-   restent donc possibles sur un Business `SUSPENDED` ou `ARCHIVED`.
+1. **Création de client sans permission — restant** : le POST Customer est
+   accessible à tout membre actif, faute de permission de gestion client
+   décidée. Les autres mutations Sales sont corrigées par P1-A3.2.
+2. **Encaissement Receivable sans permission — corrigé P1-A3.2** : le POST
+   paiement exige désormais `MANAGE_RECEIVABLES` avant `add_payment`.
+3. **Business inactif mutable — corrigé pour P1-A3.2** : les neuf opérations
+   migrées utilisent `write=True` pour leurs mutations ; `SUSPENDED` et
+   `ARCHIVED` sont refusés.
 4. **Lecture sensible trop large** : tout membre actif peut lire clients, ventes,
    créances, dépenses, achats, stock et catalogue indépendamment de ses
    permissions individuelles.
@@ -296,13 +296,28 @@ puis déléguer la distinction au moteur central.
 
 ## Plan de migration recommandé
 
-### P1-A3.2 — Sales et Receivables critiques
+### P1-A3.2 — Sales et Receivables critiques — terminé
 
 Migrer d'abord les mutations `USE_POS`, `MANAGE_SALES`,
 `MANAGE_SALE_RETURNS` et `MANAGE_RECEIVABLES`. Tester les effets Stock,
 Receivable et Finance, l'idempotence, les Business inactifs et les 403/404.
 Décider séparément les permissions de lecture Sales/Customers avant d'ouvrir ces
 GET à autre chose qu'une politique explicitement validée.
+
+Endpoints effectivement migrés :
+
+- `POST /sales/`, `PATCH /sales/{SA}/`, `POST /sales/{SA}/lines/` et
+  `POST /sales/{SA}/complete/` vers `USE_POS` ;
+- `POST /sales/{SA}/cancel/` vers `MANAGE_SALES` ;
+- `GET/POST /sales/{SA}/returns/` vers `MANAGE_SALE_RETURNS` ;
+- `PATCH /receivables/{RE}/` et `POST /receivables/{RE}/payments/` vers
+  `MANAGE_RECEIVABLES`.
+
+Les mutations utilisent `write=True`, donc un Business suspendu ou archivé est
+refusé. Les tests couvrent OWNER, ancien MANAGER sans permission, permission
+explicite, révocation implicite des droits liés au titre, membre suspendu,
+isolation tenant et invariants transactionnels existants. `POST /customers/`
+reste volontairement inchangé jusqu'à la décision sur `MANAGE_CUSTOMERS`.
 
 ### P1-A3.3 — Expenses et Purchases financiers
 
@@ -341,8 +356,8 @@ serializers, et peut être validé indépendamment avant le suivant.
 ## Conclusion
 
 L'isolation par Business est globalement présente et aucun rôle ou titre legacy
-ne confère de privilège. En revanche, 73 opérations ont une permission existante
-mais n'utilisent pas encore le moteur avec cette permission, et 7 nécessitent une
-décision de granularité. Les écritures Sales et l'encaissement Receivable sont la
-priorité immédiate car elles autorisent aujourd'hui un membre actif sans droit
-individuel à produire des effets économiques et financiers.
+ne confère de privilège. Après P1-A3.2, 64 opérations ont encore une permission
+existante mais n'utilisent pas le moteur avec cette permission, et 7 nécessitent
+une décision de granularité. Les mutations économiques Sales/Returns/Receivables
+du premier lot sont désormais centralisées ; la création de client et les
+lectures sensibles trop larges restent les priorités documentées.

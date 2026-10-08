@@ -8,7 +8,7 @@ from django.core.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
-from apps.businesses.models import Business, BusinessMember
+from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
 from apps.catalog.models import Product, ProductCategory, ProductVariant
 from apps.inventory.models import InventoryItem, StockMovement
 from apps.inventory.services import apply_stock_movement
@@ -27,7 +27,15 @@ def sale_context(*, cost_price=Decimal("7.50")):
     )
     business = Business.objects.create(name="Sale snapshot business")
     employee = CarriIdentity.objects.create(carri_subject="sale-snapshot-employee")
-    BusinessMember.objects.create(business=business, identity=employee, role="EMPLOYEE")
+    member = BusinessMember.objects.create(
+        business=business,
+        identity=employee,
+        role="EMPLOYEE",
+    )
+    BusinessMemberPermission.objects.create(
+        member=member,
+        permission=BusinessMemberPermission.Permission.USE_POS,
+    )
     product = Product.objects.create(
         business=business,
         category=category,

@@ -5,7 +5,7 @@ import pytest
 from django.utils import timezone
 from rest_framework.test import APIClient
 from apps.accounts.models import CarriIdentity
-from apps.businesses.models import Business,BusinessMember
+from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
 from apps.catalog.models import ProductCategory,Product
 from apps.inventory.models import InventoryItem,StockMovement
 from apps.inventory.services import apply_stock_movement
@@ -23,7 +23,72 @@ def test_discovery_credit_and_initial_partial_payment(data):
 def test_anonymous_credit_and_overpayment_roll_back(data):
  b,o,_,p,i,_=data;a,base,sa=sale(b,o,p);assert a.post(base+f'sales/{sa}/complete/',{'amount_paid':'0.00'},format='json').status_code==400;assert Sale.objects.get(public_id=sa).status=='DRAFT' and InventoryItem.objects.get(pk=i.pk).quantity==10 and not Receivable.objects.exists();assert a.post(base+f'sales/{sa}/complete/',{'amount_paid':'120.00'},format='json').status_code==400
 def test_payment_lifecycle_permissions_and_metadata_patch(data):
- b,o,e,p,_,cu=data;a,base,sa=sale(b,o,p,cu);a.post(base+f'sales/{sa}/complete/',{'amount_paid':'0.00'},format='json');r=Receivable.objects.get();url=base+f'receivables/{r.public_id}/';assert api(e).patch(url,{'notes':'no'},format='json').status_code==403;assert a.patch(url,{'notes':'ok','original_amount':'1','status':'PAID'},format='json').status_code==200;r.refresh_from_db();assert r.original_amount==100 and r.status=='OPEN' and r.notes=='ok';payments=url+'payments/';assert api(e).post(payments,{'amount':'60.00','payment_method':'MOBILE_MONEY'},format='json').status_code==201;assert api(o).post(payments,{'amount':'50.00','payment_method':'CARD'},format='json').status_code==400;assert api(o).post(payments,{'amount':'40.00','payment_method':'BANK_TRANSFER'},format='json').status_code==201;r.refresh_from_db();assert r.status=='PAID' and r.balance==0 and r.settled_at and not r.is_overdue;assert api(o).post(payments,{'amount':'1.00','payment_method':'OTHER'},format='json').status_code==400
+    business, owner, employee, product, _, customer = data
+    owner_client, base, sale_id = sale(business, owner, product, customer)
+    owner_client.post(
+        base + f"sales/{sale_id}/complete/",
+        {"amount_paid": "0.00"},
+        format="json",
+    )
+    receivable = Receivable.objects.get()
+    url = base + f"receivables/{receivable.public_id}/"
+    employee_client = api(employee)
+
+    assert employee_client.patch(
+        url,
+        {"notes": "no"},
+        format="json",
+    ).status_code == 403
+    assert owner_client.patch(
+        url,
+        {"notes": "ok", "original_amount": "1", "status": "PAID"},
+        format="json",
+    ).status_code == 200
+
+    receivable.refresh_from_db()
+    assert receivable.original_amount == 100
+    assert receivable.status == "OPEN"
+    assert receivable.notes == "ok"
+
+    payments_url = url + "payments/"
+    payment_data = {"amount": "60.00", "payment_method": "MOBILE_MONEY"}
+    assert employee_client.post(
+        payments_url,
+        payment_data,
+        format="json",
+    ).status_code == 403
+
+    member = BusinessMember.objects.get(business=business, identity=employee)
+    BusinessMemberPermission.objects.create(
+        member=member,
+        permission=BusinessMemberPermission.Permission.MANAGE_RECEIVABLES,
+    )
+    assert employee_client.post(
+        payments_url,
+        payment_data,
+        format="json",
+    ).status_code == 201
+    assert api(owner).post(
+        payments_url,
+        {"amount": "50.00", "payment_method": "CARD"},
+        format="json",
+    ).status_code == 400
+    assert api(owner).post(
+        payments_url,
+        {"amount": "40.00", "payment_method": "BANK_TRANSFER"},
+        format="json",
+    ).status_code == 201
+
+    receivable.refresh_from_db()
+    assert receivable.status == "PAID"
+    assert receivable.balance == 0
+    assert receivable.settled_at
+    assert not receivable.is_overdue
+    assert api(owner).post(
+        payments_url,
+        {"amount": "1.00", "payment_method": "OTHER"},
+        format="json",
+    ).status_code == 400
 def test_due_date_filters_and_complete_default(data):
  b,o,_,p,_,cu=data;a,base,sa=sale(b,o,p,cu);assert a.post(base+f'sales/{sa}/complete/',{'amount_paid':'100.00','payment_method':'CASH'},format='json').status_code==200 and not Receivable.objects.exists();_,_,sa=sale(b,o,p,cu);a.post(base+f'sales/{sa}/complete/',{'amount_paid':'0'},format='json');r=Receivable.objects.get(sale__public_id=sa);r.due_date=timezone.localdate()-timedelta(days=1);r.save();assert r.is_overdue;assert a.get(base+'receivables/?overdue=true').status_code==200
 
