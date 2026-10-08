@@ -28,6 +28,8 @@ Le service est idempotent par Business. Une même clé et une même intention no
 
 La réponse expose les identifiants publics, le statut, la date économique `returned_at`, `return_total`, les parts créditées et remboursées, le moyen de remboursement et les snapshots compacts des lignes. Elle n’embarque pas les objets Product, Customer ou Business complets.
 
-### Limites du Lot 1
+### Intégration reporting et limites du MVP
 
-Il n’existe ni annulation, ni modification, ni reversal `SALE_RETURN_REFUND` dans ce lot. Les agrégats Dashboard, profitability-summary et reports ne tiennent pas encore compte des retours : leur adaptation est explicitement reportée au Lot 2.
+Dashboard, `profitability-summary` et les rapports Sales, Products et Receivables intègrent les retours `POSTED`. Les projections économiques imputent le retour selon `returned_at`, tandis que Finance comptabilise uniquement le remboursement monétaire comme OUTFLOW et que le crédit de créance reste non monétaire.
+
+Le MVP ne propose ni modification, ni suppression, ni annulation d’un retour, ni reversal `SALE_RETURN_REFUND`, ni échange automatique. Les rapports sont des projections recalculées, pas une clôture comptable. Il n’existe pas encore de cache/offline complet pour le client mobile ni d’intégration à une passerelle externe de remboursement.

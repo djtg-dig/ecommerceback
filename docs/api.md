@@ -104,7 +104,7 @@ La réponse compacte contient `public_id`, `status`, `reason`, `returned_at`, `r
 
 Les retours peuvent être partiels, totaux et successifs dans la limite cumulée de la quantité vendue. Une cible Product ou ProductVariant archivée après la vente reste retournable sans être réactivée. Il n’existe pas d’endpoint de modification, suppression ou reversal du retour dans le Lot 1.
 
-Les données de Dashboard, profitability-summary et reports ne déduisent pas encore les retours; leur mise à jour est prévue au Lot 2.
+Dashboard, `profitability-summary` et les rapports Sales, Products et Receivables intègrent les retours `POSTED`. Les ventes sont imputées selon `completed_at`, les retours économiques selon `returned_at`, et les remboursements monétaires restent des OUTFLOW Finance distincts.
 
 ## Receivables
 GET `/receivables/`, detail, PATCH metadata et GET/POST `/payments/`.
@@ -165,3 +165,7 @@ GET/POST `/api/v1/businesses/{SH}/purchases/{PU}/payments/` et POST `/payments/{
 
 ### Dashboard
 `GET /businesses/{SH}/dashboard/` est réservé aux OWNER/MANAGER. Paramètres : `period`, ou `date_from` et `date_to`. La réponse compacte contient périodes, CA, cash, créances, rupture et dette fournisseur.
+
+### Reporting économique
+
+Les endpoints OWNER/MANAGER `profitability-summary/`, `reports/sales/`, `reports/products/`, `reports/expenses/` et `reports/receivables/` agrègent côté serveur et restent isolés par Business. Les trois premiers exposent séparément les ventes brutes, retours et valeurs nettes. `reports/receivables/` est paginé et distingue montant initial, paiements, crédits retour et solde par client. Les crédits `RETURN_CREDIT` ne sont jamais présentés comme des encaissements.

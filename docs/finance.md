@@ -2,9 +2,9 @@
 
 Chaque Business utilise une seule devise financière, choisie à la création puis immuable. Les montants de Sale, Purchase, Expense et Receivable conservent cette devise comme snapshot historique et doivent correspondre à `Business.primary_currency` lors de leur création.
 
-Le futur ledger `FinancialMovement` suivra la même règle. Finance ne contiendra ni taux de change, ni conversion implicite, ni frais de conversion : ce sujet appartient à un futur domaine séparé.
+Le ledger `FinancialMovement` suit la même règle. Finance ne contient ni taux de change, ni conversion implicite, ni frais de conversion : ce sujet appartient à un futur domaine séparé.
 
-Une Expense est une charge métier. Le futur domaine distinguera une Expense de son règlement réel (`ExpensePayment`) et du mouvement financier OUTFLOW qui en résultera.
+Une Expense est une charge métier, distincte de son règlement réel (`ExpensePayment`) et du mouvement financier OUTFLOW correspondant.
 
 # Finance — Lot 2 : journal financier interne
 
@@ -24,7 +24,7 @@ Les listes et le résumé acceptent `direction`, `event_type`, `payment_method`,
 
 Finance ne crée aucun paiement directement depuis ses endpoints de lecture. Les intégrations automatiques avec Sales, Sale Returns, Receivables, Expenses et Purchases passent par leurs services métier, avec idempotence et transactions atomiques.
 
-Décision préparée pour une évolution ultérieure : une **Expense** décrit une charge métier, un futur **ExpensePayment** décrira son règlement réel, et `FinancialMovement` décrira le mouvement financier de ce règlement. `ExpensePayment` n’existe pas dans ce lot et n’est donc ni créé ni intégré automatiquement.
+Une **Expense** décrit une charge métier, un **ExpensePayment** son règlement réel, et `FinancialMovement` le mouvement financier de ce règlement. La création et le reversal des paiements passent par les services Expenses et conservent le journal append-only.
 
 # Finance — Lot 3 : encaissements Sales et Receivables
 
@@ -42,7 +42,7 @@ La disponibilité remboursable est bornée à zéro : aucun remboursement goodwi
 
 Si le montant est positif, le client doit choisir un `BusinessPaymentMethod` actif appartenant au même Business. Le service crée un unique `FinancialMovement` `SALE_RETURN_REFUND`, `OUTFLOW`, relié par OneToOne au `SaleReturn`, ainsi que sa `PaymentTransaction`. Son `occurred_at` reprend `returned_at`. La création se trouve dans la même transaction que les lignes du retour, Inventory et Receivables; une erreur Finance annule tout le workflow. Aucun `SALE_RETURN_REFUND_REVERSAL` n’existe dans le Lot 1.
 
-Les projections Dashboard, profitability-summary et reports ne sont pas encore ajustées pour retrancher les retours; ce travail appartient au Lot 2.
+Dashboard inclut `SALE_RETURN_REFUND` une seule fois dans les OUTFLOW. Les projections économiques `profitability-summary` et reports retranchent les montants historiques des lignes de retour, sans compter une seconde fois le mouvement Finance ou le crédit de créance.
 
 # Finance — Lot 4 : décaissements Expenses
 

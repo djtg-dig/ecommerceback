@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 
 from apps.businesses.models import Business
 from apps.businesses.permissions import can_manage_business, membership_for
+from apps.expense_receivable_report_serializers import ReceivablesReportSerializer
 from apps.expense_receivable_reports import build_expenses_report, receivable_queryset, receivables_summary
 from apps.reporting import resolve_reporting_period
 
@@ -94,4 +95,9 @@ class ReceivablesReportView(ReportBase):
 
 period_params = [OpenApiParameter("period", str, enum=["today", "last_7_days", "last_30_days"]), OpenApiParameter("date_from", str), OpenApiParameter("date_to", str)]
 ExpensesReportView.get = extend_schema(tags=["Reporting"], operation_id="business_expenses_report", parameters=period_params + [OpenApiParameter("group_by", str, enum=["day", "week", "month"])], responses={200: dict, 400: None, 404: None})(ExpensesReportView.get)
-ReceivablesReportView.get = extend_schema(tags=["Reporting"], operation_id="business_receivables_report", parameters=[OpenApiParameter("page", int), OpenApiParameter("page_size", int)], responses={200: dict, 404: None})(ReceivablesReportView.get)
+ReceivablesReportView.get = extend_schema(
+    tags=["Reporting"],
+    operation_id="business_receivables_report",
+    parameters=[OpenApiParameter("page", int), OpenApiParameter("page_size", int)],
+    responses={200: ReceivablesReportSerializer, 404: None},
+)(ReceivablesReportView.get)

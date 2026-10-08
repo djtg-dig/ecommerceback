@@ -16,5 +16,9 @@ Ecommerce est le backend métier multi-tenant. Carri Account fournit l'identité
 - [Receivables](receivables.md)
 - [Expenses](expenses.md)
 - [Finance ledger](finance.md)
+- [Dashboard](dashboard.md)
+- [Profitability](profitability.md)
+- [Sales and product reporting](sales-reporting.md)
+- [Expense and receivable reporting](expense-receivable-reporting.md)
 
-Le dashboard interne Niveau 1 fournit une synthèse compacte du commerce sans créer de solde financier persistant.
+Le dashboard et les rapports Niveau 1 fournissent des projections compactes intégrant les retours de vente, sans créer de solde financier persistant ni remplacer une clôture comptable.
