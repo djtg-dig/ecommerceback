@@ -2,12 +2,12 @@
 
 from decimal import Decimal
 
-from django.db.models import Count, DecimalField, F, OuterRef, Subquery, Sum
+from django.db.models import Count, DecimalField, F, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce, TruncDay, TruncMonth, TruncWeek
 from django.utils import timezone
 
 from apps.expenses.models import Expense
-from apps.receivables.models import Receivable, ReceivablePayment
+from apps.receivables.models import Receivable, ReceivableAdjustment, ReceivablePayment
 
 
 MONEY = DecimalField(max_digits=16, decimal_places=2)
@@ -23,9 +23,62 @@ def build_expenses_report(business, start, end, group_by):
 
 
 def receivable_queryset(business):
-    paid = ReceivablePayment.objects.filter(receivable=OuterRef("pk")).values("receivable").annotate(total=Sum("amount")).values("total")
-    return Receivable.objects.filter(business=business, status__in=[Receivable.Status.OPEN, Receivable.Status.PARTIALLY_PAID]).annotate(paid=Coalesce(Subquery(paid, output_field=MONEY), Decimal("0"), output_field=MONEY)).annotate(balance=F("original_amount") - F("paid"))
+    """Return open receivables with independent cash and return aggregates."""
+    paid = (
+        ReceivablePayment.objects.filter(receivable=OuterRef("pk"))
+        .values("receivable")
+        .annotate(total=Sum("amount"))
+        .values("total")
+    )
+    return_credit = (
+        ReceivableAdjustment.objects.filter(
+            receivable=OuterRef("pk"),
+            adjustment_type=ReceivableAdjustment.Type.RETURN_CREDIT,
+        )
+        .values("receivable")
+        .annotate(total=Sum("amount"))
+        .values("total")
+    )
+    return (
+        Receivable.objects.filter(
+            business=business,
+            status__in=[Receivable.Status.OPEN, Receivable.Status.PARTIALLY_PAID],
+        )
+        .annotate(
+            paid=Coalesce(
+                Subquery(paid, output_field=MONEY),
+                Decimal("0"),
+                output_field=MONEY,
+            ),
+            return_credit=Coalesce(
+                Subquery(return_credit, output_field=MONEY),
+                Decimal("0"),
+                output_field=MONEY,
+            ),
+        )
+        .annotate(
+            balance=F("original_amount") - F("paid") - F("return_credit"),
+        )
+        .filter(balance__gt=0)
+    )
 
 
 def receivables_summary(queryset):
-    return {"total_outstanding": queryset.aggregate(value=Coalesce(Sum("balance"), Decimal("0"), output_field=MONEY))["value"], "open_count": queryset.count(), "overdue_count": queryset.filter(due_date__lt=timezone.localdate()).count()}
+    totals = queryset.aggregate(
+        total_outstanding=Coalesce(
+            Sum("balance"),
+            Decimal("0"),
+            output_field=MONEY,
+        ),
+        return_credit_amount=Coalesce(
+            Sum("return_credit"),
+            Decimal("0"),
+            output_field=MONEY,
+        ),
+        open_count=Count("pk"),
+        overdue_count=Count(
+            "pk",
+            filter=Q(due_date__lt=timezone.localdate()),
+        ),
+    )
+    return totals

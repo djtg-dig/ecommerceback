@@ -1,5 +1,7 @@
 from drf_spectacular.utils import OpenApiParameter, extend_schema
-from django.db.models import Count, Q, Sum
+from decimal import Decimal
+
+from django.db.models import Count, DecimalField, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -42,13 +44,49 @@ class ReceivablesReportView(ReportBase):
         queryset = receivable_queryset(business)
         summary = receivables_summary(queryset)
         customers = queryset.values("customer__public_id", "customer__name").annotate(
-            outstanding_amount=Coalesce(Sum("balance"), __import__("decimal").Decimal("0"), output_field=__import__("django.db.models", fromlist=["DecimalField"]).DecimalField(max_digits=16, decimal_places=2)),
+            original_amount=Coalesce(
+                Sum("original_amount"),
+                Decimal("0"),
+                output_field=DecimalField(max_digits=16, decimal_places=2),
+            ),
+            paid_amount=Coalesce(
+                Sum("paid"),
+                Decimal("0"),
+                output_field=DecimalField(max_digits=16, decimal_places=2),
+            ),
+            return_credit_amount=Coalesce(
+                Sum("return_credit"),
+                Decimal("0"),
+                output_field=DecimalField(max_digits=16, decimal_places=2),
+            ),
+            outstanding_amount=Coalesce(
+                Sum("balance"),
+                Decimal("0"),
+                output_field=DecimalField(max_digits=16, decimal_places=2),
+            ),
             open_receivables_count=Count("pk"),
             overdue_receivables_count=Count("pk", filter=Q(due_date__lt=timezone.localdate())),
         ).order_by("-outstanding_amount", "customer__name")
         paginator = ReceivablesPagination()
         page = paginator.paginate_queryset(customers, request)
-        data = [{"customer_public_id": row["customer__public_id"], "name": row["customer__name"], **{key: row[key] for key in ("outstanding_amount", "open_receivables_count", "overdue_receivables_count")}} for row in page]
+        data = [
+            {
+                "customer_public_id": row["customer__public_id"],
+                "name": row["customer__name"],
+                **{
+                    key: row[key]
+                    for key in (
+                        "original_amount",
+                        "paid_amount",
+                        "return_credit_amount",
+                        "outstanding_amount",
+                        "open_receivables_count",
+                        "overdue_receivables_count",
+                    )
+                },
+            }
+            for row in page
+        ]
         response = paginator.get_paginated_response(data)
         response.data.update(summary)
         return response
