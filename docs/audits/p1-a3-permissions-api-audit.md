@@ -1,0 +1,348 @@
+# P1-A3.1 — Audit des autorisations des API Niveau 1
+
+Date de l'audit : 8 octobre 2026.
+
+## Périmètre et méthode
+
+L'inventaire vient des routes réellement enregistrées sous `/api/v1/`,
+recoupées avec le résolveur Django, les vues, les services appelés et le registre
+`BusinessMemberPermission.Permission`. Une ligne représente une opération HTTP :
+une URL acceptant `GET` et `POST` compte donc deux endpoints d'autorisation.
+
+Statuts utilisés :
+
+- **conforme** : le comportement ne nécessite pas une permission individuelle
+  supplémentaire ou utilise déjà la permission exacte ;
+- **à migrer** : une permission existante correspond sans ambiguïté, mais la vue
+  utilise encore un contrôle direct ou le helper transitoire
+  `can_manage_business` ;
+- **à clarifier** : le registre actuel ne permet pas d'exprimer le droit sans
+  élargir excessivement l'accès.
+
+Les routes d'authentification, de santé, de schéma et d'administration Django ne
+font pas partie des domaines métier demandés. Les trois lectures de taxonomies
+publiques sont incluses car elles appartiennent aux routes Businesses/Catalog.
+
+## Registre de permissions disponible
+
+L'audit réutilise exclusivement les permissions existantes :
+
+`VIEW_MEMBERS`, `MANAGE_MEMBERS`, `UPDATE_BUSINESS`,
+`MANAGE_PAYMENT_METHODS`, `VIEW_CATALOG`, `MANAGE_CATALOG`,
+`VIEW_INVENTORY`, `MANAGE_INVENTORY`, `MANAGE_EXPENSE_CATEGORIES`,
+`CREATE_EXPENSES`, `VIEW_EXPENSES`, `MANAGE_EXPENSES`, `VIEW_PURCHASES`,
+`MANAGE_PURCHASES`, `USE_POS`, `MANAGE_SALES`, `MANAGE_SALE_RETURNS`,
+`VIEW_RECEIVABLES`, `MANAGE_RECEIVABLES`, `VIEW_FINANCIAL_SUMMARY`,
+`VIEW_DASHBOARD`, `VIEW_PROFITABILITY` et `VIEW_REPORTS`.
+
+## Inventaire complet
+
+### Businesses et référentiels plateforme — 10 opérations
+
+| Méthode | Chemin | Vue ; service | Contrôle actuel | Permission cible | Statut |
+|---|---|---|---|---|---|
+| GET | `/businesses/` | `BusinessesView`; projection ORM | `accessible`: membership ACTIVE | appartenance active, lecture administrative | conforme |
+| POST | `/businesses/` | `BusinessesView`; `create_business` | JWT ; crée son OWNER | aucune permission préalable | conforme |
+| GET | `/businesses/{SH}/` | `BusinessDetailView`; projection ORM | `accessible`: membership ACTIVE | appartenance active, lecture administrative | conforme |
+| PATCH | `/businesses/{SH}/` | `BusinessDetailView`; serializer, `replace_categories` | `can_manage_business` | `UPDATE_BUSINESS` | à migrer |
+| GET | `/businesses/{SH}/members/` | `BusinessMembersView`; projection ORM | `can_view_members` après `accessible` | `VIEW_MEMBERS` | à migrer |
+| GET | `/businesses/{SH}/payment-methods/` | `BusinessPaymentMethodsView`; projection ORM | membre actif ; `can_manage_business` révèle aussi les inactifs | permission de lecture absente | à clarifier |
+| POST | `/businesses/{SH}/payment-methods/` | `BusinessPaymentMethodsView`; serializer | `can_manage_business` | `MANAGE_PAYMENT_METHODS` | à migrer |
+| GET | `/businesses/{SH}/payment-methods/{PM}/` | `BusinessPaymentMethodDetailView`; projection ORM | membre actif ; `can_manage_business` pour un moyen inactif | permission de lecture absente | à clarifier |
+| PATCH | `/businesses/{SH}/payment-methods/{PM}/` | `BusinessPaymentMethodDetailView`; serializer | `can_manage_business` | `MANAGE_PAYMENT_METHODS` | à migrer |
+| GET | `/business-categories/` | `BusinessCategoriesView`; projection ORM | public `AllowAny` | aucune, taxonomie publique | conforme |
+
+Les lectures liste/détail Business sont les informations administratives
+minimales qu'un membre actif doit pouvoir consulter. Elles ne donnent aucun
+droit métier. La migration de `BusinessMembersView` reste nécessaire pour
+obtenir les erreurs canoniques de `require_permission`.
+
+### Catalog — 12 opérations
+
+| Méthode | Chemin | Vue ; service | Contrôle actuel | Permission cible | Statut |
+|---|---|---|---|---|---|
+| GET | `/product-categories/` | `ProductCategoryListView`; queryset | public `AllowAny` | aucune, taxonomie publique | conforme |
+| GET | `/product-categories/{code}/attributes/` | `ProductCategoryAttributesView`; `effective_attributes` | public `AllowAny` | aucune, taxonomie publique | conforme |
+| GET | `/businesses/{SH}/products/` | `ProductListCreateView`; queryset | membership ACTIVE direct | `VIEW_CATALOG` | à migrer |
+| POST | `/businesses/{SH}/products/` | `ProductListCreateView`; `create_product` | `can_manage_business` | `MANAGE_CATALOG` | à migrer |
+| GET | `/businesses/{SH}/products/pos/search/` | `PosSearchView`; agrégations Catalog/Inventory | membership ACTIVE direct | `USE_POS` | à migrer |
+| GET | `/businesses/{SH}/products/{PR}/` | `ProductDetailView`; queryset | membership ACTIVE direct | `VIEW_CATALOG` | à migrer |
+| PATCH | `/businesses/{SH}/products/{PR}/` | `ProductDetailView`; serializer | `can_manage_business` | `MANAGE_CATALOG` | à migrer |
+| POST | `/businesses/{SH}/products/{PR}/archive/` | `ProductArchiveView`; modèle | `can_manage_business` | `MANAGE_CATALOG` | à migrer |
+| GET | `/businesses/{SH}/products/{PR}/variants/` | `ProductVariantListCreateView`; queryset | membership ACTIVE direct | `VIEW_CATALOG` | à migrer |
+| POST | `/businesses/{SH}/products/{PR}/variants/` | `ProductVariantListCreateView`; `ensure_can_create_variant`, `create_variant` | `can_manage_business` | `MANAGE_CATALOG` | à migrer |
+| GET | `/businesses/{SH}/products/{PR}/variants/{PV}/` | `ProductVariantDetailView`; queryset | membership ACTIVE direct | `VIEW_CATALOG` | à migrer |
+| PATCH | `/businesses/{SH}/products/{PR}/variants/{PV}/` | `ProductVariantDetailView`; serializer | `can_manage_business` | `MANAGE_CATALOG` | à migrer |
+
+### Inventory — 5 opérations
+
+| Méthode | Chemin | Vue ; service | Contrôle actuel | Permission cible | Statut |
+|---|---|---|---|---|---|
+| GET | `/businesses/{SH}/inventory/` | `InventoryListCreateView`; queryset | membership ACTIVE direct | `VIEW_INVENTORY` | à migrer |
+| POST | `/businesses/{SH}/inventory/` | `InventoryListCreateView`; `create_inventory_item` | `can_manage_business` | `MANAGE_INVENTORY` | à migrer |
+| GET | `/businesses/{SH}/inventory/{IV}/` | `InventoryDetailView`; queryset | membership ACTIVE direct | `VIEW_INVENTORY` | à migrer |
+| GET | `/businesses/{SH}/inventory/{IV}/movements/` | `StockMovementListCreateView`; queryset | membership ACTIVE direct | `VIEW_INVENTORY` | à migrer |
+| POST | `/businesses/{SH}/inventory/{IV}/movements/` | `StockMovementListCreateView`; `apply_stock_movement` | `can_manage_business` | `MANAGE_INVENTORY` | à migrer |
+
+### Purchases et fournisseurs — 19 opérations
+
+| Méthode | Chemin | Vue ; service | Contrôle actuel | Permission cible | Statut |
+|---|---|---|---|---|---|
+| GET | `/businesses/{SH}/suppliers/` | `Suppliers`; queryset | membership ACTIVE direct | `VIEW_PURCHASES` | à migrer |
+| POST | `/businesses/{SH}/suppliers/` | `Suppliers`; serializer | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
+| GET | `/businesses/{SH}/suppliers/{SU}/` | `SupplierDetail`; queryset | membership ACTIVE direct | `VIEW_PURCHASES` | à migrer |
+| PATCH | `/businesses/{SH}/suppliers/{SU}/` | `SupplierDetail`; serializer | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
+| GET | `/businesses/{SH}/purchases/` | `Purchases`; queryset | membership ACTIVE direct | `VIEW_PURCHASES` | à migrer |
+| POST | `/businesses/{SH}/purchases/` | `Purchases`; serializer | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
+| GET | `/businesses/{SH}/purchases/{PU}/` | `PurchaseDetail`; queryset | membership ACTIVE direct | `VIEW_PURCHASES` | à migrer |
+| PATCH | `/businesses/{SH}/purchases/{PU}/` | `PurchaseDetail`; serializer | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
+| GET | `/businesses/{SH}/purchases/{PU}/lines/` | `Lines`; queryset | membership ACTIVE direct | `VIEW_PURCHASES` | à migrer |
+| POST | `/businesses/{SH}/purchases/{PU}/lines/` | `Lines`; modèle | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
+| GET | `/businesses/{SH}/purchases/{PU}/lines/{PL}/` | `LineDetail`; queryset | membership ACTIVE direct | `VIEW_PURCHASES` | à migrer |
+| PATCH | `/businesses/{SH}/purchases/{PU}/lines/{PL}/` | `LineDetail`; serializer/modèle | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
+| DELETE | `/businesses/{SH}/purchases/{PU}/lines/{PL}/` | `LineDetail`; modèle | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
+| POST | `/businesses/{SH}/purchases/{PU}/confirm/` | `Confirm`; `transition` | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
+| POST | `/businesses/{SH}/purchases/{PU}/receive/` | `Receive`; `receive_purchase` | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
+| POST | `/businesses/{SH}/purchases/{PU}/cancel/` | `Cancel`; `transition` | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
+| GET | `/businesses/{SH}/purchases/{PU}/payments/` | `PurchasePayments`; queryset | membership ACTIVE direct | `VIEW_PURCHASES` | à migrer |
+| POST | `/businesses/{SH}/purchases/{PU}/payments/` | `PurchasePayments`; `add_supplier_payment` | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
+| POST | `/businesses/{SH}/purchases/{PU}/payments/{PP}/reverse/` | `SupplierPaymentReverse`; `reverse_supplier_payment` | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
+
+### Sales, clients et retours — 12 opérations
+
+| Méthode | Chemin | Vue ; service | Contrôle actuel | Permission cible | Statut |
+|---|---|---|---|---|---|
+| GET | `/businesses/{SH}/customers/` | `Customers`; queryset | membership ACTIVE direct | permission de lecture clients absente | à clarifier |
+| POST | `/businesses/{SH}/customers/` | `Customers`; serializer | membership ACTIVE uniquement | permission de gestion clients absente | à clarifier |
+| GET | `/businesses/{SH}/sales/` | `Sales`; queryset | membership ACTIVE direct | permission de lecture ventes absente | à clarifier |
+| POST | `/businesses/{SH}/sales/` | `Sales`; serializer | membership ACTIVE uniquement | `USE_POS` | à migrer |
+| GET | `/businesses/{SH}/sales/{SA}/` | `SD`; queryset | membership ACTIVE direct | permission de lecture ventes absente | à clarifier |
+| PATCH | `/businesses/{SH}/sales/{SA}/` | `SD`; serializer | membership ACTIVE uniquement | `USE_POS` | à migrer |
+| GET | `/businesses/{SH}/sales/{SA}/lines/` | `Lines`; queryset | membership ACTIVE direct | permission de lecture ventes absente | à clarifier |
+| POST | `/businesses/{SH}/sales/{SA}/lines/` | `Lines`; modèle | membership ACTIVE uniquement | `USE_POS` | à migrer |
+| POST | `/businesses/{SH}/sales/{SA}/complete/` | `Complete`; `complete` | membership ACTIVE uniquement | `USE_POS` | à migrer |
+| POST | `/businesses/{SH}/sales/{SA}/cancel/` | `Cancel`; `cancel` | membership ACTIVE uniquement | `MANAGE_SALES` | à migrer |
+| GET | `/businesses/{SH}/sales/{SA}/returns/` | `SaleReturns`; queryset | `can_manage_business` | `MANAGE_SALE_RETURNS` | à migrer |
+| POST | `/businesses/{SH}/sales/{SA}/returns/` | `SaleReturns`; `create_sale_return` | `can_manage_business` | `MANAGE_SALE_RETURNS` | à migrer |
+
+`USE_POS` convient aux mutations du ticket courant. Il ne suffit pas à justifier
+une lecture globale de toutes les ventes historiques, d'où la décision requise
+pour les trois GET Sales. De même, rattacher toute gestion client à `USE_POS`
+donnerait au vendeur des droits de référentiel non explicitement décidés.
+
+### Receivables — 5 opérations
+
+| Méthode | Chemin | Vue ; service | Contrôle actuel | Permission cible | Statut |
+|---|---|---|---|---|---|
+| GET | `/businesses/{SH}/receivables/` | `ReceivableListView`; queryset | membership ACTIVE direct | `VIEW_RECEIVABLES` | à migrer |
+| GET | `/businesses/{SH}/receivables/{RE}/` | `ReceivableDetailView`; queryset | membership ACTIVE direct | `VIEW_RECEIVABLES` | à migrer |
+| PATCH | `/businesses/{SH}/receivables/{RE}/` | `ReceivableDetailView`; modèle | `can_manage_business` | `MANAGE_RECEIVABLES` | à migrer |
+| GET | `/businesses/{SH}/receivables/{RE}/payments/` | `ReceivablePaymentsView`; queryset | membership ACTIVE direct | `VIEW_RECEIVABLES` | à migrer |
+| POST | `/businesses/{SH}/receivables/{RE}/payments/` | `ReceivablePaymentsView`; `add_payment` | membership ACTIVE uniquement | `MANAGE_RECEIVABLES` | à migrer |
+
+### Expenses — 12 opérations
+
+| Méthode | Chemin | Vue ; service | Contrôle actuel | Permission cible | Statut |
+|---|---|---|---|---|---|
+| GET | `/businesses/{SH}/expense-categories/` | `Categories`; queryset | membership ACTIVE direct | `VIEW_EXPENSES` | à migrer |
+| POST | `/businesses/{SH}/expense-categories/` | `Categories`; modèle | `can_manage_business` | `MANAGE_EXPENSE_CATEGORIES` | à migrer |
+| GET | `/businesses/{SH}/expense-categories/{EC}/` | `CategoryDetail`; queryset | membership ACTIVE direct | `VIEW_EXPENSES` | à migrer |
+| PATCH | `/businesses/{SH}/expense-categories/{EC}/` | `CategoryDetail`; modèle | `can_manage_business` | `MANAGE_EXPENSE_CATEGORIES` | à migrer |
+| GET | `/businesses/{SH}/expenses/` | `Expenses`; queryset | membership ACTIVE direct | `VIEW_EXPENSES` | à migrer |
+| POST | `/businesses/{SH}/expenses/` | `Expenses`; modèle | `can_manage_business` | `CREATE_EXPENSES` | à migrer |
+| GET | `/businesses/{SH}/expenses/{EX}/` | `ExpenseDetail`; queryset | membership ACTIVE direct | `VIEW_EXPENSES` | à migrer |
+| PATCH | `/businesses/{SH}/expenses/{EX}/` | `ExpenseDetail`; `update_expense` | `can_manage_business` | `MANAGE_EXPENSES` | à migrer |
+| POST | `/businesses/{SH}/expenses/{EX}/cancel/` | `ExpenseCancel`; `cancel_expense` | `can_manage_business` | `MANAGE_EXPENSES` | à migrer |
+| GET | `/businesses/{SH}/expenses/{EX}/payments/` | `ExpensePayments`; queryset | membership ACTIVE direct | `VIEW_EXPENSES` | à migrer |
+| POST | `/businesses/{SH}/expenses/{EX}/payments/` | `ExpensePayments`; `add_expense_payment` | `can_manage_business` | `MANAGE_EXPENSES` | à migrer |
+| POST | `/businesses/{SH}/expenses/{EX}/payments/{EP}/reverse/` | `ExpensePaymentReverse`; `reverse_expense_payment` | `can_manage_business` | `MANAGE_EXPENSES` | à migrer |
+
+### Finance — 3 opérations
+
+| Méthode | Chemin | Vue ; service | Contrôle actuel | Permission cible | Statut |
+|---|---|---|---|---|---|
+| GET | `/businesses/{SH}/financial-movements/` | `FinancialMovementListView`; queryset | `can_manage_business`, refus masqué en 404 | `VIEW_FINANCIAL_SUMMARY` | à migrer |
+| GET | `/businesses/{SH}/financial-movements/{FM}/` | `FinancialMovementDetailView`; queryset | `can_manage_business`, refus masqué en 404 | `VIEW_FINANCIAL_SUMMARY` | à migrer |
+| GET | `/businesses/{SH}/financial-summary/` | `FinancialSummaryView`; `financial_summary` | `can_manage_business`, refus masqué en 404 | `VIEW_FINANCIAL_SUMMARY` | à migrer |
+
+### Dashboard, rentabilité et rapports — 8 opérations
+
+| Méthode | Chemin | Vue ; service | Contrôle actuel | Permission cible | Statut |
+|---|---|---|---|---|---|
+| GET | `/businesses/{SH}/dashboard/` | `DashboardView`; `build_dashboard` | `can_manage_business`, refus masqué en 404 | `VIEW_DASHBOARD` | à migrer |
+| GET | `/businesses/{SH}/profitability-summary/` | `ProfitabilitySummaryView`; `build_profitability_summary` | `can_manage_business`, refus masqué en 404 | `VIEW_PROFITABILITY` | à migrer |
+| GET | `/businesses/{SH}/reports/sales/` | `SalesReportView`; `build_sales_series` | `can_manage_business`, refus masqué en 404 | `VIEW_REPORTS` | à migrer |
+| GET | `/businesses/{SH}/reports/products/` | `ProductReportView`; `build_product_top` | `can_manage_business`, refus masqué en 404 | `VIEW_REPORTS` | à migrer |
+| GET | `/businesses/{SH}/reports/expenses/` | `ExpensesReportView`; `build_expenses_report` | `can_manage_business`, refus masqué en 404 | `VIEW_REPORTS` | à migrer |
+| GET | `/businesses/{SH}/reports/receivables/` | `ReceivablesReportView`; agrégations | `can_manage_business`, refus masqué en 404 | `VIEW_REPORTS` | à migrer |
+| GET | `/businesses/{SH}/reports/purchases/` | `PurchasesReportView`; `build_purchases_report` | `can_manage_business`, refus masqué en 404 | `VIEW_REPORTS` | à migrer |
+| GET | `/businesses/{SH}/reports/supplier-debts/` | `SupplierDebtsReportView`; `debt_queryset` | `can_manage_business`, refus masqué en 404 | `VIEW_REPORTS` | à migrer |
+
+## Synthèse chiffrée
+
+| Statut | Opérations |
+|---|---:|
+| Conforme | 6 |
+| À migrer | 73 |
+| À clarifier | 7 |
+| **Total** | **86** |
+
+## Contrôles legacy et dupliqués
+
+Quatre familles de contrôles doivent disparaître progressivement des vues :
+
+1. `can_manage_business`, helper transitoire fondé sur `UPDATE_BUSINESS`, protège
+   45 opérations de catalogue, stock, achats, retours, créances, dépenses,
+   Finance et reporting avec une permission trop générale ;
+2. les recherches directes `members__identity` + `members__status="ACTIVE"`
+   sont répétées dans presque chaque mixin et contournent `membership_for` /
+   `require_permission` ;
+3. `can_view_members` porte la bonne permission mais n'utilise pas encore le
+   chemin canonique `require_permission`, notamment pour 403/404 ;
+4. chaque domaine fabrique manuellement ses réponses `Forbidden`/`Not found`,
+   parfois en renvoyant 404 pour une permission absente et parfois 403.
+
+Aucune comparaison applicative `role == OWNER`, `role == MANAGER`,
+`role in (...)` ou équivalent n'a été trouvée hors modèles, migrations, admin et
+tests. Un ancien MANAGER ne récupère donc aucun droit du fait de son rôle. Il
+peut toutefois utiliser les opérations protégées par la seule appartenance
+active, exactement comme tout membre sans permission.
+
+Les services métier des domaines Catalog, Inventory, Purchases, Sales,
+Receivables, Expenses et Finance valident leurs invariants métier mais ne
+réévaluent généralement pas `BusinessMemberPermission`. L'autorisation repose
+donc sur la vue appelante. Ce choix impose que chaque vue migre avant qu'un
+service sensible ne soit exposé par un nouveau point d'entrée.
+
+## Permissions manquantes — décisions requises
+
+Quatre capacités ne peuvent pas être exprimées précisément avec le registre
+actuel :
+
+1. **lecture des moyens de paiement actifs** : décider si elle reste un droit de
+   référence implicite pour tout membre actif ou si une permission
+   `VIEW_PAYMENT_METHODS` est nécessaire ;
+2. **lecture des clients** : une permission du type `VIEW_CUSTOMERS` éviterait
+   d'accorder `MANAGE_SALES` ou `USE_POS` à une consultation globale ;
+3. **gestion des clients** : une permission du type `MANAGE_CUSTOMERS` séparerait
+   le référentiel client de l'utilisation du POS ;
+4. **lecture globale des ventes** : une permission du type `VIEW_SALES` éviterait
+   qu'un vendeur `USE_POS` lise tout l'historique ou qu'un lecteur doive recevoir
+   `MANAGE_SALES`.
+
+Ces noms sont descriptifs pour la décision métier ; cet audit ne les ajoute ni
+au modèle ni à une migration.
+
+## Analyse de sécurité
+
+### Garanties déjà présentes
+
+- l'OWNER actif obtient toutes les permissions enregistrées via P1-A2 ;
+- les titres et le champ legacy `role` ne sont consultés par aucune décision
+  d'autorisation ;
+- les querysets d'objets sont systématiquement rattachés au Business résolu,
+  ce qui protège l'isolation tenant sur les routes examinées ;
+- les membres suspendus sont exclus par les scopes actuels ;
+- `can_manage_business` appelle désormais le moteur avec `write=True`, donc les
+  opérations qui l'utilisent sont bloquées sur un Business suspendu ou archivé.
+
+### Risques critiques
+
+1. **Mutations Sales sans permission** : création de client, création et édition
+   de vente/ligne, complétion et annulation sont accessibles à tout membre actif.
+   La complétion peut muter stock, créance et Finance.
+2. **Encaissement Receivable sans permission** : le POST paiement appelle
+   `add_payment` pour tout membre actif et peut créer un `FinancialMovement`.
+3. **Business inactif encore mutable sur ces chemins** : les écritures Sales et
+   paiement Receivable n'appellent pas `has_permission(..., write=True)` ; elles
+   restent donc possibles sur un Business `SUSPENDED` ou `ARCHIVED`.
+4. **Lecture sensible trop large** : tout membre actif peut lire clients, ventes,
+   créances, dépenses, achats, stock et catalogue indépendamment de ses
+   permissions individuelles.
+
+### Cohérence 403/404
+
+Le moteur P1-A2 définit : absence de membership = 404 ; membership existant mais
+non autorisé ou suspendu = 403. Aucune vue métier n'appelle encore directement
+`require_permission`. Comme les scopes filtrent d'abord les memberships ACTIVE,
+un membre suspendu reçoit actuellement 404. Les vues utilisant
+`can_manage_business` répondent tantôt 403, tantôt 404 pour le même défaut de
+permission. La migration doit résoudre le Business sans fuite inter-tenant,
+puis déléguer la distinction au moteur central.
+
+## Matrice fonctionnelle condensée
+
+| Domaine / opération | Permission existante retenue |
+|---|---|
+| Modifier Business | `UPDATE_BUSINESS` |
+| Consulter membres | `VIEW_MEMBERS` |
+| Gérer moyens de paiement | `MANAGE_PAYMENT_METHODS` |
+| Lire / gérer catalogue | `VIEW_CATALOG` / `MANAGE_CATALOG` |
+| Rechercher au POS | `USE_POS` |
+| Lire / gérer inventaire | `VIEW_INVENTORY` / `MANAGE_INVENTORY` |
+| Lire / gérer achats, fournisseurs et règlements | `VIEW_PURCHASES` / `MANAGE_PURCHASES` |
+| Créer/éditer/compléter un ticket POS | `USE_POS` |
+| Annuler/gérer une vente | `MANAGE_SALES` |
+| Lire/créer un retour | `MANAGE_SALE_RETURNS` |
+| Lire / gérer créances et encaissements | `VIEW_RECEIVABLES` / `MANAGE_RECEIVABLES` |
+| Lire dépenses | `VIEW_EXPENSES` |
+| Créer dépense | `CREATE_EXPENSES` |
+| Gérer catégories de dépense | `MANAGE_EXPENSE_CATEGORIES` |
+| Modifier/annuler/régler/reverser dépense | `MANAGE_EXPENSES` |
+| Lire journal et synthèse Finance | `VIEW_FINANCIAL_SUMMARY` |
+| Dashboard | `VIEW_DASHBOARD` |
+| Rentabilité | `VIEW_PROFITABILITY` |
+| Tous les rapports `/reports/*` | `VIEW_REPORTS` |
+
+## Plan de migration recommandé
+
+### P1-A3.2 — Sales et Receivables critiques
+
+Migrer d'abord les mutations `USE_POS`, `MANAGE_SALES`,
+`MANAGE_SALE_RETURNS` et `MANAGE_RECEIVABLES`. Tester les effets Stock,
+Receivable et Finance, l'idempotence, les Business inactifs et les 403/404.
+Décider séparément les permissions de lecture Sales/Customers avant d'ouvrir ces
+GET à autre chose qu'une politique explicitement validée.
+
+### P1-A3.3 — Expenses et Purchases financiers
+
+Migrer lectures, écritures, paiements et reversals vers leurs permissions
+granulaires. Vérifier que les services transactionnels ne sont appelés qu'après
+autorisation et que les historiques financiers restent inchangés.
+
+### P1-A3.4 — Catalog, POS search et Inventory
+
+Remplacer les mixins dupliqués par le moteur central, distinguer
+`VIEW_CATALOG`, `MANAGE_CATALOG`, `USE_POS`, `VIEW_INVENTORY` et
+`MANAGE_INVENTORY`, puis tester produits archivés et isolation Business.
+
+### P1-A3.5 — Finance, Dashboard, rentabilité et rapports
+
+Remplacer `UPDATE_BUSINESS` par les permissions de lecture dédiées. Tester chaque
+projection, l'absence de fuite financière, les périodes et le comportement des
+Business inactifs.
+
+### P1-A3.6 — Administration Business
+
+Migrer membres, modification Business et gestion des moyens de paiement.
+Trancher la lecture des moyens de paiement et préserver les lectures
+administratives strictement nécessaires au statut d'un Business inactif.
+
+### P1-A3.7 — Harmonisation finale
+
+Supprimer les usages API de `can_manage_business`, centraliser les mixins de
+résolution, harmoniser OpenAPI et les erreurs 403/404, puis exécuter la matrice
+transversale OWNER / permission accordée / révoquée / aucune permission /
+suspendu / autre Business / Business inactif.
+
+Chaque lot conserve les routes et payloads, n'ajoute pas de logique métier aux
+serializers, et peut être validé indépendamment avant le suivant.
+
+## Conclusion
+
+L'isolation par Business est globalement présente et aucun rôle ou titre legacy
+ne confère de privilège. En revanche, 73 opérations ont une permission existante
+mais n'utilisent pas encore le moteur avec cette permission, et 7 nécessitent une
+décision de granularité. Les écritures Sales et l'encaissement Receivable sont la
+priorité immédiate car elles autorisent aujourd'hui un membre actif sans droit
+individuel à produire des effets économiques et financiers.
