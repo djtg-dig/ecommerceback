@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 from apps.businesses.models import Business
 from apps.businesses.permissions import can_manage_business, membership_for
 from apps.reporting import resolve_reporting_period
+from apps.sales_report_serializers import ProductReportSerializer, SalesReportSerializer
 from apps.sales_reports import build_product_top, build_sales_series
 
 
@@ -40,5 +41,5 @@ class ProductReportView(ReportBase):
 
 
 period_params = [OpenApiParameter("period", str, enum=["today", "last_7_days", "last_30_days"]), OpenApiParameter("date_from", str), OpenApiParameter("date_to", str)]
-SalesReportView.get = extend_schema(tags=["Reporting"], operation_id="business_sales_report", parameters=period_params + [OpenApiParameter("group_by", str, enum=["day", "week", "month"])], responses={200: dict, 400: None, 404: None})(SalesReportView.get)
-ProductReportView.get = extend_schema(tags=["Reporting"], operation_id="business_products_report", parameters=period_params + [OpenApiParameter("limit", int)], responses={200: dict, 400: None, 404: None})(ProductReportView.get)
+SalesReportView.get = extend_schema(tags=["Reporting"], operation_id="business_sales_report", parameters=period_params + [OpenApiParameter("group_by", str, enum=["day", "week", "month"])], responses={200: SalesReportSerializer, 400: None, 404: None})(SalesReportView.get)
+ProductReportView.get = extend_schema(tags=["Reporting"], operation_id="business_products_report", parameters=period_params + [OpenApiParameter("limit", int)], responses={200: ProductReportSerializer, 400: None, 404: None})(ProductReportView.get)
