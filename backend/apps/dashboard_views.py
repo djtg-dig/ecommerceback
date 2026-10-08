@@ -3,6 +3,7 @@ from rest_framework.views import APIView
 from apps.businesses.models import Business
 from apps.businesses.permissions import can_manage_business, membership_for
 from apps.dashboard import build_dashboard
+from apps.dashboard_serializers import DashboardSerializer
 from apps.reporting import resolve_reporting_period
 
 class DashboardView(APIView):
@@ -24,5 +25,5 @@ DashboardView.get = extend_schema(
         OpenApiParameter("date_from", str, required=False),
         OpenApiParameter("date_to", str, required=False),
     ],
-    responses={200: dict, 400: None, 404: None},
+    responses={200: DashboardSerializer, 400: None, 404: None},
 )(DashboardView.get)
