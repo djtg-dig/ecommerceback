@@ -19,6 +19,8 @@ Business is the legal/operational tenant; a future BusinessLocation may represen
 
 `BusinessMember` sépare désormais trois notions : `is_owner` porte la propriété administrative unique du Business, `title` décrit librement le métier (Gérant, Gestionnaire, Caissier, Vendeur, Magasinier, Comptable ou Employé), et `BusinessMemberPermission` porte les autorisations individuelles. Un titre n'accorde aucun droit. L'OWNER actif possède implicitement toutes les permissions; les autres membres commencent sans permission et un membre suspendu n'en exerce aucune. Le champ `role` OWNER/MANAGER/EMPLOYEE est conservé uniquement pour la migration et la compatibilité des données historiques; les décisions d'autorisation ne le consultent plus.
 
+Le moteur central `apps.businesses.permissions` résout l'appartenance, valide le nom de permission et applique uniformément l'isolation tenant. Il distingue une absence d'appartenance (`404`) d'un membre connu mais non autorisé (`403`). Les lectures administratives autorisées restent disponibles pour un Business inactif, tandis que `write=True` bloque les écritures métier sur un Business `SUSPENDED` ou `ARCHIVED`. L'administration des permissions est transactionnelle et réservée au propriétaire actif. La migration endpoint par endpoint vers cette interface centralisée relève de P1-A3.
+
 
 ## Global catalog
 

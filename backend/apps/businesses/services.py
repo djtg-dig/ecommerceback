@@ -14,6 +14,7 @@ from .models import (
     BusinessMemberPermission,
     BusinessPaymentMethod,
 )
+from .permissions import validate_permission
 
 MAX_PUBLIC_ID_ATTEMPTS = 5
 DEFAULT_PAYMENT_METHODS = (
@@ -120,18 +121,20 @@ def replace_categories(business, codes, primary_category):
 
 def grant_permission(actor_member, member, permission):
     """Let an active owner grant one explicit permission in their Business."""
-    if permission not in BusinessMemberPermission.Permission.values:
-        raise ValidationError("Unknown Business permission.")
+    validate_permission(permission)
 
     with transaction.atomic():
         actor = BusinessMember.objects.select_for_update().get(pk=actor_member.pk)
         target = BusinessMember.objects.select_for_update().get(pk=member.pk)
+        business = Business.objects.select_for_update().get(pk=actor.business_id)
         if (
             not actor.is_owner
             or actor.status != BusinessMember.Status.ACTIVE
             or actor.business_id != target.business_id
         ):
             raise ValidationError("Only the active Business owner can grant permissions.")
+        if business.status != Business.Status.ACTIVE:
+            raise ValidationError("Permissions cannot be changed for an inactive Business.")
         if target.is_owner:
             raise ValidationError("Owners already have all permissions.")
         if target.status != BusinessMember.Status.ACTIVE:
@@ -146,15 +149,20 @@ def grant_permission(actor_member, member, permission):
 
 def revoke_permission(actor_member, member, permission):
     """Let an active owner revoke one explicit permission in their Business."""
+    validate_permission(permission)
+
     with transaction.atomic():
         actor = BusinessMember.objects.select_for_update().get(pk=actor_member.pk)
         target = BusinessMember.objects.select_for_update().get(pk=member.pk)
+        business = Business.objects.select_for_update().get(pk=actor.business_id)
         if (
             not actor.is_owner
             or actor.status != BusinessMember.Status.ACTIVE
             or actor.business_id != target.business_id
         ):
             raise ValidationError("Only the active Business owner can revoke permissions.")
+        if business.status != Business.Status.ACTIVE:
+            raise ValidationError("Permissions cannot be changed for an inactive Business.")
         if target.is_owner:
             raise ValidationError("Owner permissions are implicit and cannot be revoked.")
 

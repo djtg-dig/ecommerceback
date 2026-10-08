@@ -1,13 +1,27 @@
-from .models import BusinessMember, BusinessMemberPermission
+from django.core.exceptions import ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied
+
+from .models import Business, BusinessMember, BusinessMemberPermission
 
 
-def membership_for(identity, business):
-    """Return the identity's active membership in a Business, when it exists."""
-    return BusinessMember.objects.filter(
+def validate_permission(permission):
+    """Reject permission names that are not part of the server-side registry."""
+    if permission not in BusinessMemberPermission.Permission.values:
+        raise ValidationError({"permission": "Unknown Business permission."})
+
+    return permission
+
+
+def membership_for(identity, business, *, include_suspended=False):
+    """Return an identity's membership without crossing the Business boundary."""
+    memberships = BusinessMember.objects.select_related("business").filter(
         identity=identity,
         business=business,
-        status=BusinessMember.Status.ACTIVE,
-    ).first()
+    )
+    if not include_suspended:
+        memberships = memberships.filter(status=BusinessMember.Status.ACTIVE)
+
+    return memberships.first()
 
 
 def can_manage_business(member):
@@ -19,6 +33,7 @@ def can_manage_business(member):
     return has_permission(
         member,
         BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+        write=True,
     )
 
 
@@ -30,12 +45,39 @@ def can_view_members(member):
     )
 
 
-def has_permission(member, permission):
-    """Return True if the member is an active owner or holds the explicit permission."""
+def has_permission(member, permission, *, write=False):
+    """Evaluate one registered permission from trusted membership data.
+
+    Reads remain possible on an inactive Business for an active authorized member,
+    so administrative status information stays available. Business writes are
+    denied unless the Business itself is active.
+    """
+    validate_permission(permission)
+
     if not member or member.status != BusinessMember.Status.ACTIVE:
+        return False
+    if write and member.business.status != Business.Status.ACTIVE:
         return False
     if member.is_owner:
         return True
     return BusinessMemberPermission.objects.filter(
         member=member, permission=permission
     ).exists()
+
+
+def require_permission(identity, business, permission, *, write=False):
+    """Return the authorized member or raise the API's canonical 404/403 errors.
+
+    A missing membership is deliberately indistinguishable from an unknown
+    Business. A suspended member is known to the tenant but has no authorization,
+    so it receives 403. Callers mark business mutations with ``write=True``.
+    """
+    validate_permission(permission)
+    member = membership_for(identity, business, include_suspended=True)
+
+    if member is None:
+        raise NotFound("Not found.")
+    if not has_permission(member, permission, write=write):
+        raise PermissionDenied("Forbidden.")
+
+    return member

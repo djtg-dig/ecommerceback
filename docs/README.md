@@ -4,6 +4,7 @@ Ecommerce est le backend métier multi-tenant. Carri Account fournit l'identité
 
 - [Architecture](architecture.md)
 - [Authentication](authentication.md)
+- [Business permissions](permissions.md)
 - [Database](database.md)
 - [API](api.md)
 - [Public identifiers](identifiers.md)
