@@ -41,13 +41,18 @@ def setup_business():
     manager_member = BusinessMember.objects.create(
         business=business, identity=manager, role="MANAGER"
     )
-    BusinessMember.objects.create(
+    employee_member = BusinessMember.objects.create(
         business=business, identity=employee, role="EMPLOYEE"
     )
+    for permission in (
+        BusinessMemberPermission.Permission.MANAGE_EXPENSE_CATEGORIES,
+        BusinessMemberPermission.Permission.MANAGE_EXPENSES,
+    ):
+        grant_permission(owner_member, manager_member, permission)
     grant_permission(
         owner_member,
-        manager_member,
-        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+        employee_member,
+        BusinessMemberPermission.Permission.VIEW_EXPENSES,
     )
     ensure_default_expense_categories(business)
     return business, owner, manager, employee, outsider

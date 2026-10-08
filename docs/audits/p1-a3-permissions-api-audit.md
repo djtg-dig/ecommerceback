@@ -88,25 +88,25 @@ obtenir les erreurs canoniques de `require_permission`.
 
 | Méthode | Chemin | Vue ; service | Contrôle actuel | Permission cible | Statut |
 |---|---|---|---|---|---|
-| GET | `/businesses/{SH}/suppliers/` | `Suppliers`; queryset | membership ACTIVE direct | `VIEW_PURCHASES` | à migrer |
-| POST | `/businesses/{SH}/suppliers/` | `Suppliers`; serializer | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
-| GET | `/businesses/{SH}/suppliers/{SU}/` | `SupplierDetail`; queryset | membership ACTIVE direct | `VIEW_PURCHASES` | à migrer |
-| PATCH | `/businesses/{SH}/suppliers/{SU}/` | `SupplierDetail`; serializer | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
-| GET | `/businesses/{SH}/purchases/` | `Purchases`; queryset | membership ACTIVE direct | `VIEW_PURCHASES` | à migrer |
-| POST | `/businesses/{SH}/purchases/` | `Purchases`; serializer | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
-| GET | `/businesses/{SH}/purchases/{PU}/` | `PurchaseDetail`; queryset | membership ACTIVE direct | `VIEW_PURCHASES` | à migrer |
-| PATCH | `/businesses/{SH}/purchases/{PU}/` | `PurchaseDetail`; serializer | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
-| GET | `/businesses/{SH}/purchases/{PU}/lines/` | `Lines`; queryset | membership ACTIVE direct | `VIEW_PURCHASES` | à migrer |
-| POST | `/businesses/{SH}/purchases/{PU}/lines/` | `Lines`; modèle | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
-| GET | `/businesses/{SH}/purchases/{PU}/lines/{PL}/` | `LineDetail`; queryset | membership ACTIVE direct | `VIEW_PURCHASES` | à migrer |
-| PATCH | `/businesses/{SH}/purchases/{PU}/lines/{PL}/` | `LineDetail`; serializer/modèle | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
-| DELETE | `/businesses/{SH}/purchases/{PU}/lines/{PL}/` | `LineDetail`; modèle | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
-| POST | `/businesses/{SH}/purchases/{PU}/confirm/` | `Confirm`; `transition` | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
-| POST | `/businesses/{SH}/purchases/{PU}/receive/` | `Receive`; `receive_purchase` | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
-| POST | `/businesses/{SH}/purchases/{PU}/cancel/` | `Cancel`; `transition` | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
-| GET | `/businesses/{SH}/purchases/{PU}/payments/` | `PurchasePayments`; queryset | membership ACTIVE direct | `VIEW_PURCHASES` | à migrer |
-| POST | `/businesses/{SH}/purchases/{PU}/payments/` | `PurchasePayments`; `add_supplier_payment` | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
-| POST | `/businesses/{SH}/purchases/{PU}/payments/{PP}/reverse/` | `SupplierPaymentReverse`; `reverse_supplier_payment` | `can_manage_business` | `MANAGE_PURCHASES` | à migrer |
+| GET | `/businesses/{SH}/suppliers/` | `Suppliers`; queryset | `require_permission(..., VIEW_PURCHASES)` | `VIEW_PURCHASES` | conforme — P1-A3.3 |
+| POST | `/businesses/{SH}/suppliers/` | `Suppliers`; serializer | `require_permission(..., MANAGE_PURCHASES, write=True)` | `MANAGE_PURCHASES` | conforme — P1-A3.3 |
+| GET | `/businesses/{SH}/suppliers/{SU}/` | `SupplierDetail`; queryset | `require_permission(..., VIEW_PURCHASES)` | `VIEW_PURCHASES` | conforme — P1-A3.3 |
+| PATCH | `/businesses/{SH}/suppliers/{SU}/` | `SupplierDetail`; serializer | `require_permission(..., MANAGE_PURCHASES, write=True)` | `MANAGE_PURCHASES` | conforme — P1-A3.3 |
+| GET | `/businesses/{SH}/purchases/` | `Purchases`; queryset | `require_permission(..., VIEW_PURCHASES)` | `VIEW_PURCHASES` | conforme — P1-A3.3 |
+| POST | `/businesses/{SH}/purchases/` | `Purchases`; serializer | `require_permission(..., MANAGE_PURCHASES, write=True)` | `MANAGE_PURCHASES` | conforme — P1-A3.3 |
+| GET | `/businesses/{SH}/purchases/{PU}/` | `PurchaseDetail`; queryset | `require_permission(..., VIEW_PURCHASES)` | `VIEW_PURCHASES` | conforme — P1-A3.3 |
+| PATCH | `/businesses/{SH}/purchases/{PU}/` | `PurchaseDetail`; serializer | `require_permission(..., MANAGE_PURCHASES, write=True)` | `MANAGE_PURCHASES` | conforme — P1-A3.3 |
+| GET | `/businesses/{SH}/purchases/{PU}/lines/` | `Lines`; queryset | `require_permission(..., VIEW_PURCHASES)` | `VIEW_PURCHASES` | conforme — P1-A3.3 |
+| POST | `/businesses/{SH}/purchases/{PU}/lines/` | `Lines`; modèle | `require_permission(..., MANAGE_PURCHASES, write=True)` | `MANAGE_PURCHASES` | conforme — P1-A3.3 |
+| GET | `/businesses/{SH}/purchases/{PU}/lines/{PL}/` | `LineDetail`; queryset | `require_permission(..., VIEW_PURCHASES)` | `VIEW_PURCHASES` | conforme — P1-A3.3 |
+| PATCH | `/businesses/{SH}/purchases/{PU}/lines/{PL}/` | `LineDetail`; serializer/modèle | `require_permission(..., MANAGE_PURCHASES, write=True)` | `MANAGE_PURCHASES` | conforme — P1-A3.3 |
+| DELETE | `/businesses/{SH}/purchases/{PU}/lines/{PL}/` | `LineDetail`; modèle | `require_permission(..., MANAGE_PURCHASES, write=True)` | `MANAGE_PURCHASES` | conforme — P1-A3.3 |
+| POST | `/businesses/{SH}/purchases/{PU}/confirm/` | `Confirm`; `transition` | `require_permission(..., MANAGE_PURCHASES, write=True)` | `MANAGE_PURCHASES` | conforme — P1-A3.3 |
+| POST | `/businesses/{SH}/purchases/{PU}/receive/` | `Receive`; `receive_purchase` | `require_permission(..., MANAGE_PURCHASES, write=True)` | `MANAGE_PURCHASES` | conforme — P1-A3.3 |
+| POST | `/businesses/{SH}/purchases/{PU}/cancel/` | `Cancel`; `transition` | `require_permission(..., MANAGE_PURCHASES, write=True)` | `MANAGE_PURCHASES` | conforme — P1-A3.3 |
+| GET | `/businesses/{SH}/purchases/{PU}/payments/` | `PurchasePayments`; queryset | `require_permission(..., VIEW_PURCHASES)` | `VIEW_PURCHASES` | conforme — P1-A3.3 |
+| POST | `/businesses/{SH}/purchases/{PU}/payments/` | `PurchasePayments`; `add_supplier_payment` | `require_permission(..., MANAGE_PURCHASES, write=True)` | `MANAGE_PURCHASES` | conforme — P1-A3.3 |
+| POST | `/businesses/{SH}/purchases/{PU}/payments/{PP}/reverse/` | `SupplierPaymentReverse`; `reverse_supplier_payment` | `require_permission(..., MANAGE_PURCHASES, write=True)` | `MANAGE_PURCHASES` | conforme — P1-A3.3 |
 
 ### Sales, clients et retours — 12 opérations
 
@@ -144,18 +144,18 @@ donnerait au vendeur des droits de référentiel non explicitement décidés.
 
 | Méthode | Chemin | Vue ; service | Contrôle actuel | Permission cible | Statut |
 |---|---|---|---|---|---|
-| GET | `/businesses/{SH}/expense-categories/` | `Categories`; queryset | membership ACTIVE direct | `VIEW_EXPENSES` | à migrer |
-| POST | `/businesses/{SH}/expense-categories/` | `Categories`; modèle | `can_manage_business` | `MANAGE_EXPENSE_CATEGORIES` | à migrer |
-| GET | `/businesses/{SH}/expense-categories/{EC}/` | `CategoryDetail`; queryset | membership ACTIVE direct | `VIEW_EXPENSES` | à migrer |
-| PATCH | `/businesses/{SH}/expense-categories/{EC}/` | `CategoryDetail`; modèle | `can_manage_business` | `MANAGE_EXPENSE_CATEGORIES` | à migrer |
-| GET | `/businesses/{SH}/expenses/` | `Expenses`; queryset | membership ACTIVE direct | `VIEW_EXPENSES` | à migrer |
-| POST | `/businesses/{SH}/expenses/` | `Expenses`; modèle | `can_manage_business` | `CREATE_EXPENSES` | à migrer |
-| GET | `/businesses/{SH}/expenses/{EX}/` | `ExpenseDetail`; queryset | membership ACTIVE direct | `VIEW_EXPENSES` | à migrer |
-| PATCH | `/businesses/{SH}/expenses/{EX}/` | `ExpenseDetail`; `update_expense` | `can_manage_business` | `MANAGE_EXPENSES` | à migrer |
-| POST | `/businesses/{SH}/expenses/{EX}/cancel/` | `ExpenseCancel`; `cancel_expense` | `can_manage_business` | `MANAGE_EXPENSES` | à migrer |
-| GET | `/businesses/{SH}/expenses/{EX}/payments/` | `ExpensePayments`; queryset | membership ACTIVE direct | `VIEW_EXPENSES` | à migrer |
-| POST | `/businesses/{SH}/expenses/{EX}/payments/` | `ExpensePayments`; `add_expense_payment` | `can_manage_business` | `MANAGE_EXPENSES` | à migrer |
-| POST | `/businesses/{SH}/expenses/{EX}/payments/{EP}/reverse/` | `ExpensePaymentReverse`; `reverse_expense_payment` | `can_manage_business` | `MANAGE_EXPENSES` | à migrer |
+| GET | `/businesses/{SH}/expense-categories/` | `Categories`; queryset | `require_permission(..., VIEW_EXPENSES)` | `VIEW_EXPENSES` | conforme — P1-A3.3 |
+| POST | `/businesses/{SH}/expense-categories/` | `Categories`; modèle | `require_permission(..., MANAGE_EXPENSE_CATEGORIES, write=True)` | `MANAGE_EXPENSE_CATEGORIES` | conforme — P1-A3.3 |
+| GET | `/businesses/{SH}/expense-categories/{EC}/` | `CategoryDetail`; queryset | `require_permission(..., VIEW_EXPENSES)` | `VIEW_EXPENSES` | conforme — P1-A3.3 |
+| PATCH | `/businesses/{SH}/expense-categories/{EC}/` | `CategoryDetail`; modèle | `require_permission(..., MANAGE_EXPENSE_CATEGORIES, write=True)` | `MANAGE_EXPENSE_CATEGORIES` | conforme — P1-A3.3 |
+| GET | `/businesses/{SH}/expenses/` | `Expenses`; queryset | `require_permission(..., VIEW_EXPENSES)` | `VIEW_EXPENSES` | conforme — P1-A3.3 |
+| POST | `/businesses/{SH}/expenses/` | `Expenses`; modèle | `require_permission(..., CREATE_EXPENSES, write=True)` | `CREATE_EXPENSES` | conforme — P1-A3.3 |
+| GET | `/businesses/{SH}/expenses/{EX}/` | `ExpenseDetail`; queryset | `require_permission(..., VIEW_EXPENSES)` | `VIEW_EXPENSES` | conforme — P1-A3.3 |
+| PATCH | `/businesses/{SH}/expenses/{EX}/` | `ExpenseDetail`; `update_expense` | `require_permission(..., MANAGE_EXPENSES, write=True)` | `MANAGE_EXPENSES` | conforme — P1-A3.3 |
+| POST | `/businesses/{SH}/expenses/{EX}/cancel/` | `ExpenseCancel`; `cancel_expense` | `require_permission(..., MANAGE_EXPENSES, write=True)` | `MANAGE_EXPENSES` | conforme — P1-A3.3 |
+| GET | `/businesses/{SH}/expenses/{EX}/payments/` | `ExpensePayments`; queryset | `require_permission(..., VIEW_EXPENSES)` | `VIEW_EXPENSES` | conforme — P1-A3.3 |
+| POST | `/businesses/{SH}/expenses/{EX}/payments/` | `ExpensePayments`; `add_expense_payment` | `require_permission(..., MANAGE_EXPENSES, write=True)` | `MANAGE_EXPENSES` | conforme — P1-A3.3 |
+| POST | `/businesses/{SH}/expenses/{EX}/payments/{EP}/reverse/` | `ExpensePaymentReverse`; `reverse_expense_payment` | `require_permission(..., MANAGE_EXPENSES, write=True)` | `MANAGE_EXPENSES` | conforme — P1-A3.3 |
 
 ### Finance — 3 opérations
 
@@ -182,8 +182,8 @@ donnerait au vendeur des droits de référentiel non explicitement décidés.
 
 | Statut | Opérations |
 |---|---:|
-| Conforme | 15 |
-| À migrer | 64 |
+| Conforme | 46 |
+| À migrer | 33 |
 | À clarifier | 7 |
 | **Total** | **86** |
 
@@ -192,8 +192,8 @@ donnerait au vendeur des droits de référentiel non explicitement décidés.
 Quatre familles de contrôles doivent disparaître progressivement des vues :
 
 1. `can_manage_business`, helper transitoire fondé sur `UPDATE_BUSINESS`, protège
-   42 opérations de configuration Business, catalogue, stock, achats, dépenses,
-   Finance et reporting avec une permission trop générale ;
+   encore 23 opérations de configuration Business, catalogue, stock, Finance et
+   reporting avec une permission trop générale ;
 2. les recherches directes `members__identity` + `members__status="ACTIVE"`
    sont répétées dans presque chaque mixin et contournent `membership_for` /
    `require_permission` ;
@@ -256,19 +256,18 @@ au modèle ni à une migration.
 3. **Business inactif mutable — corrigé pour P1-A3.2** : les neuf opérations
    migrées utilisent `write=True` pour leurs mutations ; `SUSPENDED` et
    `ARCHIVED` sont refusés.
-4. **Lecture sensible trop large** : tout membre actif peut lire clients, ventes,
-   créances, dépenses, achats, stock et catalogue indépendamment de ses
-   permissions individuelles.
+4. **Lecture sensible trop large — partiellement corrigée P1-A3.3** : achats,
+   fournisseurs et dépenses exigent désormais leur permission de lecture. Tout
+   membre actif peut encore lire clients, ventes, créances, stock et catalogue
+   indépendamment de ses permissions individuelles.
 
 ### Cohérence 403/404
 
 Le moteur P1-A2 définit : absence de membership = 404 ; membership existant mais
-non autorisé ou suspendu = 403. Aucune vue métier n'appelle encore directement
-`require_permission`. Comme les scopes filtrent d'abord les memberships ACTIVE,
-un membre suspendu reçoit actuellement 404. Les vues utilisant
-`can_manage_business` répondent tantôt 403, tantôt 404 pour le même défaut de
-permission. La migration doit résoudre le Business sans fuite inter-tenant,
-puis déléguer la distinction au moteur central.
+non autorisé ou suspendu = 403. Les vues Sales/Receivables migrées en P1-A3.2 et
+Purchases/Expenses migrées en P1-A3.3 appliquent désormais cette distinction en
+résolvant d'abord le Business puis en appelant `require_permission`. Les autres
+scopes directs et usages de `can_manage_business` restent à harmoniser.
 
 ## Matrice fonctionnelle condensée
 
@@ -319,11 +318,27 @@ explicite, révocation implicite des droits liés au titre, membre suspendu,
 isolation tenant et invariants transactionnels existants. `POST /customers/`
 reste volontairement inchangé jusqu'à la décision sur `MANAGE_CUSTOMERS`.
 
-### P1-A3.3 — Expenses et Purchases financiers
+### P1-A3.3 — Expenses et Purchases financiers — terminé
 
 Migrer lectures, écritures, paiements et reversals vers leurs permissions
 granulaires. Vérifier que les services transactionnels ne sont appelés qu'après
 autorisation et que les historiques financiers restent inchangés.
+
+Endpoints effectivement migrés :
+
+- les 4 opérations fournisseurs et les 15 opérations achats, lignes,
+  transitions, règlements et reversals utilisent respectivement
+  `VIEW_PURCHASES` et `MANAGE_PURCHASES` ;
+- les 5 lectures dépenses/catégories/règlements utilisent `VIEW_EXPENSES` ;
+- la création de dépense utilise `CREATE_EXPENSES`, les 2 mutations de
+  catégories utilisent `MANAGE_EXPENSE_CATEGORIES` et les 4 autres mutations
+  dépenses/règlements utilisent `MANAGE_EXPENSES`.
+
+Toutes les mutations utilisent `write=True`, donc elles sont refusées sur un
+Business suspendu ou archivé. Les tests couvrent l'OWNER, l'ancien MANAGER sans
+permission, les permissions explicites et indépendantes, le membre suspendu,
+l'isolation tenant et les statuts inactifs du Business. Aucun service
+transactionnel ni historique financier n'a été modifié.
 
 ### P1-A3.4 — Catalog, POS search et Inventory
 
@@ -356,8 +371,9 @@ serializers, et peut être validé indépendamment avant le suivant.
 ## Conclusion
 
 L'isolation par Business est globalement présente et aucun rôle ou titre legacy
-ne confère de privilège. Après P1-A3.2, 64 opérations ont encore une permission
+ne confère de privilège. Après P1-A3.3, 33 opérations ont encore une permission
 existante mais n'utilisent pas le moteur avec cette permission, et 7 nécessitent
-une décision de granularité. Les mutations économiques Sales/Returns/Receivables
-du premier lot sont désormais centralisées ; la création de client et les
-lectures sensibles trop larges restent les priorités documentées.
+une décision de granularité. Les opérations Sales/Returns/Receivables critiques
+ainsi que tout le périmètre Purchases/Expenses sont désormais centralisés ; la
+création de client et les autres lectures sensibles trop larges restent les
+priorités documentées.

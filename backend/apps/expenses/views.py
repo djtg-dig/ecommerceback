@@ -8,8 +8,8 @@ from drf_spectacular.utils import OpenApiParameter, OpenApiTypes, extend_schema
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.businesses.models import Business
-from apps.businesses.permissions import can_manage_business, membership_for
+from apps.businesses.models import Business, BusinessMemberPermission
+from apps.businesses.permissions import require_permission
 from apps.common.choices import PaymentMethod
 
 from .models import Expense, ExpenseCategory
@@ -32,6 +32,7 @@ from .services import (
     reverse_expense_payment,
     update_expense,
 )
+
 
 def category_data(category):
     return {
@@ -69,12 +70,19 @@ def expense_data(expense):
 
 
 class BusinessScopedView(APIView):
-    def business_for(self, request, public_id):
-        return Business.objects.filter(
-            public_id=public_id,
-            members__identity=request.user,
-            members__status="ACTIVE",
-        ).first()
+    def business_for(self, request, public_id, permission, *, write=False):
+        """Resolve one tenant and enforce its server-defined permission."""
+        business = Business.objects.filter(public_id=public_id).first()
+        if business is None:
+            return None
+
+        require_permission(
+            request.user,
+            business,
+            permission,
+            write=write,
+        )
+        return business
 
     @staticmethod
     def not_found():
@@ -84,16 +92,13 @@ class BusinessScopedView(APIView):
     def forbidden():
         return Response({"detail": "Forbidden."}, status=403)
 
-    def manageable_business(self, request, public_id):
-        business = self.business_for(request, public_id)
-        if not business:
-            return None
-        return business if can_manage_business(membership_for(request.user, business)) else False
-
-
 class Categories(BusinessScopedView):
     def get(self, request, business_public_id):
-        business = self.business_for(request, business_public_id)
+        business = self.business_for(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_EXPENSES,
+        )
         if not business:
             return self.not_found()
         categories = ExpenseCategory.objects.filter(business=business)
@@ -101,11 +106,14 @@ class Categories(BusinessScopedView):
         return Response(category_data(category) for category in categories)
 
     def post(self, request, business_public_id):
-        business = self.manageable_business(request, business_public_id)
+        business = self.business_for(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.MANAGE_EXPENSE_CATEGORIES,
+            write=True,
+        )
         if business is None:
             return self.not_found()
-        if business is False:
-            return self.forbidden()
         name = request.data.get("name")
         if not isinstance(name, str) or not name.strip():
             return Response({"detail": "A category name is required."}, status=400)
@@ -129,8 +137,21 @@ class Categories(BusinessScopedView):
 
 
 class CategoryDetail(BusinessScopedView):
-    def get_object(self, request, business_public_id, category_public_id):
-        business = self.business_for(request, business_public_id)
+    def get_object(
+        self,
+        request,
+        business_public_id,
+        category_public_id,
+        permission,
+        *,
+        write=False,
+    ):
+        business = self.business_for(
+            request,
+            business_public_id,
+            permission,
+            write=write,
+        )
         if not business:
             return None, None
         category = ExpenseCategory.objects.filter(
@@ -141,17 +162,26 @@ class CategoryDetail(BusinessScopedView):
         return business, category
 
     def get(self, request, business_public_id, category_public_id):
-        business, category = self.get_object(request, business_public_id, category_public_id)
+        business, category = self.get_object(
+            request,
+            business_public_id,
+            category_public_id,
+            BusinessMemberPermission.Permission.VIEW_EXPENSES,
+        )
         if not business or not category:
             return self.not_found()
         return Response(category_data(category))
 
     def patch(self, request, business_public_id, category_public_id):
-        business, category = self.get_object(request, business_public_id, category_public_id)
+        business, category = self.get_object(
+            request,
+            business_public_id,
+            category_public_id,
+            BusinessMemberPermission.Permission.MANAGE_EXPENSE_CATEGORIES,
+            write=True,
+        )
         if not business or not category:
             return self.not_found()
-        if not can_manage_business(membership_for(request.user, business)):
-            return self.forbidden()
         immutable_fields = {"public_id", "business", "is_system"}
         if category.is_system:
             immutable_fields.update({"code", "name", "description", "sort_order"})
@@ -174,7 +204,11 @@ class CategoryDetail(BusinessScopedView):
 
 class Expenses(BusinessScopedView):
     def get(self, request, business_public_id):
-        business = self.business_for(request, business_public_id)
+        business = self.business_for(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_EXPENSES,
+        )
         if not business:
             return self.not_found()
         queryset = Expense.objects.select_related("category").filter(business=business).annotate(
@@ -215,11 +249,14 @@ class Expenses(BusinessScopedView):
         return Response([expense_data(expense) for expense in queryset])
 
     def post(self, request, business_public_id):
-        business = self.manageable_business(request, business_public_id)
+        business = self.business_for(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.CREATE_EXPENSES,
+            write=True,
+        )
         if business is None:
             return self.not_found()
-        if business is False:
-            return self.forbidden()
         category = ExpenseCategory.objects.filter(
             business=business, public_id=request.data.get("category"), is_active=True
         ).first()
@@ -264,8 +301,21 @@ class Expenses(BusinessScopedView):
 
 
 class ExpenseDetail(BusinessScopedView):
-    def get_object(self, request, business_public_id, expense_public_id):
-        business = self.business_for(request, business_public_id)
+    def get_object(
+        self,
+        request,
+        business_public_id,
+        expense_public_id,
+        permission,
+        *,
+        write=False,
+    ):
+        business = self.business_for(
+            request,
+            business_public_id,
+            permission,
+            write=write,
+        )
         if not business:
             return None, None
         expense = Expense.objects.select_related("category").annotate(
@@ -279,17 +329,26 @@ class ExpenseDetail(BusinessScopedView):
         return business, expense
 
     def get(self, request, business_public_id, expense_public_id):
-        business, expense = self.get_object(request, business_public_id, expense_public_id)
+        business, expense = self.get_object(
+            request,
+            business_public_id,
+            expense_public_id,
+            BusinessMemberPermission.Permission.VIEW_EXPENSES,
+        )
         if not business or not expense:
             return self.not_found()
         return Response(expense_data(expense))
 
     def patch(self, request, business_public_id, expense_public_id):
-        business, expense = self.get_object(request, business_public_id, expense_public_id)
+        business, expense = self.get_object(
+            request,
+            business_public_id,
+            expense_public_id,
+            BusinessMemberPermission.Permission.MANAGE_EXPENSES,
+            write=True,
+        )
         if not business or not expense:
             return self.not_found()
-        if not can_manage_business(membership_for(request.user, business)):
-            return self.forbidden()
         allowed_fields = {
             "category",
             "amount",
@@ -353,11 +412,15 @@ class ExpenseDetail(BusinessScopedView):
 
 class ExpenseCancel(BusinessScopedView):
     def post(self, request, business_public_id, expense_public_id):
-        business, expense = ExpenseDetail().get_object(request, business_public_id, expense_public_id)
+        business, expense = ExpenseDetail().get_object(
+            request,
+            business_public_id,
+            expense_public_id,
+            BusinessMemberPermission.Permission.MANAGE_EXPENSES,
+            write=True,
+        )
         if not business or not expense:
             return self.not_found()
-        if not can_manage_business(membership_for(request.user, business)):
-            return self.forbidden()
         reason = request.data.get("cancellation_reason", "")
         if not isinstance(reason, str) or not reason.strip():
             return Response({"detail": "A cancellation reason is required."}, status=400)
@@ -384,31 +447,63 @@ def expense_payment_data(payment):
 
 
 class ExpensePayments(BusinessScopedView):
-    def get_expense(self, request, business_public_id, expense_public_id):
-        business = self.business_for(request, business_public_id)
+    def get_expense(
+        self,
+        request,
+        business_public_id,
+        expense_public_id,
+        permission,
+        *,
+        write=False,
+    ):
+        business = self.business_for(
+            request,
+            business_public_id,
+            permission,
+            write=write,
+        )
         if not business:
             return None, None
-        return business, Expense.objects.filter(business=business, public_id=expense_public_id).first()
+        expense = Expense.objects.filter(
+            business=business,
+            public_id=expense_public_id,
+        ).first()
+        return business, expense
 
     def get(self, request, business_public_id, expense_public_id):
-        business, expense = self.get_expense(request, business_public_id, expense_public_id)
+        business, expense = self.get_expense(
+            request,
+            business_public_id,
+            expense_public_id,
+            BusinessMemberPermission.Permission.VIEW_EXPENSES,
+        )
         if not business or not expense:
             return self.not_found()
-        return Response([expense_payment_data(payment) for payment in expense.payments.select_related("created_by", "reversed_by")])
+        payments = expense.payments.select_related("created_by", "reversed_by")
+        return Response([expense_payment_data(payment) for payment in payments])
 
     def post(self, request, business_public_id, expense_public_id):
-        business, expense = self.get_expense(request, business_public_id, expense_public_id)
+        business, expense = self.get_expense(
+            request,
+            business_public_id,
+            expense_public_id,
+            BusinessMemberPermission.Permission.MANAGE_EXPENSES,
+            write=True,
+        )
         if not business or not expense:
             return self.not_found()
-        if not can_manage_business(membership_for(request.user, business)):
-            return self.forbidden()
         serializer = ExpensePaymentCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         key = request.headers.get("Idempotency-Key", "")
         if len(key) > 255:
             return Response({"detail": "Invalid Idempotency-Key."}, status=400)
         try:
-            payment = add_expense_payment(expense, request.user, idempotency_key=key, **serializer.validated_data)
+            payment = add_expense_payment(
+                expense,
+                request.user,
+                idempotency_key=key,
+                **serializer.validated_data,
+            )
         except ExpensePaymentIdempotencyConflict as error:
             return Response({"detail": str(error)}, status=409)
         except ValidationError as error:
@@ -417,17 +512,35 @@ class ExpensePayments(BusinessScopedView):
 
 
 class ExpensePaymentReverse(ExpensePayments):
-    def post(self, request, business_public_id, expense_public_id, payment_public_id):
-        business, expense = self.get_expense(request, business_public_id, expense_public_id)
-        payment = expense.payments.filter(public_id=payment_public_id).first() if expense else None
+    def post(
+        self,
+        request,
+        business_public_id,
+        expense_public_id,
+        payment_public_id,
+    ):
+        business, expense = self.get_expense(
+            request,
+            business_public_id,
+            expense_public_id,
+            BusinessMemberPermission.Permission.MANAGE_EXPENSES,
+            write=True,
+        )
+        payment = (
+            expense.payments.filter(public_id=payment_public_id).first()
+            if expense
+            else None
+        )
         if not business or not expense or not payment:
             return self.not_found()
-        if not can_manage_business(membership_for(request.user, business)):
-            return self.forbidden()
         serializer = ExpensePaymentReverseSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            payment = reverse_expense_payment(payment, request.user, serializer.validated_data["reason"])
+            payment = reverse_expense_payment(
+                payment,
+                request.user,
+                serializer.validated_data["reason"],
+            )
         except ValidationError as error:
             return Response({"detail": str(error)}, status=400)
         return Response(expense_payment_data(payment))
@@ -475,7 +588,7 @@ Categories.get = extend_schema(
     tags=["Expense Categories"],
     operation_id="expense_category_list",
     parameters=[_business_id],
-    responses={200: ExpenseCategorySerializer(many=True), 404: None},
+    responses={200: ExpenseCategorySerializer(many=True), 403: None, 404: None},
 )(Categories.get)
 Categories.post = extend_schema(
     tags=["Expense Categories"],
@@ -483,13 +596,16 @@ Categories.post = extend_schema(
     parameters=[_business_id],
     request=ExpenseCategoryCreateSerializer,
     responses={201: ExpenseCategorySerializer, 400: None, 403: None, 404: None},
-    description="OWNER et MANAGER créent les catégories personnalisées d'un Business.",
+    description=(
+        "Le propriétaire ou un membre ayant MANAGE_EXPENSE_CATEGORIES crée "
+        "les catégories personnalisées d'un Business."
+    ),
 )(Categories.post)
 CategoryDetail.get = extend_schema(
     tags=["Expense Categories"],
     operation_id="expense_category_retrieve",
     parameters=[_business_id, _category_id],
-    responses={200: ExpenseCategorySerializer, 404: None},
+    responses={200: ExpenseCategorySerializer, 403: None, 404: None},
 )(CategoryDetail.get)
 CategoryDetail.patch = extend_schema(
     tags=["Expense Categories"],
@@ -503,7 +619,7 @@ Expenses.get = extend_schema(
     tags=["Expenses"],
     operation_id="expense_list",
     parameters=[_business_id, *_expense_filters],
-    responses={200: ExpenseSerializer(many=True), 400: None, 404: None},
+    responses={200: ExpenseSerializer(many=True), 400: None, 403: None, 404: None},
 )(Expenses.get)
 Expenses.post = extend_schema(
     tags=["Expenses"],
@@ -511,13 +627,16 @@ Expenses.post = extend_schema(
     parameters=[_business_id],
     request=ExpenseCreateSerializer,
     responses={201: ExpenseSerializer, 400: None, 403: None, 404: None},
-    description="OWNER et MANAGER créent une dépense ACTIVE avec une catégorie active.",
+    description=(
+        "Le propriétaire ou un membre ayant CREATE_EXPENSES crée une dépense "
+        "ACTIVE avec une catégorie active."
+    ),
 )(Expenses.post)
 ExpenseDetail.get = extend_schema(
     tags=["Expenses"],
     operation_id="expense_retrieve",
     parameters=[_business_id, _expense_id],
-    responses={200: ExpenseSerializer, 404: None},
+    responses={200: ExpenseSerializer, 403: None, 404: None},
 )(ExpenseDetail.get)
 ExpenseDetail.patch = extend_schema(
     tags=["Expenses"],
@@ -536,12 +655,64 @@ ExpenseCancel.post = extend_schema(
     parameters=[_business_id, _expense_id],
     request=ExpenseCancelSerializer,
     responses={200: ExpenseSerializer, 400: None, 403: None, 404: None},
-    description="Transition terminale ACTIVE vers CANCELLED pour OWNER et MANAGER.",
+    description=(
+        "Transition terminale ACTIVE vers CANCELLED pour le propriétaire ou "
+        "un membre ayant MANAGE_EXPENSES."
+    ),
 )(ExpenseCancel.post)
 
-ExpensePayments.get = extend_schema(tags=["Expense Payments"], operation_id="expense_payment_list", responses={200: ExpensePaymentSerializer(many=True)})(ExpensePayments.get)
-ExpensePayments.post = extend_schema(tags=["Expense Payments"], operation_id="expense_payment_create", request=ExpensePaymentCreateSerializer, parameters=[OpenApiParameter("Idempotency-Key", OpenApiTypes.STR, OpenApiParameter.HEADER, required=False)], responses={201: ExpensePaymentSerializer, 400: None, 409: None})(ExpensePayments.post)
-ExpensePaymentReverse.post = extend_schema(tags=["Expense Payments"], operation_id="expense_payment_reverse", request=ExpensePaymentReverseSerializer, responses={200: ExpensePaymentSerializer, 400: None})(ExpensePaymentReverse.post)
+ExpensePayments.get = extend_schema(
+    tags=["Expense Payments"],
+    operation_id="expense_payment_list",
+    parameters=[_business_id, _expense_id],
+    responses={
+        200: ExpensePaymentSerializer(many=True),
+        403: None,
+        404: None,
+    },
+)(ExpensePayments.get)
+ExpensePayments.post = extend_schema(
+    tags=["Expense Payments"],
+    operation_id="expense_payment_create",
+    request=ExpensePaymentCreateSerializer,
+    parameters=[
+        _business_id,
+        _expense_id,
+        OpenApiParameter(
+            "Idempotency-Key",
+            OpenApiTypes.STR,
+            OpenApiParameter.HEADER,
+            required=False,
+        ),
+    ],
+    responses={
+        201: ExpensePaymentSerializer,
+        400: None,
+        403: None,
+        404: None,
+        409: None,
+    },
+)(ExpensePayments.post)
+ExpensePaymentReverse.post = extend_schema(
+    tags=["Expense Payments"],
+    operation_id="expense_payment_reverse",
+    request=ExpensePaymentReverseSerializer,
+    parameters=[
+        _business_id,
+        _expense_id,
+        OpenApiParameter(
+            "payment_public_id",
+            OpenApiTypes.STR,
+            OpenApiParameter.PATH,
+        ),
+    ],
+    responses={
+        200: ExpensePaymentSerializer,
+        400: None,
+        403: None,
+        404: None,
+    },
+)(ExpensePaymentReverse.post)
 
 ExpensePayments.http_method_names = ["get", "post", "head", "options"]
 ExpensePaymentReverse.http_method_names = ["post", "options"]

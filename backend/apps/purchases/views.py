@@ -1,9 +1,11 @@
 from django.core.exceptions import ValidationError
+from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework import status
-from apps.businesses.models import Business
-from apps.businesses.permissions import membership_for, can_manage_business
+
+from apps.businesses.models import Business, BusinessMemberPermission
+from apps.businesses.permissions import require_permission
+
 from .models import Supplier, Purchase, PurchaseLine
 from .serializers import (
     SupplierSerializer,
@@ -11,16 +13,33 @@ from .serializers import (
     PurchaseWriteSerializer,
     PurchaseLineSerializer,
     PurchaseLineWriteSerializer,
-    SupplierPaymentSerializer, SupplierPaymentCreateSerializer, SupplierPaymentReverseSerializer,
+    SupplierPaymentSerializer,
+    SupplierPaymentCreateSerializer,
+    SupplierPaymentReverseSerializer,
 )
-from .services import transition, receive_purchase, add_supplier_payment, reverse_supplier_payment, SupplierPaymentIdempotencyConflict
+from .services import (
+    SupplierPaymentIdempotencyConflict,
+    add_supplier_payment,
+    receive_purchase,
+    reverse_supplier_payment,
+    transition,
+)
 
 
 class Mixin:
-    def business(self, r, sh):
-        return Business.objects.filter(
-            public_id=sh, members__identity=r.user, members__status="ACTIVE"
-        ).first()
+    def business(self, request, public_id, permission, *, write=False):
+        """Resolve one tenant and enforce its server-defined permission."""
+        business = Business.objects.filter(public_id=public_id).first()
+        if business is None:
+            return None
+
+        require_permission(
+            request.user,
+            business,
+            permission,
+            write=write,
+        )
+        return business
 
     def nf(self):
         return Response({"detail": "Not found."}, 404)
@@ -31,7 +50,11 @@ class Mixin:
 
 class Suppliers(Mixin, APIView):
     def get(self, r, business_public_id):
-        b = self.business(r, business_public_id)
+        b = self.business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_PURCHASES,
+        )
         return (
             Response(
                 SupplierSerializer(Supplier.objects.filter(business=b), many=True).data
@@ -41,11 +64,14 @@ class Suppliers(Mixin, APIView):
         )
 
     def post(self, r, business_public_id):
-        b = self.business(r, business_public_id)
+        b = self.business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.MANAGE_PURCHASES,
+            write=True,
+        )
         if not b:
             return self.nf()
-        if not can_manage_business(membership_for(r.user, b)):
-            return self.forbid()
         s = SupplierSerializer(data=r.data)
         s.is_valid(raise_exception=True)
         o = s.save(business=b)
@@ -57,17 +83,24 @@ class SupplierDetail(Suppliers):
         return Supplier.objects.filter(business=b, public_id=p).first()
 
     def get(self, r, business_public_id, supplier_public_id):
-        b = self.business(r, business_public_id)
+        b = self.business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_PURCHASES,
+        )
         o = self.obj(b, supplier_public_id) if b else None
         return Response(SupplierSerializer(o).data) if o else self.nf()
 
     def patch(self, r, business_public_id, supplier_public_id):
-        b = self.business(r, business_public_id)
+        b = self.business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.MANAGE_PURCHASES,
+            write=True,
+        )
         o = self.obj(b, supplier_public_id) if b else None
         if not o:
             return self.nf()
-        if not can_manage_business(membership_for(r.user, b)):
-            return self.forbid()
         s = SupplierSerializer(o, data=r.data, partial=True)
         s.is_valid(raise_exception=True)
         s.save()
@@ -76,7 +109,11 @@ class SupplierDetail(Suppliers):
 
 class Purchases(Mixin, APIView):
     def get(self, r, business_public_id):
-        b = self.business(r, business_public_id)
+        b = self.business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_PURCHASES,
+        )
         return (
             Response(
                 PurchaseSerializer(Purchase.objects.filter(business=b), many=True).data
@@ -86,11 +123,14 @@ class Purchases(Mixin, APIView):
         )
 
     def post(self, r, business_public_id):
-        b = self.business(r, business_public_id)
+        b = self.business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.MANAGE_PURCHASES,
+            write=True,
+        )
         if not b:
             return self.nf()
-        if not can_manage_business(membership_for(r.user, b)):
-            return self.forbid()
         s = PurchaseWriteSerializer(data=r.data, context={"business": b})
         s.is_valid(raise_exception=True)
         o = s.save(business=b, created_by=r.user, currency=b.primary_currency)
@@ -102,17 +142,24 @@ class PurchaseDetail(Purchases):
         return Purchase.objects.filter(business=b, public_id=p).first()
 
     def get(self, r, business_public_id, purchase_public_id):
-        b = self.business(r, business_public_id)
+        b = self.business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_PURCHASES,
+        )
         o = self.obj(b, purchase_public_id) if b else None
         return Response(PurchaseSerializer(o).data) if o else self.nf()
 
     def patch(self, r, business_public_id, purchase_public_id):
-        b = self.business(r, business_public_id)
+        b = self.business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.MANAGE_PURCHASES,
+            write=True,
+        )
         o = self.obj(b, purchase_public_id) if b else None
         if not o:
             return self.nf()
-        if not can_manage_business(membership_for(r.user, b)):
-            return self.forbid()
         if o.status != "DRAFT":
             return Response({"detail": "Only drafts are editable."}, 400)
         s = PurchaseWriteSerializer(
@@ -125,7 +172,11 @@ class PurchaseDetail(Purchases):
 
 class Lines(PurchaseDetail):
     def get(self, r, business_public_id, purchase_public_id):
-        b = self.business(r, business_public_id)
+        b = self.business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_PURCHASES,
+        )
         p = self.obj(b, purchase_public_id) if b else None
         return (
             Response(PurchaseLineSerializer(p.lines.all(), many=True).data)
@@ -134,12 +185,15 @@ class Lines(PurchaseDetail):
         )
 
     def post(self, r, business_public_id, purchase_public_id):
-        b = self.business(r, business_public_id)
+        b = self.business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.MANAGE_PURCHASES,
+            write=True,
+        )
         p = self.obj(b, purchase_public_id) if b else None
         if not p:
             return self.nf()
-        if not can_manage_business(membership_for(r.user, b)):
-            return self.forbid()
         if p.status != "DRAFT":
             return Response({"detail": "Only drafts are editable."}, 400)
         s = PurchaseLineWriteSerializer(data=r.data, context={"purchase": p})
@@ -153,7 +207,11 @@ class LineDetail(Lines):
         return p.lines.filter(public_id=x).first()
 
     def get(self, r, business_public_id, purchase_public_id, line_public_id):
-        b = self.business(r, business_public_id)
+        b = self.business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_PURCHASES,
+        )
         p = self.obj(b, purchase_public_id) if b else None
         o = self.getobj(p, line_public_id) if p else None
         return Response(PurchaseLineSerializer(o).data) if o else self.nf()
@@ -169,13 +227,16 @@ class LineDetail(Lines):
         )
 
     def _edit(self, r, sh, pu, pl, delete):
-        b = self.business(r, sh)
+        b = self.business(
+            r,
+            sh,
+            BusinessMemberPermission.Permission.MANAGE_PURCHASES,
+            write=True,
+        )
         p = self.obj(b, pu) if b else None
         o = self.getobj(p, pl) if p else None
         if not o:
             return self.nf()
-        if not can_manage_business(membership_for(r.user, b)):
-            return self.forbid()
         if p.status != "DRAFT":
             return Response({"detail": "Only drafts are editable."}, 400)
         if delete:
@@ -192,12 +253,15 @@ class Action(PurchaseDetail):
     action = None
 
     def post(self, r, business_public_id, purchase_public_id):
-        b = self.business(r, business_public_id)
+        b = self.business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.MANAGE_PURCHASES,
+            write=True,
+        )
         p = self.obj(b, purchase_public_id) if b else None
         if not p:
             return self.nf()
-        if not can_manage_business(membership_for(r.user, b)):
-            return self.forbid()
         try:
             o = (
                 receive_purchase(p, r.user)
@@ -338,27 +402,82 @@ Receive.http_method_names = ["post", "options"]
 Cancel.http_method_names = ["post", "options"]
 
 class PurchasePayments(PurchaseDetail):
- def get(self,r,business_public_id,purchase_public_id):
-  b=self.business(r,business_public_id);p=self.obj(b,purchase_public_id) if b else None
-  return Response(SupplierPaymentSerializer(p.payments.all(),many=True).data) if p else self.nf()
- def post(self,r,business_public_id,purchase_public_id):
-  b=self.business(r,business_public_id);p=self.obj(b,purchase_public_id) if b else None
-  if not p:return self.nf()
-  if not can_manage_business(membership_for(r.user,b)):return self.forbid()
-  s=SupplierPaymentCreateSerializer(data=r.data);s.is_valid(raise_exception=True)
-  try:o=add_supplier_payment(p,r.user,idempotency_key=r.headers.get('Idempotency-Key',''),**s.validated_data)
-  except SupplierPaymentIdempotencyConflict as e:return Response({'detail':str(e)},409)
-  except ValidationError as e:return Response({'detail':str(e)},400)
-  return Response(SupplierPaymentSerializer(o).data,201)
+    def get(self, r, business_public_id, purchase_public_id):
+        business = self.business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_PURCHASES,
+        )
+        purchase = self.obj(business, purchase_public_id) if business else None
+        if not purchase:
+            return self.nf()
+        return Response(
+            SupplierPaymentSerializer(purchase.payments.all(), many=True).data
+        )
+
+    def post(self, r, business_public_id, purchase_public_id):
+        business = self.business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.MANAGE_PURCHASES,
+            write=True,
+        )
+        purchase = self.obj(business, purchase_public_id) if business else None
+        if not purchase:
+            return self.nf()
+        serializer = SupplierPaymentCreateSerializer(data=r.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            payment = add_supplier_payment(
+                purchase,
+                r.user,
+                idempotency_key=r.headers.get("Idempotency-Key", ""),
+                **serializer.validated_data,
+            )
+        except SupplierPaymentIdempotencyConflict as error:
+            return Response({"detail": str(error)}, 409)
+        except ValidationError as error:
+            return Response({"detail": str(error)}, 400)
+        return Response(SupplierPaymentSerializer(payment).data, 201)
+
+
 class SupplierPaymentReverse(PurchasePayments):
- def post(self,r,business_public_id,purchase_public_id,payment_public_id):
-  b=self.business(r,business_public_id);p=self.obj(b,purchase_public_id) if b else None;o=p.payments.filter(public_id=payment_public_id).first() if p else None
-  if not o:return self.nf()
-  if not can_manage_business(membership_for(r.user,b)):return self.forbid()
-  s=SupplierPaymentReverseSerializer(data=r.data);s.is_valid(raise_exception=True)
-  try:return Response(SupplierPaymentSerializer(reverse_supplier_payment(o,r.user,s.validated_data['reason'])).data)
-  except ValidationError as e:return Response({'detail':str(e)},400)
-PurchasePayments.http_method_names=['get','post','head','options'];SupplierPaymentReverse.http_method_names=['post','options']
+    def post(
+        self,
+        r,
+        business_public_id,
+        purchase_public_id,
+        payment_public_id,
+    ):
+        business = self.business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.MANAGE_PURCHASES,
+            write=True,
+        )
+        purchase = self.obj(business, purchase_public_id) if business else None
+        payment = (
+            purchase.payments.filter(public_id=payment_public_id).first()
+            if purchase
+            else None
+        )
+        if not payment:
+            return self.nf()
+        serializer = SupplierPaymentReverseSerializer(data=r.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            reversed_payment = reverse_supplier_payment(
+                payment,
+                r.user,
+                serializer.validated_data["reason"],
+            )
+            return Response(SupplierPaymentSerializer(reversed_payment).data)
+        except ValidationError as error:
+            return Response({"detail": str(error)}, 400)
+
+
+PurchasePayments.http_method_names = ["get", "post", "head", "options"]
+SupplierPaymentReverse.http_method_names = ["post", "options"]
 
 PurchasePayments.serializer_class = SupplierPaymentSerializer
 SupplierPaymentReverse.serializer_class = SupplierPaymentReverseSerializer
