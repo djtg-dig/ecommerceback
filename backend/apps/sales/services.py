@@ -92,7 +92,12 @@ def create_sale_return(
         from apps.receivables.models import Receivable, ReceivableAdjustment
 
         return_total = sum(
-            (locked_lines[line_id].unit_price * quantity for line_id, quantity in normalized),
+            (
+                (locked_lines[line_id].unit_price * quantity).quantize(
+                    Decimal("0.01")
+                )
+                for line_id, quantity in normalized
+            ),
             Decimal("0.00"),
         )
         receivable = (
@@ -168,7 +173,7 @@ def create_sale_return(
         )
         for line_id, quantity in normalized:
             line = locked_lines[line_id]
-            return_line = SaleReturnLine.objects.create(sale_return=sale_return, sale_line=line, quantity=quantity, unit_price_snapshot=line.unit_price, unit_cost_snapshot=line.unit_cost_snapshot, line_total=quantity * line.unit_price)
+            return_line = SaleReturnLine.objects.create(sale_return=sale_return, sale_line=line, quantity=quantity, unit_price_snapshot=line.unit_price, unit_cost_snapshot=line.unit_cost_snapshot, line_total=(quantity * line.unit_price).quantize(Decimal("0.01")))
             inventory_item = InventoryItem.objects.select_for_update().get(product=line.product) if line.product_id else InventoryItem.objects.select_for_update().get(variant=line.variant)
             apply_stock_movement(inventory_item=inventory_item, movement_type=StockMovement.Type.RETURN, performed_by=actor, quantity=quantity, reference_type="SALE_RETURN_LINE", reference_id=return_line.public_id, allow_archived_target=True)
 
