@@ -6,7 +6,8 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 from apps.accounts.models import CarriIdentity
-from apps.businesses.models import Business, BusinessMember, BusinessPaymentMethod
+from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission, BusinessPaymentMethod
+from apps.businesses.services import grant_permission
 from apps.catalog.models import Product, ProductCategory
 from apps.inventory.models import InventoryItem
 from apps.sales.models import Customer, Sale, SaleLine
@@ -99,7 +100,23 @@ def test_dashboard_permissions_and_period_validation():
     manager=CarriIdentity.objects.create(carri_subject='dash-manager')
     employee=CarriIdentity.objects.create(carri_subject='dash-employee')
     outsider=CarriIdentity.objects.create(carri_subject='dash-outsider')
-    for identity,role in ((owner,'OWNER'),(manager,'MANAGER'),(employee,'EMPLOYEE')): BusinessMember.objects.create(business=business,identity=identity,role=role)
+    memberships = {
+        role: BusinessMember.objects.create(
+            business=business,
+            identity=identity,
+            role=role,
+        )
+        for identity, role in (
+            (owner, "OWNER"),
+            (manager, "MANAGER"),
+            (employee, "EMPLOYEE"),
+        )
+    }
+    grant_permission(
+        memberships["OWNER"],
+        memberships["MANAGER"],
+        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+    )
     url=f'/api/v1/businesses/{business.public_id}/dashboard/'
     def api(user):
         c=APIClient();c.force_authenticate(user=user);return c

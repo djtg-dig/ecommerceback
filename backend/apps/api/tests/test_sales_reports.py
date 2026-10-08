@@ -8,7 +8,8 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
-from apps.businesses.models import Business, BusinessMember
+from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
+from apps.businesses.services import grant_permission
 from apps.catalog.models import Product, ProductCategory, ProductVariant
 from apps.finance.models import FinancialMovement
 from apps.inventory.models import InventoryItem, StockMovement
@@ -25,8 +26,20 @@ def make_context(suffix):
     owner = CarriIdentity.objects.create(carri_subject=f"reports-owner-{suffix}")
     manager = CarriIdentity.objects.create(carri_subject=f"reports-manager-{suffix}")
     employee = CarriIdentity.objects.create(carri_subject=f"reports-employee-{suffix}")
-    for identity, role in ((owner, "OWNER"), (manager, "MANAGER"), (employee, "EMPLOYEE")):
-        BusinessMember.objects.create(business=business, identity=identity, role=role)
+    owner_member = BusinessMember.objects.create(
+        business=business, identity=owner, role="OWNER"
+    )
+    manager_member = BusinessMember.objects.create(
+        business=business, identity=manager, role="MANAGER"
+    )
+    BusinessMember.objects.create(
+        business=business, identity=employee, role="EMPLOYEE"
+    )
+    grant_permission(
+        owner_member,
+        manager_member,
+        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+    )
     category, _ = ProductCategory.objects.get_or_create(code="REPORTS", defaults={"name": "Reports", "slug": "reports"})
     return business, owner, manager, employee, category
 

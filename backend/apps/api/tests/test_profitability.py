@@ -8,7 +8,8 @@ from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
-from apps.businesses.models import Business, BusinessMember
+from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
+from apps.businesses.services import grant_permission
 from apps.catalog.models import Product, ProductCategory, ProductVariant
 from apps.expenses.models import Expense, ExpenseCategory
 from apps.finance.models import FinancialMovement
@@ -27,8 +28,26 @@ def context(subject_suffix=""):
     owner = CarriIdentity.objects.create(carri_subject=f"profit-owner-{subject_suffix}")
     manager = CarriIdentity.objects.create(carri_subject=f"profit-manager-{subject_suffix}")
     employee = CarriIdentity.objects.create(carri_subject=f"profit-employee-{subject_suffix}")
-    for identity, role in ((owner, "OWNER"), (manager, "MANAGER"), (employee, "EMPLOYEE")):
-        BusinessMember.objects.create(business=business, identity=identity, role=role)
+    owner_member = BusinessMember.objects.create(
+        business=business,
+        identity=owner,
+        role="OWNER",
+    )
+    manager_member = BusinessMember.objects.create(
+        business=business,
+        identity=manager,
+        role="MANAGER",
+    )
+    BusinessMember.objects.create(
+        business=business,
+        identity=employee,
+        role="EMPLOYEE",
+    )
+    grant_permission(
+        owner_member,
+        manager_member,
+        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+    )
     category, _ = ProductCategory.objects.get_or_create(
         code="PROFIT",
         defaults={"name": "Profit", "slug": "profit"},

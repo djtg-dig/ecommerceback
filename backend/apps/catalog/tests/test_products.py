@@ -6,7 +6,8 @@ import pytest
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
-from apps.businesses.models import Business, BusinessMember
+from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
+from apps.businesses.services import grant_permission
 from apps.catalog.models import AttributeDefinition, AttributeOption, Product, ProductCategory, ProductVariant
 
 pytestmark = pytest.mark.django_db
@@ -31,10 +32,15 @@ def actors():
     manager = CarriIdentity.objects.create(carri_subject="manager")
     employee = CarriIdentity.objects.create(carri_subject="employee")
     outsider = CarriIdentity.objects.create(carri_subject="outsider")
-    BusinessMember.objects.create(identity=owner, business=business, role="OWNER")
+    owner_member = BusinessMember.objects.create(identity=owner, business=business, role="OWNER")
     BusinessMember.objects.create(identity=owner, business=other_business, role="OWNER")
-    BusinessMember.objects.create(identity=manager, business=business, role="MANAGER")
+    manager_member = BusinessMember.objects.create(identity=manager, business=business, role="MANAGER")
     BusinessMember.objects.create(identity=employee, business=business, role="EMPLOYEE")
+    grant_permission(
+        owner_member,
+        manager_member,
+        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+    )
     return business, other_business, owner, manager, employee, outsider
 
 

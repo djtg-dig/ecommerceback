@@ -7,7 +7,8 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
-from apps.businesses.models import Business, BusinessMember
+from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
+from apps.businesses.services import grant_permission
 from apps.expenses.models import Expense, ExpenseCategory, ExpensePayment
 from apps.finance.models import FinancialMovement
 from apps.finance.services import create_financial_movement, reverse_movement
@@ -29,8 +30,20 @@ def make_context():
     manager = CarriIdentity.objects.create(carri_subject="finance-manager")
     employee = CarriIdentity.objects.create(carri_subject="finance-employee")
     outsider = CarriIdentity.objects.create(carri_subject="finance-outsider")
-    for identity, role in ((owner, "OWNER"), (manager, "MANAGER"), (employee, "EMPLOYEE")):
-        BusinessMember.objects.create(business=business, identity=identity, role=role)
+    owner_member = BusinessMember.objects.create(
+        business=business, identity=owner, role="OWNER"
+    )
+    manager_member = BusinessMember.objects.create(
+        business=business, identity=manager, role="MANAGER"
+    )
+    BusinessMember.objects.create(
+        business=business, identity=employee, role="EMPLOYEE"
+    )
+    grant_permission(
+        owner_member,
+        manager_member,
+        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+    )
     category = ExpenseCategory.objects.create(business=business, code="FIN", name="Finance")
     expense = Expense.objects.create(
         business=business, category=category, amount=Decimal("25.00"), currency="CDF",

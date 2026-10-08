@@ -8,7 +8,8 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
-from apps.businesses.models import Business, BusinessMember
+from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
+from apps.businesses.services import grant_permission
 from apps.catalog.models import Product, ProductCategory
 from apps.finance.models import FinancialMovement
 from apps.inventory.models import InventoryItem, StockMovement
@@ -38,16 +39,26 @@ def api_context(quantity=Decimal("10.000")):
     manager = CarriIdentity.objects.create(carri_subject=f"return-manager-{suffix}")
     employee = CarriIdentity.objects.create(carri_subject=f"return-employee-{suffix}")
     outsider = CarriIdentity.objects.create(carri_subject=f"return-outsider-{suffix}")
-    for identity, role in (
-        (owner, BusinessMember.Role.OWNER),
-        (manager, BusinessMember.Role.MANAGER),
-        (employee, BusinessMember.Role.EMPLOYEE),
-    ):
-        BusinessMember.objects.create(
-            business=business,
-            identity=identity,
-            role=role,
-        )
+    owner_member = BusinessMember.objects.create(
+        business=business,
+        identity=owner,
+        role=BusinessMember.Role.OWNER,
+    )
+    manager_member = BusinessMember.objects.create(
+        business=business,
+        identity=manager,
+        role=BusinessMember.Role.MANAGER,
+    )
+    BusinessMember.objects.create(
+        business=business,
+        identity=employee,
+        role=BusinessMember.Role.EMPLOYEE,
+    )
+    grant_permission(
+        owner_member,
+        manager_member,
+        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+    )
     product = Product.objects.create(
         business=business,
         category=category,

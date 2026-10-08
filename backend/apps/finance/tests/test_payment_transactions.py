@@ -8,7 +8,8 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
-from apps.businesses.models import Business, BusinessMember, BusinessPaymentMethod
+from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission, BusinessPaymentMethod
+from apps.businesses.services import grant_permission
 from apps.finance.models import FinancialMovement, PaymentTransaction
 from apps.finance.services import create_financial_movement, reverse_movement
 from apps.sales.models import Customer, Sale
@@ -28,8 +29,20 @@ def business_with_members():
     owner = CarriIdentity.objects.create(carri_subject=f"payment-owner-{suffix}")
     manager = CarriIdentity.objects.create(carri_subject=f"payment-manager-{suffix}")
     employee = CarriIdentity.objects.create(carri_subject=f"payment-employee-{suffix}")
-    for identity, role in ((owner, "OWNER"), (manager, "MANAGER"), (employee, "EMPLOYEE")):
-        BusinessMember.objects.create(business=business, identity=identity, role=role)
+    owner_member = BusinessMember.objects.create(
+        business=business, identity=owner, role="OWNER"
+    )
+    manager_member = BusinessMember.objects.create(
+        business=business, identity=manager, role="MANAGER"
+    )
+    BusinessMember.objects.create(
+        business=business, identity=employee, role="EMPLOYEE"
+    )
+    grant_permission(
+        owner_member,
+        manager_member,
+        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+    )
     return business, owner, manager, employee
 
 

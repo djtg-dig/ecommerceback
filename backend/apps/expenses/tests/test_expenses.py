@@ -9,8 +9,8 @@ from django.db import close_old_connections, transaction
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
-from apps.businesses.models import Business, BusinessMember
-from apps.businesses.services import create_business
+from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
+from apps.businesses.services import create_business, grant_permission
 from apps.common.choices import PaymentMethod
 from apps.expenses.models import Expense, ExpenseCategory
 from apps.expenses.services import (
@@ -35,8 +35,20 @@ def setup_business():
     manager = CarriIdentity.objects.create(carri_subject="expense-manager")
     employee = CarriIdentity.objects.create(carri_subject="expense-employee")
     outsider = CarriIdentity.objects.create(carri_subject="expense-outsider")
-    for identity, role in ((owner, "OWNER"), (manager, "MANAGER"), (employee, "EMPLOYEE")):
-        BusinessMember.objects.create(business=business, identity=identity, role=role)
+    owner_member = BusinessMember.objects.create(
+        business=business, identity=owner, role="OWNER"
+    )
+    manager_member = BusinessMember.objects.create(
+        business=business, identity=manager, role="MANAGER"
+    )
+    BusinessMember.objects.create(
+        business=business, identity=employee, role="EMPLOYEE"
+    )
+    grant_permission(
+        owner_member,
+        manager_member,
+        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+    )
     ensure_default_expense_categories(business)
     return business, owner, manager, employee, outsider
 

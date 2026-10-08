@@ -7,7 +7,8 @@ from django.core.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
-from apps.businesses.models import Business, BusinessMember
+from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
+from apps.businesses.services import grant_permission
 from apps.catalog.models import Product, ProductCategory, ProductVariant
 from apps.inventory.models import InventoryItem, StockMovement
 from apps.inventory.services import apply_stock_movement
@@ -24,8 +25,20 @@ def setup():
     manager = CarriIdentity.objects.create(carri_subject="inventory-manager")
     employee = CarriIdentity.objects.create(carri_subject="inventory-employee")
     outsider = CarriIdentity.objects.create(carri_subject="inventory-outsider")
-    for identity, role in ((owner, "OWNER"), (manager, "MANAGER"), (employee, "EMPLOYEE")):
-        BusinessMember.objects.create(business=business, identity=identity, role=role)
+    owner_member = BusinessMember.objects.create(
+        business=business, identity=owner, role="OWNER"
+    )
+    manager_member = BusinessMember.objects.create(
+        business=business, identity=manager, role="MANAGER"
+    )
+    BusinessMember.objects.create(
+        business=business, identity=employee, role="EMPLOYEE"
+    )
+    grant_permission(
+        owner_member,
+        manager_member,
+        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+    )
     product = Product.objects.create(business=business, category=category, name="Simple", selling_price="1", currency="CDF", attributes={})
     other_product = Product.objects.create(business=other, category=category, name="Other", selling_price="1", currency="CDF", attributes={})
     return business, other, owner, manager, employee, outsider, product, other_product

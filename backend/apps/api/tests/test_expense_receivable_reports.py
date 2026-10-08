@@ -7,7 +7,8 @@ from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
-from apps.businesses.models import Business, BusinessMember
+from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
+from apps.businesses.services import grant_permission
 from apps.expenses.models import Expense, ExpenseCategory
 from apps.receivables.models import Receivable, ReceivableAdjustment, ReceivablePayment
 from apps.sales.models import Customer, Sale, SaleReturn
@@ -67,8 +68,17 @@ def test_expense_report_categories_periods_and_payments_do_not_change_charge():
     business = Business.objects.create(name="Expenses report")
     owner = CarriIdentity.objects.create(carri_subject="expenses-report-owner")
     manager = CarriIdentity.objects.create(carri_subject="expenses-report-manager")
-    BusinessMember.objects.create(business=business, identity=owner, role="OWNER")
-    BusinessMember.objects.create(business=business, identity=manager, role="MANAGER")
+    owner_member = BusinessMember.objects.create(
+        business=business, identity=owner, role="OWNER"
+    )
+    manager_member = BusinessMember.objects.create(
+        business=business, identity=manager, role="MANAGER"
+    )
+    grant_permission(
+        owner_member,
+        manager_member,
+        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+    )
     first = ExpenseCategory.objects.create(business=business, code="FIRST", name="First")
     second = ExpenseCategory.objects.create(business=business, code="SECOND", name="Second")
     for amount, category in ((Decimal("100"), first), (Decimal("300"), second), (Decimal("200"), second)):
@@ -240,8 +250,17 @@ def test_receivables_report_permissions_and_business_isolation():
     manager = CarriIdentity.objects.create(carri_subject="visible-receivables-manager")
     employee = CarriIdentity.objects.create(carri_subject="visible-receivables-employee")
     outsider = CarriIdentity.objects.create(carri_subject="receivables-outsider")
-    BusinessMember.objects.create(business=business, identity=owner, role="OWNER")
-    BusinessMember.objects.create(business=business, identity=manager, role="MANAGER")
+    owner_member = BusinessMember.objects.create(
+        business=business, identity=owner, role="OWNER"
+    )
+    manager_member = BusinessMember.objects.create(
+        business=business, identity=manager, role="MANAGER"
+    )
+    grant_permission(
+        owner_member,
+        manager_member,
+        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+    )
     BusinessMember.objects.create(business=business, identity=employee, role="EMPLOYEE")
     other_customer = Customer.objects.create(business=other_business, name="Hidden")
     other_sale = Sale.objects.create(
