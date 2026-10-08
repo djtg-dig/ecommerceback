@@ -1,7 +1,7 @@
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from .models import Business, BusinessCategory, BusinessMember, BusinessPaymentMethod
+from .models import Business, BusinessCategory, BusinessMember, BusinessMemberPermission, BusinessPaymentMethod
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -102,6 +102,7 @@ class BusinessSerializer(serializers.ModelSerializer):
 
 class BusinessMemberSerializer(serializers.ModelSerializer):
     identity_id = serializers.UUIDField(read_only=True)
+    permissions = serializers.SerializerMethodField()
 
     class Meta:
         model = BusinessMember
@@ -109,9 +110,21 @@ class BusinessMemberSerializer(serializers.ModelSerializer):
             "id",
             "identity_id",
             "role",
+            "title",
+            "is_owner",
             "status",
+            "permissions",
             "joined_at",
         )
+
+    @extend_schema_field(serializers.ListField(child=serializers.CharField()))
+    def get_permissions(self, member):
+        if member.is_owner:
+            return list(BusinessMemberPermission.Permission.values)
+        return list(
+            member.permissions.values_list("permission", flat=True)
+        )
+
 
 class BusinessPaymentMethodSerializer(serializers.ModelSerializer):
     class Meta:

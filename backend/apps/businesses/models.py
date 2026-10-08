@@ -159,7 +159,13 @@ class BusinessMember(models.Model):
         on_delete=models.PROTECT,
         related_name="members",
     )
-    role = models.CharField(max_length=10, choices=Role.choices)
+    role = models.CharField(
+        max_length=10,
+        choices=Role.choices,
+        default=Role.EMPLOYEE,
+    )
+    is_owner = models.BooleanField(default=False)
+    title = models.CharField(max_length=120, blank=True)
     status = models.CharField(
         max_length=10,
         choices=Status.choices,
@@ -173,6 +179,100 @@ class BusinessMember(models.Model):
             models.UniqueConstraint(
                 fields=["identity", "business"],
                 name="unique_business_identity",
+            ),
+            models.UniqueConstraint(
+                fields=["business"],
+                condition=Q(is_owner=True),
+                name="unique_business_owner",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        # Transitional compatibility for trusted code that still creates the
+        # initial owner through the legacy role. Authorization never reads role.
+        if self._state.adding and self.role == self.Role.OWNER and not self.is_owner:
+            self.is_owner = True
+            if not self.title:
+                self.title = "Gérant"
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        errors = {}
+
+        if not self.pk or not type(self).objects.filter(pk=self.pk).exists():
+            if self.is_owner and not self.title:
+                errors["title"] = "An owner must have a title."
+            if self.is_owner and self.status != self.Status.ACTIVE:
+                errors["status"] = "A business owner must be active."
+            if errors:
+                raise ValidationError(errors)
+            return
+
+        previous = type(self).objects.get(pk=self.pk)
+
+        removes_active_owner = previous.is_owner and (
+            not self.is_owner or self.status != self.Status.ACTIVE
+        )
+        if removes_active_owner:
+            has_another_active_owner = type(self).objects.filter(
+                business=self.business,
+                is_owner=True,
+                status=self.Status.ACTIVE,
+            ).exclude(pk=self.pk).exists()
+            if not has_another_active_owner:
+                errors["is_owner"] = "A business must retain an active owner."
+
+        if errors:
+            raise ValidationError(errors)
+
+    def delete(self, *args, **kwargs):
+        if self.is_owner:
+            raise ValidationError("A business owner cannot be deleted.")
+        return super().delete(*args, **kwargs)
+
+
+class BusinessMemberPermission(models.Model):
+    class Permission(models.TextChoices):
+        VIEW_MEMBERS = "VIEW_MEMBERS", "View members"
+        MANAGE_MEMBERS = "MANAGE_MEMBERS", "Manage members"
+        UPDATE_BUSINESS = "UPDATE_BUSINESS", "Update business"
+        MANAGE_PAYMENT_METHODS = "MANAGE_PAYMENT_METHODS", "Manage payment methods"
+        VIEW_CATALOG = "VIEW_CATALOG", "View catalog"
+        MANAGE_CATALOG = "MANAGE_CATALOG", "Manage catalog"
+        VIEW_INVENTORY = "VIEW_INVENTORY", "View inventory"
+        MANAGE_EXPENSE_CATEGORIES = "MANAGE_EXPENSE_CATEGORIES", "Manage expense categories"
+        CREATE_EXPENSES = "CREATE_EXPENSES", "Create expenses"
+        VIEW_EXPENSES = "VIEW_EXPENSES", "View expenses"
+        MANAGE_EXPENSES = "MANAGE_EXPENSES", "Manage expenses"
+        VIEW_PURCHASES = "VIEW_PURCHASES", "View purchases"
+        MANAGE_PURCHASES = "MANAGE_PURCHASES", "Manage purchases"
+        USE_POS = "USE_POS", "Use point of sale"
+        MANAGE_SALES = "MANAGE_SALES", "Manage sales"
+        MANAGE_SALE_RETURNS = "MANAGE_SALE_RETURNS", "Manage sale returns"
+        VIEW_RECEIVABLES = "VIEW_RECEIVABLES", "View receivables"
+        MANAGE_RECEIVABLES = "MANAGE_RECEIVABLES", "Manage receivables"
+        VIEW_FINANCIAL_SUMMARY = "VIEW_FINANCIAL_SUMMARY", "View financial summary"
+        MANAGE_INVENTORY = "MANAGE_INVENTORY", "Manage inventory"
+        VIEW_DASHBOARD = "VIEW_DASHBOARD", "View dashboard"
+        VIEW_PROFITABILITY = "VIEW_PROFITABILITY", "View profitability"
+        VIEW_REPORTS = "VIEW_REPORTS", "View reports"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    member = models.ForeignKey(
+        BusinessMember,
+        on_delete=models.CASCADE,
+        related_name="permissions",
+    )
+    permission = models.CharField(max_length=40, choices=Permission.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["member", "permission"],
+                name="unique_member_permission",
             )
         ]
 
@@ -181,24 +281,7 @@ class BusinessMember(models.Model):
         super().save(*args, **kwargs)
 
     def clean(self):
-        if not self.pk or not type(self).objects.filter(pk=self.pk).exists():
-            return
-
-        previous = type(self).objects.get(pk=self.pk)
-        removes_active_owner = (
-            previous.role == self.Role.OWNER
-            and previous.status == self.Status.ACTIVE
-            and (
-                self.role != self.Role.OWNER
-                or self.status != self.Status.ACTIVE
-            )
-        )
-        if removes_active_owner:
-            has_another_active_owner = type(self).objects.filter(
-                business=self.business,
-                role=self.Role.OWNER,
-                status=self.Status.ACTIVE,
-            ).exclude(pk=self.pk).exists()
-
-            if not has_another_active_owner:
-                raise ValidationError("A business must retain an active owner.")
+        if self.member and self.member.is_owner:
+            raise ValidationError("Owners have all permissions by design.")
+        if self.member and self.member.status != BusinessMember.Status.ACTIVE:
+            raise ValidationError("Permissions can only be granted to active members.")

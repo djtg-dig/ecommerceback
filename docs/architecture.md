@@ -17,6 +17,8 @@ Django expose l'API métier versionnée et PostgreSQL stocke les projections et 
 
 Business is the legal/operational tenant; a future BusinessLocation may represent outlets. BusinessCategory is a flat business-activity taxonomy and is distinct from future ProductCategory. Public IDs improve client-facing references but do not grant access: membership filtering remains mandatory.
 
+`BusinessMember` sépare désormais trois notions : `is_owner` porte la propriété administrative unique du Business, `title` décrit librement le métier (Gérant, Gestionnaire, Caissier, Vendeur, Magasinier, Comptable ou Employé), et `BusinessMemberPermission` porte les autorisations individuelles. Un titre n'accorde aucun droit. L'OWNER actif possède implicitement toutes les permissions; les autres membres commencent sans permission et un membre suspendu n'en exerce aucune. Le champ `role` OWNER/MANAGER/EMPLOYEE est conservé uniquement pour la migration et la compatibilité des données historiques; les décisions d'autorisation ne le consultent plus.
+
 
 ## Global catalog
 
@@ -49,7 +51,7 @@ Expenses est un domaine Niveau 1 séparé de Purchases et de Receivables. Il pos
 
 ## Niveau 1 — Gestion interne
 
-- ✓ Business / membres
+- ✓ Business / membres (séparation propriété / titre / permissions)
 - ✓ Catalogue, produits / variantes
 - ✓ Inventaire
 - ✓ Fournisseurs et achats
@@ -65,7 +67,7 @@ Chaque Business choisit `primary_currency` (`CDF` ou `USD`) à sa création. Cet
 
 ## Finance
 
-Finance est le journal financier append-only interne. `FinancialMovement` reçoit des événements métier déjà validés et ne pilote aucun gateway. Les sources Sales, Sale Returns, Receivables, Expenses et Purchases restent propriétaires de leurs workflows et écrivent via le service Finance dans leurs transactions. OWNER et MANAGER consultent les mouvements et agrégats, tandis que les employés n’accèdent pas au reporting financier.
+Finance est le journal financier append-only interne. `FinancialMovement` reçoit des événements métier déjà validés et ne pilote aucun gateway. Les sources Sales, Sale Returns, Receivables, Expenses et Purchases restent propriétaires de leurs workflows et écrivent via le service Finance dans leurs transactions. Le propriétaire dispose de l'accès complet; un autre membre ne reçoit un accès de gestion que par permission individuelle explicite.
 
 ## Encaissements Sales et créances
 

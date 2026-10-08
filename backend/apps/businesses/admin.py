@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Business, BusinessMember
+from .models import Business, BusinessMember, BusinessMemberPermission, BusinessPaymentMethod
 
 
 @admin.register(Business)
@@ -27,6 +27,8 @@ class BusinessMemberAdmin(admin.ModelAdmin):
         "business",
         "identity",
         "role",
+        "title",
+        "is_owner",
         "status",
         "joined_at",
     )
@@ -34,8 +36,31 @@ class BusinessMemberAdmin(admin.ModelAdmin):
         "identity",
         "business",
         "role",
+        "title",
+        "is_owner",
         "status",
         "joined_at",
+        "updated_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(BusinessMemberPermission)
+class BusinessMemberPermissionAdmin(admin.ModelAdmin):
+    list_display = (
+        "member",
+        "permission",
+        "created_at",
+    )
+    readonly_fields = (
+        "member",
+        "permission",
+        "created_at",
         "updated_at",
     )
 

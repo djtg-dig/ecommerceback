@@ -17,7 +17,10 @@ erDiagram
 - **IDTokenReplay** : hash unique de preuve mobile et expiration.
 - **OAuthHandoff** : hash unique, identité, expiration et consommation.
 - **Business** : PK UUID, données opérationnelles, statut ACTIVE/SUSPENDED/ARCHIVED, devise CDF/USD.
-- **BusinessMember** : PK UUID, FK protégées vers Business et CarriIdentity, unique `(identity, business)`, rôle OWNER/MANAGER/EMPLOYEE et statut ACTIVE/SUSPENDED. Le modèle refuse la suppression fonctionnelle du dernier OWNER actif.
+- **BusinessMember** : PK UUID, FK protégées vers Business et CarriIdentity, unique `(identity, business)`, rôle OWNER/MANAGER/EMPLOYEE conservé comme donnée legacy, `is_owner` booléen, `title` descriptif et statut ACTIVE/SUSPENDED. Une contrainte conditionnelle garantit au plus un propriétaire par Business. Le modèle refuse la suspension, la perte de propriété et la suppression du propriétaire actif. Le service de création garantit qu'un nouveau Business en possède exactement un, actif, avec le titre `Gérant`.
+- **BusinessMemberPermission** : PK UUID, FK vers BusinessMember, permission granulaire couvrant membres, configuration Business, moyens de paiement, catalogue, inventaire, achats, POS/ventes/retours, créances, dépenses, Finance, Dashboard, rentabilité et rapports; unique `(member, permission)`. L'OWNER n'a aucune ligne à maintenir car ses droits sont implicites. Un non-propriétaire ne reçoit aucune ligne automatiquement.
+
+Les migrations `0005` et `0006` ajoutent d'abord la nouvelle structure, puis recopient explicitement les données legacy : OWNER devient propriétaire avec le titre `Gérant`, MANAGER reçoit seulement le titre `Gestionnaire`, EMPLOYEE le titre `Employé`. Aucun ancien MANAGER ne reçoit de permission. Si plusieurs anciens OWNER existent pour un même Business, la migration s'arrête explicitement au lieu d'en rétrograder un arbitrairement.
 
 ## Public business identifiers and activity taxonomy
 

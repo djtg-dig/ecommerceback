@@ -12,10 +12,12 @@
 | GET `/api/v1/product-categories/{code}/attributes/` | public | attributs actifs effectifs et leurs options actives |
 | POST `/api/v1/auth/token/refresh/` | refresh ecommerce | renouvelle les tokens |
 | GET/POST `/api/v1/businesses/` | JWT ecommerce | liste isolée / crée Business + OWNER |
-| GET/PATCH `/api/v1/businesses/{id}/` | membre actif | détail / modification OWNER ou MANAGER |
-| GET `/api/v1/businesses/{id}/members/` | OWNER ou MANAGER | memberships sans données Carri |
+| GET/PATCH `/api/v1/businesses/{id}/` | membre actif | détail / modification OWNER ou permission explicite |
+| GET `/api/v1/businesses/{id}/members/` | OWNER ou `VIEW_MEMBERS` | memberships sans données Carri |
 
 Un Business étranger répond 404. Invitations de membres : à implémenter.
+
+La propriété administrative (`is_owner`), le titre professionnel (`title`) et les permissions individuelles sont indépendants. Un titre tel que Gérant, Gestionnaire ou Caissier n'accorde jamais de droit. L'OWNER actif dispose implicitement de toutes les permissions; les autres membres commencent sans permission et un membre SUSPENDED n'accède plus au Business. Le champ `role` reste exposé temporairement pour compatibilité legacy mais n'est plus une source d'autorisation. Durant la transition des endpoints métier, la mention historique « MANAGER » dans les tableaux ci-dessous désigne un membre auquel l'OWNER a explicitement attribué la permission transitoire requise, actuellement `UPDATE_BUSINESS`; le seul titre ou l'ancien rôle MANAGER ne suffit plus.
 
 Business routes use `public_id` (`SHXXXXXXXXXX`), never the internal UUID: `GET/PATCH /api/v1/businesses/{public_id}/` and `GET /api/v1/businesses/{public_id}/members/`. Create and PATCH accept `categories` (codes) and optional `primary_category`; OWNER and MANAGER may change them. `GET /api/v1/business-categories/` is public and returns active platform categories only.
 

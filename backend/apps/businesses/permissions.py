@@ -1,4 +1,4 @@
-from .models import BusinessMember
+from .models import BusinessMember, BusinessMemberPermission
 
 
 def membership_for(identity, business):
@@ -11,13 +11,31 @@ def membership_for(identity, business):
 
 
 def can_manage_business(member):
-    """Allow active owners and managers to perform Business management actions."""
-    return member and member.role in {
-        BusinessMember.Role.OWNER,
-        BusinessMember.Role.MANAGER,
-    }
+    """Transitional gate backed by ownership or one explicit permission.
+
+    Existing endpoints still call this broad helper. Later API-specific lots can
+    replace it with their granular permission without consulting ``role``.
+    """
+    return has_permission(
+        member,
+        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+    )
 
 
 def can_view_members(member):
-    """Member visibility follows the existing Business management rule."""
-    return can_manage_business(member)
+    """Allow owners or members holding the explicit member-view permission."""
+    return has_permission(
+        member,
+        BusinessMemberPermission.Permission.VIEW_MEMBERS,
+    )
+
+
+def has_permission(member, permission):
+    """Return True if the member is an active owner or holds the explicit permission."""
+    if not member or member.status != BusinessMember.Status.ACTIVE:
+        return False
+    if member.is_owner:
+        return True
+    return BusinessMemberPermission.objects.filter(
+        member=member, permission=permission
+    ).exists()

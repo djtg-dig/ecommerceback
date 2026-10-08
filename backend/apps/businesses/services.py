@@ -1,20 +1,36 @@
 """Application services for explicit Business lifecycle operations."""
 
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 
 from apps.common.choices import PaymentMethod
 
 from .identifiers import generate_business_public_id
-from .models import Business, BusinessCategory, BusinessCategoryMembership, BusinessMember, BusinessPaymentMethod
+from .models import (
+    Business,
+    BusinessCategory,
+    BusinessCategoryMembership,
+    BusinessMember,
+    BusinessMemberPermission,
+    BusinessPaymentMethod,
+)
 
 MAX_PUBLIC_ID_ATTEMPTS = 5
-DEFAULT_PAYMENT_METHODS = (("Argent liquide", PaymentMethod.CASH), ("Mobile Money", PaymentMethod.MOBILE_MONEY), ("Virement bancaire", PaymentMethod.BANK_TRANSFER), ("Carte", PaymentMethod.CARD), ("Autre", PaymentMethod.OTHER))
+DEFAULT_PAYMENT_METHODS = (
+    ("Argent liquide", PaymentMethod.CASH),
+    ("Mobile Money", PaymentMethod.MOBILE_MONEY),
+    ("Virement bancaire", PaymentMethod.BANK_TRANSFER),
+    ("Carte", PaymentMethod.CARD),
+    ("Autre", PaymentMethod.OTHER),
+)
 
 
 def ensure_default_payment_methods(business):
     """Create standard methods when absent, without creating financial balances."""
     for name, category in DEFAULT_PAYMENT_METHODS:
-        BusinessPaymentMethod.objects.get_or_create(business=business, name=name, defaults={"category": category})
+        BusinessPaymentMethod.objects.get_or_create(
+            business=business, name=name, defaults={"category": category}
+        )
 
 
 def create_business(identity, validated_data):
@@ -53,6 +69,8 @@ def create_business(identity, validated_data):
                     business=business,
                     identity=identity,
                     role=BusinessMember.Role.OWNER,
+                    is_owner=True,
+                    title="Gérant",
                     status=BusinessMember.Status.ACTIVE,
                 )
 
@@ -63,7 +81,6 @@ def create_business(identity, validated_data):
                         is_primary=code == primary_category,
                     )
 
-                # A local import avoids coupling module import order across apps.
                 from apps.expenses.services import ensure_default_expense_categories
 
                 ensure_default_expense_categories(business)
@@ -99,3 +116,49 @@ def replace_categories(business, codes, primary_category):
                 category=category,
                 is_primary=code == primary_category,
             )
+
+
+def grant_permission(actor_member, member, permission):
+    """Let an active owner grant one explicit permission in their Business."""
+    if permission not in BusinessMemberPermission.Permission.values:
+        raise ValidationError("Unknown Business permission.")
+
+    with transaction.atomic():
+        actor = BusinessMember.objects.select_for_update().get(pk=actor_member.pk)
+        target = BusinessMember.objects.select_for_update().get(pk=member.pk)
+        if (
+            not actor.is_owner
+            or actor.status != BusinessMember.Status.ACTIVE
+            or actor.business_id != target.business_id
+        ):
+            raise ValidationError("Only the active Business owner can grant permissions.")
+        if target.is_owner:
+            raise ValidationError("Owners already have all permissions.")
+        if target.status != BusinessMember.Status.ACTIVE:
+            raise ValidationError("Only active members can receive permissions.")
+
+        permission_row, _ = BusinessMemberPermission.objects.get_or_create(
+            member=target,
+            permission=permission,
+        )
+        return permission_row
+
+
+def revoke_permission(actor_member, member, permission):
+    """Let an active owner revoke one explicit permission in their Business."""
+    with transaction.atomic():
+        actor = BusinessMember.objects.select_for_update().get(pk=actor_member.pk)
+        target = BusinessMember.objects.select_for_update().get(pk=member.pk)
+        if (
+            not actor.is_owner
+            or actor.status != BusinessMember.Status.ACTIVE
+            or actor.business_id != target.business_id
+        ):
+            raise ValidationError("Only the active Business owner can revoke permissions.")
+        if target.is_owner:
+            raise ValidationError("Owner permissions are implicit and cannot be revoked.")
+
+        BusinessMemberPermission.objects.filter(
+            member=target,
+            permission=permission,
+        ).delete()
