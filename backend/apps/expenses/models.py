@@ -93,6 +93,14 @@ class Expense(models.Model):
             previous = type(self).objects.filter(pk=self.pk).first()
             if previous and previous.public_id != self.public_id:
                 errors["public_id"] = "The public identifier is immutable."
+            if previous and previous.amount != self.amount:
+                paid_amount = self.payments.filter(
+                    reversed_at__isnull=True
+                ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
+                if self.amount < paid_amount:
+                    errors["amount"] = (
+                        "Amount cannot be lower than the total already paid."
+                    )
         if errors:
             raise ValidationError(errors)
 

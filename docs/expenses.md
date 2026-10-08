@@ -24,6 +24,8 @@ Une Expense porte un identifiant public `EX`, une catégorie, un montant décima
 
 Une Expense est créée `ACTIVE`. `POST .../expenses/{EX}/cancel/` applique la seule transition `ACTIVE -> CANCELLED` via `cancel_expense`, qui verrouille la ligne et conserve auteur, date et motif. `CANCELLED` est terminal : une dépense annulée ne se modifie ni ne s'annule une seconde fois.
 
+Le montant d'une Expense `ACTIVE` reste modifiable, mais ne peut jamais devenir inférieur à la somme de ses paiements actifs. Un montant égal au total payé est accepté et produit un solde nul. La mise à jour verrouille la même ligne Expense que la création d'un paiement : une modification et un paiement concurrents sont donc sérialisés, sans altérer l'historique des `ExpensePayment` ni leurs mouvements Finance.
+
 ## Permissions et isolation
 
 OWNER et MANAGER lisent, créent, modifient et annulent. EMPLOYEE lit seulement. Chaque accès est borné au Business de la membership active ; une ressource étrangère répond `404`.

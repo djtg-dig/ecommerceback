@@ -1,7 +1,11 @@
 from datetime import date
+from queue import Queue
+from threading import Event, Thread
 from unittest.mock import patch
 
 import pytest
+from django.core.exceptions import ValidationError
+from django.db import close_old_connections, transaction
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
@@ -9,7 +13,11 @@ from apps.businesses.models import Business, BusinessMember
 from apps.businesses.services import create_business
 from apps.common.choices import PaymentMethod
 from apps.expenses.models import Expense, ExpenseCategory
-from apps.expenses.services import ensure_default_expense_categories
+from apps.expenses.services import (
+    add_expense_payment,
+    ensure_default_expense_categories,
+    update_expense,
+)
 from apps.receivables.models import ReceivablePayment
 
 pytestmark = pytest.mark.django_db
@@ -545,3 +553,263 @@ def test_expense_payments_reverse_and_cancellation_rules_with_finance_rollback()
             from apps.expenses.services import add_expense_payment
             add_expense_payment(rollback_expense, owner, Decimal("10"), "CASH")
     assert not ExpensePayment.objects.filter(expense=rollback_expense).exists()
+
+
+def test_expense_amount_can_be_reduced_without_payments_or_above_paid_total():
+    business, owner, _, _, _ = setup_business()
+    category = ExpenseCategory.objects.get(business=business, code="RENT")
+    expense = Expense.objects.get(
+        public_id=create_expense(
+            client(owner),
+            business,
+            category,
+            amount="100.00",
+        ).data["public_id"]
+    )
+    detail_url = base_url(business) + f"expenses/{expense.public_id}/"
+
+    without_payment = client(owner).patch(
+        detail_url,
+        {"amount": "80.00"},
+        format="json",
+    )
+    assert without_payment.status_code == 200
+    assert without_payment.data["amount"] == "80.00"
+    assert without_payment.data["balance"] == "80.00"
+
+    payment = client(owner).post(
+        expense_payments_url(business, expense),
+        {"amount": "30.00", "payment_method": "CASH"},
+        format="json",
+    )
+    assert payment.status_code == 201
+
+    above_paid = client(owner).patch(
+        detail_url,
+        {"amount": "50.00"},
+        format="json",
+    )
+    assert above_paid.status_code == 200
+    assert above_paid.data["paid_amount"] == "30.00"
+    assert above_paid.data["balance"] == "20.00"
+
+
+def test_expense_amount_equal_to_multiple_payments_is_allowed_and_history_is_preserved():
+    business, owner, _, _, _ = setup_business()
+    category = ExpenseCategory.objects.get(business=business, code="RENT")
+    expense = Expense.objects.get(
+        public_id=create_expense(
+            client(owner),
+            business,
+            category,
+            amount="100.00",
+        ).data["public_id"]
+    )
+    payments_url = expense_payments_url(business, expense)
+    first = client(owner).post(
+        payments_url,
+        {"amount": "30.00", "payment_method": "CASH"},
+        format="json",
+    )
+    second = client(owner).post(
+        payments_url,
+        {"amount": "20.00", "payment_method": "MOBILE_MONEY"},
+        format="json",
+    )
+    payment_ids = {first.data["public_id"], second.data["public_id"]}
+    movement_ids = set(
+        FinancialMovement.objects.filter(
+            expense_payment__expense=expense
+        ).values_list("public_id", flat=True)
+    )
+
+    response = client(owner).patch(
+        base_url(business) + f"expenses/{expense.public_id}/",
+        {"amount": "50.00"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.data["amount"] == "50.00"
+    assert response.data["paid_amount"] == "50.00"
+    assert response.data["balance"] == "0.00"
+    assert response.data["payment_status"] == Expense.PaymentStatus.PAID
+    assert set(
+        ExpensePayment.objects.filter(expense=expense).values_list(
+            "public_id", flat=True
+        )
+    ) == payment_ids
+    assert set(
+        FinancialMovement.objects.filter(
+            expense_payment__expense=expense
+        ).values_list("public_id", flat=True)
+    ) == movement_ids
+
+
+def test_expense_amount_below_paid_total_is_rejected_without_any_change():
+    business, owner, _, _, _ = setup_business()
+    category = ExpenseCategory.objects.get(business=business, code="RENT")
+    expense = Expense.objects.get(
+        public_id=create_expense(
+            client(owner),
+            business,
+            category,
+            amount="100.00",
+            reference="ORIGINAL",
+        ).data["public_id"]
+    )
+    for amount in ("30.00", "20.00"):
+        response = client(owner).post(
+            expense_payments_url(business, expense),
+            {"amount": amount, "payment_method": "CASH"},
+            format="json",
+        )
+        assert response.status_code == 201
+
+    rejected = client(owner).patch(
+        base_url(business) + f"expenses/{expense.public_id}/",
+        {"amount": "49.99", "reference": "MUST-NOT-PERSIST"},
+        format="json",
+    )
+
+    assert rejected.status_code == 400
+    assert rejected.data == {
+        "detail": {
+            "amount": ["Amount cannot be lower than the total already paid."]
+        }
+    }
+    expense.refresh_from_db()
+    assert expense.amount == Decimal("100.00")
+    assert expense.reference == "ORIGINAL"
+    assert expense.paid_amount == Decimal("50.00")
+    assert expense.balance == Decimal("50.00")
+
+    expense.amount = Decimal("49.99")
+    with pytest.raises(
+        ValidationError,
+        match="Amount cannot be lower than the total already paid",
+    ):
+        expense.save()
+    expense.refresh_from_db()
+    assert expense.amount == Decimal("100.00")
+
+
+def test_expense_amount_update_permissions_isolation_and_put_cannot_bypass_guard():
+    business, owner, _, employee, _ = setup_business()
+    other_business = Business.objects.create(name="Other expense tenant")
+    other_owner = CarriIdentity.objects.create(carri_subject="other-expense-p0")
+    BusinessMember.objects.create(
+        business=other_business,
+        identity=other_owner,
+        role=BusinessMember.Role.OWNER,
+    )
+    category = ExpenseCategory.objects.get(business=business, code="RENT")
+    expense = Expense.objects.get(
+        public_id=create_expense(
+            client(owner),
+            business,
+            category,
+            amount="100.00",
+        ).data["public_id"]
+    )
+    add_expense_payment(expense, owner, Decimal("40.00"), "CASH")
+    detail_url = base_url(business) + f"expenses/{expense.public_id}/"
+
+    assert client(employee).patch(
+        detail_url,
+        {"amount": "30.00"},
+        format="json",
+    ).status_code == 403
+    assert client(other_owner).patch(
+        base_url(other_business) + f"expenses/{expense.public_id}/",
+        {"amount": "30.00"},
+        format="json",
+    ).status_code == 404
+    assert client(owner).put(
+        detail_url,
+        {"amount": "30.00"},
+        format="json",
+    ).status_code == 405
+
+    expense.refresh_from_db()
+    assert expense.amount == Decimal("100.00")
+    assert expense.balance == Decimal("60.00")
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_expense_reduction_and_payment_are_serialized():
+    business, owner, _, _, _ = setup_business()
+    category = ExpenseCategory.objects.get(business=business, code="RENT")
+    expense = Expense.objects.get(
+        public_id=create_expense(
+            client(owner),
+            business,
+            category,
+            amount="100.00",
+        ).data["public_id"]
+    )
+    amount_lock_acquired = Event()
+    release_amount_update = Event()
+    payment_started = Event()
+    outcomes = Queue()
+
+    def reduce_amount():
+        close_old_connections()
+        try:
+            with transaction.atomic():
+                locked_expense = Expense.objects.select_for_update().get(
+                    pk=expense.pk
+                )
+                amount_lock_acquired.set()
+                if not release_amount_update.wait(timeout=5):
+                    raise RuntimeError("Timed out waiting to release amount update.")
+                update_expense(
+                    locked_expense,
+                    {"amount": Decimal("50.00")},
+                )
+            outcomes.put(("amount", None))
+        except Exception as error:
+            outcomes.put(("amount", error))
+        finally:
+            close_old_connections()
+
+    def pay_expense():
+        close_old_connections()
+        payment_started.set()
+        try:
+            add_expense_payment(
+                expense,
+                owner,
+                Decimal("60.00"),
+                "CASH",
+            )
+            outcomes.put(("payment", None))
+        except Exception as error:
+            outcomes.put(("payment", error))
+        finally:
+            close_old_connections()
+
+    amount_thread = Thread(target=reduce_amount)
+    payment_thread = Thread(target=pay_expense)
+    amount_thread.start()
+    assert amount_lock_acquired.wait(timeout=5)
+    payment_thread.start()
+    assert payment_started.wait(timeout=5)
+    release_amount_update.set()
+    amount_thread.join(timeout=10)
+    payment_thread.join(timeout=10)
+
+    assert not amount_thread.is_alive()
+    assert not payment_thread.is_alive()
+    results = dict(outcomes.get(timeout=1) for _ in range(2))
+    assert results["amount"] is None
+    assert isinstance(results["payment"], ValidationError)
+    assert "Payment exceeds the remaining expense balance" in str(
+        results["payment"]
+    )
+
+    expense.refresh_from_db()
+    assert expense.amount == Decimal("50.00")
+    assert expense.paid_amount == Decimal("0")
+    assert expense.balance == Decimal("50.00")
+    assert not ExpensePayment.objects.filter(expense=expense).exists()

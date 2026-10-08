@@ -30,6 +30,7 @@ from .services import (
     add_expense_payment,
     cancel_expense,
     reverse_expense_payment,
+    update_expense,
 )
 
 def category_data(category):
@@ -289,8 +290,6 @@ class ExpenseDetail(BusinessScopedView):
             return self.not_found()
         if not can_manage_business(membership_for(request.user, business)):
             return self.forbidden()
-        if expense.status != Expense.Status.ACTIVE:
-            return Response({"detail": "Cancelled expenses are immutable."}, status=400)
         allowed_fields = {
             "category",
             "amount",
@@ -303,13 +302,14 @@ class ExpenseDetail(BusinessScopedView):
         unknown_fields = set(request.data).difference(allowed_fields)
         if unknown_fields:
             return Response({"detail": "One or more fields cannot be changed."}, status=400)
+        changes = {}
         if "category" in request.data:
             category = ExpenseCategory.objects.filter(
                 business=business, public_id=request.data["category"], is_active=True
             ).first()
             if not category:
                 return Response({"detail": "Invalid category."}, status=400)
-            expense.category = category
+            changes["category"] = category
         if "amount" in request.data:
             try:
                 amount = Decimal(str(request.data["amount"]))
@@ -317,28 +317,30 @@ class ExpenseDetail(BusinessScopedView):
                 amount = Decimal(0)
             if amount <= 0:
                 return Response({"detail": "Amount must be positive."}, status=400)
-            expense.amount = amount
+            changes["amount"] = amount
         if "currency" in request.data:
             if request.data["currency"] != business.primary_currency:
                 return Response(
                     {"detail": "Currency must match the Business primary currency."},
                     status=400,
                 )
-            expense.currency = business.primary_currency
+            changes["currency"] = business.primary_currency
         if "payment_method" in request.data:
             if request.data["payment_method"] not in PaymentMethod.values:
                 return Response({"detail": "Invalid payment method."}, status=400)
-            expense.payment_method = request.data["payment_method"]
+            changes["payment_method"] = request.data["payment_method"]
         if "expense_date" in request.data:
             try:
-                expense.expense_date = date.fromisoformat(request.data["expense_date"])
+                changes["expense_date"] = date.fromisoformat(
+                    request.data["expense_date"]
+                )
             except (TypeError, ValueError):
                 return Response({"detail": "Invalid expense date."}, status=400)
         for field in ("description", "reference"):
             if field in request.data:
-                setattr(expense, field, request.data[field])
+                changes[field] = request.data[field]
         try:
-            expense.save()
+            expense = update_expense(expense, changes)
         except ValidationError as error:
             detail = (
                 error.message_dict
@@ -523,7 +525,10 @@ ExpenseDetail.patch = extend_schema(
     parameters=[_business_id, _expense_id],
     request=ExpenseUpdateSerializer,
     responses={200: ExpenseSerializer, 400: None, 403: None, 404: None},
-    description="Une dépense CANCELLED est terminale ; status ne se modifie pas par PATCH.",
+    description=(
+        "Une dépense CANCELLED est terminale ; status ne se modifie pas par "
+        "PATCH. Le montant ne peut pas devenir inférieur au total déjà payé."
+    ),
 )(ExpenseDetail.patch)
 ExpenseCancel.post = extend_schema(
     tags=["Expenses"],

@@ -75,6 +75,28 @@ def cancel_expense(expense, actor, reason):
 
     return locked_expense
 
+
+def update_expense(expense, changes):
+    """Update an active Expense while serializing changes with its payments.
+
+    Expense payments lock the same parent row before checking the remaining
+    balance. Sharing that lock guarantees that a concurrent amount reduction
+    and payment cannot both validate against stale values.
+    """
+    from .models import Expense
+
+    with transaction.atomic():
+        locked_expense = Expense.objects.select_for_update().get(pk=expense.pk)
+        if locked_expense.status != Expense.Status.ACTIVE:
+            raise ValidationError("Cancelled expenses are immutable.")
+
+        for field, value in changes.items():
+            setattr(locked_expense, field, value)
+
+        locked_expense.save()
+
+    return locked_expense
+
 import hashlib
 import json
 
