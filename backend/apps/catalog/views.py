@@ -11,8 +11,8 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.businesses.models import Business
-from apps.businesses.permissions import can_manage_business, membership_for
+from apps.businesses.models import Business, BusinessMemberPermission
+from apps.businesses.permissions import require_permission
 
 from .models import Product, ProductCategory, ProductVariant
 from .serializers import (
@@ -66,12 +66,27 @@ class ProductCategoryAttributesView(generics.GenericAPIView):
 
 
 class BusinessProductMixin:
-    """Resolve a business only through the caller's active membership."""
+    """Resolve one tenant and enforce its server-defined permission."""
 
-    def get_business(self, request, business_public_id):
-        return Business.objects.filter(
-            public_id=business_public_id, members__identity=request.user, members__status="ACTIVE"
-        ).distinct().first()
+    def get_business(
+        self,
+        request,
+        business_public_id,
+        permission,
+        *,
+        write=False,
+    ):
+        business = Business.objects.filter(public_id=business_public_id).first()
+        if business is None:
+            return None
+
+        require_permission(
+            request.user,
+            business,
+            permission,
+            write=write,
+        )
+        return business
 
     def get_product(self, business, product_public_id):
         return Product.objects.filter(business=business, public_id=product_public_id).select_related("category", "business").first()
@@ -86,10 +101,14 @@ class BusinessProductMixin:
 
 
 class ProductListCreateView(BusinessProductMixin, APIView):
-    """List a member's products or create one as owner/manager."""
+    """List or create products under granular catalog permissions."""
 
     def get(self, request, business_public_id):
-        business = self.get_business(request, business_public_id)
+        business = self.get_business(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_CATALOG,
+        )
         if not business:
             return self.not_found()
         products = Product.objects.filter(business=business).select_related("category")
@@ -102,11 +121,14 @@ class ProductListCreateView(BusinessProductMixin, APIView):
         return Response(ProductOutputSerializer(products, many=True).data)
 
     def post(self, request, business_public_id):
-        business = self.get_business(request, business_public_id)
+        business = self.get_business(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.MANAGE_CATALOG,
+            write=True,
+        )
         if not business:
             return self.not_found()
-        if not can_manage_business(membership_for(request.user, business)):
-            return self.forbidden()
         serializer = ProductWriteSerializer(data=request.data, context={"business": business})
         serializer.is_valid(raise_exception=True)
         values = dict(serializer.validated_data)
@@ -211,7 +233,11 @@ class PosSearchView(BusinessProductMixin, APIView):
         )
 
     def get(self, request, business_public_id):
-        business = self.get_business(request, business_public_id)
+        business = self.get_business(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.USE_POS,
+        )
         if not business:
             return self.not_found()
         raw_query = request.query_params.get("q")
@@ -245,17 +271,24 @@ class ProductDetailView(BusinessProductMixin, APIView):
     """Read or update one product, always scoped to its parent business."""
 
     def get(self, request, business_public_id, product_public_id):
-        business = self.get_business(request, business_public_id)
+        business = self.get_business(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_CATALOG,
+        )
         product = self.get_product(business, product_public_id) if business else None
         return Response(ProductOutputSerializer(product).data) if product else self.not_found()
 
     def patch(self, request, business_public_id, product_public_id):
-        business = self.get_business(request, business_public_id)
+        business = self.get_business(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.MANAGE_CATALOG,
+            write=True,
+        )
         product = self.get_product(business, product_public_id) if business else None
         if not product:
             return self.not_found()
-        if not can_manage_business(membership_for(request.user, business)):
-            return self.forbidden()
         serializer = ProductWriteSerializer(product, data=request.data, partial=True, context={"business": business})
         serializer.is_valid(raise_exception=True)
         try:
@@ -269,34 +302,59 @@ class ProductArchiveView(BusinessProductMixin, APIView):
     """Archive instead of deleting a product, preserving future history."""
 
     def post(self, request, business_public_id, product_public_id):
-        business = self.get_business(request, business_public_id)
+        business = self.get_business(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.MANAGE_CATALOG,
+            write=True,
+        )
         product = self.get_product(business, product_public_id) if business else None
         if not product:
             return self.not_found()
-        if not can_manage_business(membership_for(request.user, business)):
-            return self.forbidden()
         product.status = Product.Status.ARCHIVED
         product.save(update_fields=("status", "updated_at"))
         return Response(ProductOutputSerializer(product).data)
 
 
 class ProductVariantListCreateView(BusinessProductMixin, APIView):
-    """List variants to all members and create them for owners/managers."""
+    """List or create variants under granular catalog permissions."""
 
-    def get_product_or_404(self, request, business_public_id, product_public_id):
-        business = self.get_business(request, business_public_id)
+    def get_product_or_404(
+        self,
+        request,
+        business_public_id,
+        product_public_id,
+        permission,
+        *,
+        write=False,
+    ):
+        business = self.get_business(
+            request,
+            business_public_id,
+            permission,
+            write=write,
+        )
         return business, self.get_product(business, product_public_id) if business else None
 
     def get(self, request, business_public_id, product_public_id):
-        _, product = self.get_product_or_404(request, business_public_id, product_public_id)
+        _, product = self.get_product_or_404(
+            request,
+            business_public_id,
+            product_public_id,
+            BusinessMemberPermission.Permission.VIEW_CATALOG,
+        )
         return Response(ProductVariantOutputSerializer(product.variants.all(), many=True).data) if product else self.not_found()
 
     def post(self, request, business_public_id, product_public_id):
-        business, product = self.get_product_or_404(request, business_public_id, product_public_id)
+        business, product = self.get_product_or_404(
+            request,
+            business_public_id,
+            product_public_id,
+            BusinessMemberPermission.Permission.MANAGE_CATALOG,
+            write=True,
+        )
         if not product:
             return self.not_found()
-        if not can_manage_business(membership_for(request.user, business)):
-            return self.forbidden()
         serializer = ProductVariantWriteSerializer(data=request.data, context={"product": product})
         serializer.is_valid(raise_exception=True)
         try:
@@ -313,25 +371,47 @@ class ProductVariantListCreateView(BusinessProductMixin, APIView):
 class ProductVariantDetailView(BusinessProductMixin, APIView):
     """Read or update a variant after both product and business scoping."""
 
-    def get_product_or_404(self, request, business_public_id, product_public_id):
-        business = self.get_business(request, business_public_id)
+    def get_product_or_404(
+        self,
+        request,
+        business_public_id,
+        product_public_id,
+        permission,
+        *,
+        write=False,
+    ):
+        business = self.get_business(
+            request,
+            business_public_id,
+            permission,
+            write=write,
+        )
         return business, self.get_product(business, product_public_id) if business else None
 
     def get_variant(self, product, variant_public_id):
         return ProductVariant.objects.filter(product=product, public_id=variant_public_id).select_related("product__category", "product__business").first()
 
     def get(self, request, business_public_id, product_public_id, variant_public_id):
-        _, product = self.get_product_or_404(request, business_public_id, product_public_id)
+        _, product = self.get_product_or_404(
+            request,
+            business_public_id,
+            product_public_id,
+            BusinessMemberPermission.Permission.VIEW_CATALOG,
+        )
         variant = self.get_variant(product, variant_public_id) if product else None
         return Response(ProductVariantOutputSerializer(variant).data) if variant else self.not_found()
 
     def patch(self, request, business_public_id, product_public_id, variant_public_id):
-        business, product = self.get_product_or_404(request, business_public_id, product_public_id)
+        business, product = self.get_product_or_404(
+            request,
+            business_public_id,
+            product_public_id,
+            BusinessMemberPermission.Permission.MANAGE_CATALOG,
+            write=True,
+        )
         variant = self.get_variant(product, variant_public_id) if product else None
         if not variant:
             return self.not_found()
-        if not can_manage_business(membership_for(request.user, business)):
-            return self.forbidden()
         serializer = ProductVariantWriteSerializer(variant, data=request.data, partial=True, context={"product": product})
         serializer.is_valid(raise_exception=True)
         try:
@@ -349,7 +429,7 @@ _category_code = OpenApiParameter("code", str, OpenApiParameter.PATH, descriptio
 
 ProductCategoryListView.get = extend_schema(tags=["Product Categories"], operation_id="product_category_list", auth=[], responses={200: ProductCategorySerializer(many=True)})(ProductCategoryListView.get)
 ProductCategoryAttributesView.get = extend_schema(tags=["Product Categories"], operation_id="product_category_effective_attributes", auth=[], parameters=[_category_code], responses={200: EffectiveAttributeSerializer(many=True), 404: None})(ProductCategoryAttributesView.get)
-ProductListCreateView.get = extend_schema(tags=["Products"], operation_id="product_list", parameters=[_business_public_id, OpenApiParameter("status", str, OpenApiParameter.QUERY), OpenApiParameter("category", str, OpenApiParameter.QUERY), OpenApiParameter("search", str, OpenApiParameter.QUERY)], responses={200: ProductOutputSerializer(many=True), 404: None})(ProductListCreateView.get)
+ProductListCreateView.get = extend_schema(tags=["Products"], operation_id="product_list", parameters=[_business_public_id, OpenApiParameter("status", str, OpenApiParameter.QUERY), OpenApiParameter("category", str, OpenApiParameter.QUERY), OpenApiParameter("search", str, OpenApiParameter.QUERY)], responses={200: ProductOutputSerializer(many=True), 403: None, 404: None})(ProductListCreateView.get)
 ProductListCreateView.post = extend_schema(tags=["Products"], operation_id="product_create", parameters=[_business_public_id], request=ProductWriteSerializer, responses={201: ProductOutputSerializer, 400: None, 403: None, 404: None})(ProductListCreateView.post)
 PosSearchView.get = extend_schema(
     tags=["Products"],
@@ -360,13 +440,13 @@ PosSearchView.get = extend_schema(
         OpenApiParameter("page", int, OpenApiParameter.QUERY),
         OpenApiParameter("page_size", int, OpenApiParameter.QUERY),
     ],
-    responses={200: PosSearchResultSerializer(many=True), 400: None, 404: None, 409: None},
+    responses={200: PosSearchResultSerializer(many=True), 400: None, 403: None, 404: None, 409: None},
     description="Compact POS search: public ID, trimmed barcode, normalized SKU, then name search.",
 )(PosSearchView.get)
-ProductDetailView.get = extend_schema(tags=["Products"], operation_id="product_retrieve", parameters=[_business_public_id, _product_public_id], responses={200: ProductOutputSerializer, 404: None})(ProductDetailView.get)
+ProductDetailView.get = extend_schema(tags=["Products"], operation_id="product_retrieve", parameters=[_business_public_id, _product_public_id], responses={200: ProductOutputSerializer, 403: None, 404: None})(ProductDetailView.get)
 ProductDetailView.patch = extend_schema(tags=["Products"], operation_id="product_update", parameters=[_business_public_id, _product_public_id], request=ProductWriteSerializer, responses={200: ProductOutputSerializer, 400: None, 403: None, 404: None})(ProductDetailView.patch)
 ProductArchiveView.post = extend_schema(tags=["Products"], operation_id="product_archive", parameters=[_business_public_id, _product_public_id], request=None, responses={200: ProductOutputSerializer, 403: None, 404: None})(ProductArchiveView.post)
-ProductVariantListCreateView.get = extend_schema(tags=["Product Variants"], operation_id="product_variant_list", parameters=[_business_public_id, _product_public_id], responses={200: ProductVariantOutputSerializer(many=True), 404: None})(ProductVariantListCreateView.get)
+ProductVariantListCreateView.get = extend_schema(tags=["Product Variants"], operation_id="product_variant_list", parameters=[_business_public_id, _product_public_id], responses={200: ProductVariantOutputSerializer(many=True), 403: None, 404: None})(ProductVariantListCreateView.get)
 ProductVariantListCreateView.post = extend_schema(tags=["Product Variants"], operation_id="product_variant_create", parameters=[_business_public_id, _product_public_id], request=ProductVariantWriteSerializer, responses={201: ProductVariantOutputSerializer, 400: None, 403: None, 404: None})(ProductVariantListCreateView.post)
-ProductVariantDetailView.get = extend_schema(tags=["Product Variants"], operation_id="product_variant_retrieve", parameters=[_business_public_id, _product_public_id, _variant_public_id], responses={200: ProductVariantOutputSerializer, 404: None})(ProductVariantDetailView.get)
+ProductVariantDetailView.get = extend_schema(tags=["Product Variants"], operation_id="product_variant_retrieve", parameters=[_business_public_id, _product_public_id, _variant_public_id], responses={200: ProductVariantOutputSerializer, 403: None, 404: None})(ProductVariantDetailView.get)
 ProductVariantDetailView.patch = extend_schema(tags=["Product Variants"], operation_id="product_variant_update", parameters=[_business_public_id, _product_public_id, _variant_public_id], request=ProductVariantWriteSerializer, responses={200: ProductVariantOutputSerializer, 400: None, 403: None, 404: None})(ProductVariantDetailView.patch)

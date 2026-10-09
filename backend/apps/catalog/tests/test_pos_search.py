@@ -7,7 +7,8 @@ from django.db import connection
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
-from apps.businesses.models import Business, BusinessMember
+from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
+from apps.businesses.services import grant_permission
 from apps.catalog.models import Product, ProductCategory, ProductVariant
 from apps.inventory.models import InventoryItem
 
@@ -21,7 +22,22 @@ def setup_pos():
     )
     business = Business.objects.create(name="POS shop")
     employee = CarriIdentity.objects.create(carri_subject="pos-employee")
-    BusinessMember.objects.create(business=business, identity=employee, role="EMPLOYEE")
+    owner = CarriIdentity.objects.create(carri_subject="pos-owner")
+    owner_member = BusinessMember.objects.create(
+        business=business,
+        identity=owner,
+        role=BusinessMember.Role.OWNER,
+    )
+    employee_member = BusinessMember.objects.create(
+        business=business,
+        identity=employee,
+        role=BusinessMember.Role.EMPLOYEE,
+    )
+    grant_permission(
+        owner_member,
+        employee_member,
+        BusinessMemberPermission.Permission.USE_POS,
+    )
     client = APIClient()
     client.force_authenticate(user=employee)
     return category, business, employee, client
@@ -106,7 +122,7 @@ def test_pos_excludes_archived_variant_and_suspended_member():
     membership.status = BusinessMember.Status.SUSPENDED
     membership.save(update_fields=("status", "updated_at"))
 
-    assert search(client, business, "anything").status_code == 404
+    assert search(client, business, "anything").status_code == 403
 
 
 def test_pos_text_pagination_validation_isolation_and_constant_queries():
@@ -129,7 +145,7 @@ def test_pos_text_pagination_validation_isolation_and_constant_queries():
     assert small_response.data["count"] == 5
     assert response.data["count"] == 105 and len(response.data["results"]) == 50
     assert len(small_queries) == len(large_queries)
-    assert len(large_queries) <= 9
+    assert len(large_queries) <= 11
     payload_size = len(json.dumps(response.data).encode("utf-8"))
     assert payload_size < 20_000
     assert search(client, business, " ").status_code == 400

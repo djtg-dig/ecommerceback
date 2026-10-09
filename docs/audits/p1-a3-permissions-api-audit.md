@@ -63,26 +63,26 @@ obtenir les erreurs canoniques de `require_permission`.
 |---|---|---|---|---|---|
 | GET | `/product-categories/` | `ProductCategoryListView`; queryset | public `AllowAny` | aucune, taxonomie publique | conforme |
 | GET | `/product-categories/{code}/attributes/` | `ProductCategoryAttributesView`; `effective_attributes` | public `AllowAny` | aucune, taxonomie publique | conforme |
-| GET | `/businesses/{SH}/products/` | `ProductListCreateView`; queryset | membership ACTIVE direct | `VIEW_CATALOG` | à migrer |
-| POST | `/businesses/{SH}/products/` | `ProductListCreateView`; `create_product` | `can_manage_business` | `MANAGE_CATALOG` | à migrer |
-| GET | `/businesses/{SH}/products/pos/search/` | `PosSearchView`; agrégations Catalog/Inventory | membership ACTIVE direct | `USE_POS` | à migrer |
-| GET | `/businesses/{SH}/products/{PR}/` | `ProductDetailView`; queryset | membership ACTIVE direct | `VIEW_CATALOG` | à migrer |
-| PATCH | `/businesses/{SH}/products/{PR}/` | `ProductDetailView`; serializer | `can_manage_business` | `MANAGE_CATALOG` | à migrer |
-| POST | `/businesses/{SH}/products/{PR}/archive/` | `ProductArchiveView`; modèle | `can_manage_business` | `MANAGE_CATALOG` | à migrer |
-| GET | `/businesses/{SH}/products/{PR}/variants/` | `ProductVariantListCreateView`; queryset | membership ACTIVE direct | `VIEW_CATALOG` | à migrer |
-| POST | `/businesses/{SH}/products/{PR}/variants/` | `ProductVariantListCreateView`; `ensure_can_create_variant`, `create_variant` | `can_manage_business` | `MANAGE_CATALOG` | à migrer |
-| GET | `/businesses/{SH}/products/{PR}/variants/{PV}/` | `ProductVariantDetailView`; queryset | membership ACTIVE direct | `VIEW_CATALOG` | à migrer |
-| PATCH | `/businesses/{SH}/products/{PR}/variants/{PV}/` | `ProductVariantDetailView`; serializer | `can_manage_business` | `MANAGE_CATALOG` | à migrer |
+| GET | `/businesses/{SH}/products/` | `ProductListCreateView`; queryset | `require_permission(..., VIEW_CATALOG)` | `VIEW_CATALOG` | conforme — P1-A3.4 |
+| POST | `/businesses/{SH}/products/` | `ProductListCreateView`; `create_product` | `require_permission(..., MANAGE_CATALOG, write=True)` | `MANAGE_CATALOG` | conforme — P1-A3.4 |
+| GET | `/businesses/{SH}/products/pos/search/` | `PosSearchView`; agrégations Catalog/Inventory | `require_permission(..., USE_POS)` | `USE_POS` | conforme — P1-A3.4 |
+| GET | `/businesses/{SH}/products/{PR}/` | `ProductDetailView`; queryset | `require_permission(..., VIEW_CATALOG)` | `VIEW_CATALOG` | conforme — P1-A3.4 |
+| PATCH | `/businesses/{SH}/products/{PR}/` | `ProductDetailView`; serializer | `require_permission(..., MANAGE_CATALOG, write=True)` | `MANAGE_CATALOG` | conforme — P1-A3.4 |
+| POST | `/businesses/{SH}/products/{PR}/archive/` | `ProductArchiveView`; modèle | `require_permission(..., MANAGE_CATALOG, write=True)` | `MANAGE_CATALOG` | conforme — P1-A3.4 |
+| GET | `/businesses/{SH}/products/{PR}/variants/` | `ProductVariantListCreateView`; queryset | `require_permission(..., VIEW_CATALOG)` | `VIEW_CATALOG` | conforme — P1-A3.4 |
+| POST | `/businesses/{SH}/products/{PR}/variants/` | `ProductVariantListCreateView`; `ensure_can_create_variant`, `create_variant` | `require_permission(..., MANAGE_CATALOG, write=True)` | `MANAGE_CATALOG` | conforme — P1-A3.4 |
+| GET | `/businesses/{SH}/products/{PR}/variants/{PV}/` | `ProductVariantDetailView`; queryset | `require_permission(..., VIEW_CATALOG)` | `VIEW_CATALOG` | conforme — P1-A3.4 |
+| PATCH | `/businesses/{SH}/products/{PR}/variants/{PV}/` | `ProductVariantDetailView`; serializer | `require_permission(..., MANAGE_CATALOG, write=True)` | `MANAGE_CATALOG` | conforme — P1-A3.4 |
 
 ### Inventory — 5 opérations
 
 | Méthode | Chemin | Vue ; service | Contrôle actuel | Permission cible | Statut |
 |---|---|---|---|---|---|
-| GET | `/businesses/{SH}/inventory/` | `InventoryListCreateView`; queryset | membership ACTIVE direct | `VIEW_INVENTORY` | à migrer |
-| POST | `/businesses/{SH}/inventory/` | `InventoryListCreateView`; `create_inventory_item` | `can_manage_business` | `MANAGE_INVENTORY` | à migrer |
-| GET | `/businesses/{SH}/inventory/{IV}/` | `InventoryDetailView`; queryset | membership ACTIVE direct | `VIEW_INVENTORY` | à migrer |
-| GET | `/businesses/{SH}/inventory/{IV}/movements/` | `StockMovementListCreateView`; queryset | membership ACTIVE direct | `VIEW_INVENTORY` | à migrer |
-| POST | `/businesses/{SH}/inventory/{IV}/movements/` | `StockMovementListCreateView`; `apply_stock_movement` | `can_manage_business` | `MANAGE_INVENTORY` | à migrer |
+| GET | `/businesses/{SH}/inventory/` | `InventoryListCreateView`; queryset | `require_permission(..., VIEW_INVENTORY)` | `VIEW_INVENTORY` | conforme — P1-A3.4 |
+| POST | `/businesses/{SH}/inventory/` | `InventoryListCreateView`; `create_inventory_item` | `require_permission(..., MANAGE_INVENTORY, write=True)` | `MANAGE_INVENTORY` | conforme — P1-A3.4 |
+| GET | `/businesses/{SH}/inventory/{IV}/` | `InventoryDetailView`; queryset | `require_permission(..., VIEW_INVENTORY)` | `VIEW_INVENTORY` | conforme — P1-A3.4 |
+| GET | `/businesses/{SH}/inventory/{IV}/movements/` | `StockMovementListCreateView`; queryset | `require_permission(..., VIEW_INVENTORY)` | `VIEW_INVENTORY` | conforme — P1-A3.4 |
+| POST | `/businesses/{SH}/inventory/{IV}/movements/` | `StockMovementListCreateView`; `apply_stock_movement` | `require_permission(..., MANAGE_INVENTORY, write=True)` | `MANAGE_INVENTORY` | conforme — P1-A3.4 |
 
 ### Purchases et fournisseurs — 19 opérations
 
@@ -182,8 +182,8 @@ donnerait au vendeur des droits de référentiel non explicitement décidés.
 
 | Statut | Opérations |
 |---|---:|
-| Conforme | 46 |
-| À migrer | 33 |
+| Conforme | 61 |
+| À migrer | 18 |
 | À clarifier | 7 |
 | **Total** | **86** |
 
@@ -192,8 +192,8 @@ donnerait au vendeur des droits de référentiel non explicitement décidés.
 Quatre familles de contrôles doivent disparaître progressivement des vues :
 
 1. `can_manage_business`, helper transitoire fondé sur `UPDATE_BUSINESS`, protège
-   encore 23 opérations de configuration Business, catalogue, stock, Finance et
-   reporting avec une permission trop générale ;
+   encore 16 opérations de configuration Business, Finance et reporting avec
+   une permission trop générale ;
 2. les recherches directes `members__identity` + `members__status="ACTIVE"`
    sont répétées dans presque chaque mixin et contournent `membership_for` /
    `require_permission` ;
@@ -256,18 +256,19 @@ au modèle ni à une migration.
 3. **Business inactif mutable — corrigé pour P1-A3.2** : les neuf opérations
    migrées utilisent `write=True` pour leurs mutations ; `SUSPENDED` et
    `ARCHIVED` sont refusés.
-4. **Lecture sensible trop large — partiellement corrigée P1-A3.3** : achats,
-   fournisseurs et dépenses exigent désormais leur permission de lecture. Tout
-   membre actif peut encore lire clients, ventes, créances, stock et catalogue
+4. **Lecture sensible trop large — partiellement corrigée P1-A3.4** : achats,
+   fournisseurs, dépenses, catalogue et stock exigent désormais leur permission
+   de lecture. Tout membre actif peut encore lire clients, ventes et créances
    indépendamment de ses permissions individuelles.
 
 ### Cohérence 403/404
 
 Le moteur P1-A2 définit : absence de membership = 404 ; membership existant mais
 non autorisé ou suspendu = 403. Les vues Sales/Receivables migrées en P1-A3.2 et
-Purchases/Expenses migrées en P1-A3.3 appliquent désormais cette distinction en
-résolvant d'abord le Business puis en appelant `require_permission`. Les autres
-scopes directs et usages de `can_manage_business` restent à harmoniser.
+Purchases/Expenses migrées en P1-A3.3 et Catalog/Inventory migrées en P1-A3.4
+appliquent désormais cette distinction en résolvant d'abord le Business puis en
+appelant `require_permission`. Les autres scopes directs et usages de
+`can_manage_business` restent à harmoniser.
 
 ## Matrice fonctionnelle condensée
 
@@ -340,11 +341,25 @@ permission, les permissions explicites et indépendantes, le membre suspendu,
 l'isolation tenant et les statuts inactifs du Business. Aucun service
 transactionnel ni historique financier n'a été modifié.
 
-### P1-A3.4 — Catalog, POS search et Inventory
+### P1-A3.4 — Catalog, POS search et Inventory — terminé
 
 Remplacer les mixins dupliqués par le moteur central, distinguer
 `VIEW_CATALOG`, `MANAGE_CATALOG`, `USE_POS`, `VIEW_INVENTORY` et
 `MANAGE_INVENTORY`, puis tester produits archivés et isolation Business.
+
+Endpoints effectivement migrés :
+
+- les 4 lectures produits/variantes utilisent `VIEW_CATALOG` et les 5 mutations
+  produits/variantes utilisent `MANAGE_CATALOG` avec `write=True` ;
+- la recherche compacte POS utilise exclusivement `USE_POS` ;
+- les 3 lectures Inventory/StockMovement utilisent `VIEW_INVENTORY` et les 2
+  créations utilisent `MANAGE_INVENTORY` avec `write=True`.
+
+Les tests couvrent l'OWNER, l'ancien MANAGER sans droit implicite, chacune des
+permissions explicites, le membre suspendu, l'isolation tenant et les Business
+suspendus ou archivés. Les règles existantes des produits archivés sont
+préservées. Le coût SQL de l'autorisation POS ajoute deux requêtes fixes, sans
+N+1 : le nombre de requêtes reste identique entre petit et grand jeux de données.
 
 ### P1-A3.5 — Finance, Dashboard, rentabilité et rapports
 
@@ -371,9 +386,9 @@ serializers, et peut être validé indépendamment avant le suivant.
 ## Conclusion
 
 L'isolation par Business est globalement présente et aucun rôle ou titre legacy
-ne confère de privilège. Après P1-A3.3, 33 opérations ont encore une permission
+ne confère de privilège. Après P1-A3.4, 18 opérations ont encore une permission
 existante mais n'utilisent pas le moteur avec cette permission, et 7 nécessitent
 une décision de granularité. Les opérations Sales/Returns/Receivables critiques
-ainsi que tout le périmètre Purchases/Expenses sont désormais centralisés ; la
-création de client et les autres lectures sensibles trop larges restent les
-priorités documentées.
+ainsi que les périmètres Purchases/Expenses et Catalog/Inventory sont désormais
+centralisés ; la création de client et les autres lectures sensibles trop larges
+restent les priorités documentées.

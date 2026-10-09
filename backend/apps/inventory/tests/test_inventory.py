@@ -31,13 +31,18 @@ def setup():
     manager_member = BusinessMember.objects.create(
         business=business, identity=manager, role="MANAGER"
     )
-    BusinessMember.objects.create(
+    employee_member = BusinessMember.objects.create(
         business=business, identity=employee, role="EMPLOYEE"
     )
     grant_permission(
         owner_member,
         manager_member,
-        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+        BusinessMemberPermission.Permission.MANAGE_INVENTORY,
+    )
+    grant_permission(
+        owner_member,
+        employee_member,
+        BusinessMemberPermission.Permission.VIEW_INVENTORY,
     )
     product = Product.objects.create(business=business, category=category, name="Simple", selling_price="1", currency="CDF", attributes={})
     other_product = Product.objects.create(business=other, category=category, name="Other", selling_price="1", currency="CDF", attributes={})

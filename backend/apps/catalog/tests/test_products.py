@@ -35,11 +35,20 @@ def actors():
     owner_member = BusinessMember.objects.create(identity=owner, business=business, role="OWNER")
     BusinessMember.objects.create(identity=owner, business=other_business, role="OWNER")
     manager_member = BusinessMember.objects.create(identity=manager, business=business, role="MANAGER")
-    BusinessMember.objects.create(identity=employee, business=business, role="EMPLOYEE")
+    employee_member = BusinessMember.objects.create(
+        identity=employee,
+        business=business,
+        role="EMPLOYEE",
+    )
     grant_permission(
         owner_member,
         manager_member,
-        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+        BusinessMemberPermission.Permission.MANAGE_CATALOG,
+    )
+    grant_permission(
+        owner_member,
+        employee_member,
+        BusinessMemberPermission.Permission.VIEW_CATALOG,
     )
     return business, other_business, owner, manager, employee, outsider
 
