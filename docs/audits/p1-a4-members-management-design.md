@@ -431,6 +431,42 @@ de cycle de vie restent dans P1-A4.6.
 - Les invitations et l'attribution/révocation de permissions ne sont pas
   introduites dans ce lot.
 
+État de P1-A4.5 — administration des permissions individuelles, livré
+le 9 octobre 2026 :
+
+- `GET /api/v1/businesses/{SH}/members/{BM}/permissions/` liste les
+  permissions explicites d'un membre (exige `VIEW_MEMBERS`). Pour
+  l'OWNER, les droits implicites complets sont retournés en lecture
+  sans ligne de registre. Réponse compacte `{permission}` par ligne,
+  triée par permission, lues depuis le préchargement
+  `_prefetched_permissions` sans requête supplémentaire.
+- `GET /api/v1/businesses/{SH}/permissions/` expose le registre
+  serveur complet `{permission, label}` (exige `VIEW_MEMBERS`),
+  permettant à un client de découvrir les valeurs attribuables.
+- `POST /api/v1/businesses/{SH}/members/{BM}/permissions/` attribue
+  une permission (payload `{permission}`, réponse `201`). Seul le
+  propriétaire actif peut appeler ; `MANAGE_MEMBERS` sans propriété
+  reçoit `403`.
+- `DELETE /api/v1/businesses/{SH}/members/{BM}/permissions/{permission}/`
+  révoque une permission (réponse `204`). Seul le propriétaire actif
+  peut appeler.
+- Les deux mutations réutilisent les services transactionnels
+  `grant_permission` et `revoke_permission` : `transaction.atomic`
+  avec `select_for_update` sur l'acteur, la cible et le Business,
+  validation du registre serveur, refus des permissions inconnues
+  (`400`), refus d'attribuer à un membre retiré ou suspendu, refus
+  de modifier les droits implicites du propriétaire. L'attribution
+  répétée est idempotente (`get_or_create`, une seule ligne) ; la
+  révocation répétée est idempotente (`204`).
+- Les mutations sont refusées (`403`) sur un Business `SUSPENDED`
+  ou `ARCHIVED`. L'isolation interentreprises est préservée
+  (`404`). Aucun membre ne peut s'attribuer de permission et aucun
+  rôle ou titre ne confère de droit implicite.
+- Les permissions d'un membre suspendu sont conservées mais
+  inopérantes ; celles d'un membre retiré sont supprimées et ne
+  sont jamais restaurées automatiquement.
+- Les invitations ne sont pas introduites dans ce lot.
+
 1. **P1-A4.2 — Prérequis identité et modèles** : ajouter
    `BusinessMember.public_id`, les métadonnées de cycle de vie et le retrait
    logique, puis migration, backfill et tests. Le contrat e-mail Carri, la
@@ -440,12 +476,12 @@ de cycle de vie restent dans P1-A4.6.
    préchargement des permissions et mesures anti-N+1.
 3. **P1-A4.4 — Cycle de vie membre** : titre, suspension, réactivation et
    retrait logique avec protections OWNER, services transactionnels verrouillés.
-4. **P1-A4.5 — Administration des invitations** : créer/lister/détailler,
+4. **P1-A4.5 — Administration des permissions** : consultation, attribution et
+   révocation OWNER-only autour des services existants, registre exposé.
+5. **P1-A4.6 — Administration des invitations** : créer/lister/détailler,
    révoquer/renvoyer, idempotence et adaptateur d'envoi après commit.
-5. **P1-A4.6 — Parcours invité** : liste personnelle, acceptation/refus,
+6. **P1-A4.7 — Parcours invité** : liste personnelle, acceptation/refus,
    vérification Carri et tests de concurrence.
-6. **P1-A4.7 — API des permissions** : endpoints OWNER-only autour des services
-   existants, tests d'escalade et matrice complète.
 7. **P1-A4.8 — Validation finale** : OpenAPI, performance, documentation Flutter,
    tests globaux et audit des événements sensibles.
 

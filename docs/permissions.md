@@ -102,3 +102,18 @@ lui-même. La suspension conserve les permissions mais les rend inopérantes ;
 la réactivation restaure les mêmes permissions sans élévation ; le retrait
 supprime les permissions et est idempotent. Un membre `REMOVED` ne peut pas
 être réactivé par l'endpoint ordinaire.
+
+## Administration des permissions individuelles
+
+`GET .../members/{BM}/permissions/` (exige `VIEW_MEMBERS`) liste les
+permissions explicites d'un membre ; pour l'OWNER, les droits implicites
+complets sont retournés en lecture. `GET .../permissions/` expose le registre
+serveur complet. `POST .../members/{BM}/permissions/` attribue et
+`DELETE .../members/{BM}/permissions/{permission}/` révoque : ces deux
+mutations sont réservées au propriétaire actif (`MANAGE_MEMBERS` sans
+propriété reçoit `403`), réutilisent les services transactionnels verrouillés,
+valident le registre serveur et refusent les permissions inconnues (`400`).
+L'attribution répétée est idempotente, la révocation répétée aussi (`204`).
+Les mutations sont refusées sur un Business `SUSPENDED` ou `ARCHIVED`.
+Aucun membre ne peut s'attribuer de permission ; les droits implicites du
+propriétaire ne sont jamais modifiés.

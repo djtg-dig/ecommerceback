@@ -138,6 +138,31 @@ class BusinessMemberTitleSerializer(serializers.ModelSerializer):
         extra_kwargs = {"title": {"required": True, "allow_blank": False}}
 
 
+class BusinessMemberPermissionSerializer(serializers.Serializer):
+    """Compact projection of one registered Business permission."""
+
+    permission = serializers.ChoiceField(
+        choices=BusinessMemberPermission.Permission.choices,
+    )
+
+
+class BusinessMemberPermissionGrantSerializer(serializers.Serializer):
+    """Payload used to grant one registered permission to a member."""
+
+    permission = serializers.ChoiceField(
+        choices=BusinessMemberPermission.Permission.choices,
+    )
+
+
+class BusinessPermissionCatalogSerializer(serializers.Serializer):
+    """Compact projection of the server-side permission registry."""
+
+    permission = serializers.ChoiceField(
+        choices=BusinessMemberPermission.Permission.choices,
+    )
+    label = serializers.CharField(read_only=True)
+
+
 class BusinessPaymentMethodSerializer(serializers.ModelSerializer):
     class Meta:
         model = BusinessPaymentMethod

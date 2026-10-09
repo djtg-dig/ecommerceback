@@ -2,6 +2,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Prefetch
 from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
 from rest_framework import permissions, serializers
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -13,11 +14,19 @@ from .models import (
     BusinessMemberPermission,
     BusinessPaymentMethod,
 )
-from .permissions import has_permission, require_any_permission, require_permission
+from .permissions import (
+    has_permission,
+    require_any_permission,
+    require_permission,
+    validate_permission,
+)
 from .serializers import (
     BusinessCreateSerializer,
+    BusinessMemberPermissionGrantSerializer,
+    BusinessMemberPermissionSerializer,
     BusinessMemberSerializer,
     BusinessMemberTitleSerializer,
+    BusinessPermissionCatalogSerializer,
     BusinessSerializer,
     BusinessUpdateSerializer,
     CategorySerializer,
@@ -25,9 +34,11 @@ from .serializers import (
 )
 from .services import (
     create_business,
+    grant_permission,
     reactivate_member,
     remove_member,
     replace_categories,
+    revoke_permission,
     suspend_member,
     update_member_title,
 )
@@ -325,6 +336,173 @@ class BusinessMemberReactivateView(APIView):
         return Response(BusinessMemberSerializer(reactivated).data)
 
 
+class BusinessPermissionCatalogView(APIView):
+    """List every registered permission the owner may grant."""
+
+    def get(self, request, public_id):
+        business = Business.objects.filter(public_id=public_id).first()
+        if business is None:
+            return Response({"detail": "Not found."}, status=404)
+        require_permission(
+            request.user,
+            business,
+            BusinessMemberPermission.Permission.VIEW_MEMBERS,
+        )
+
+        catalog = [
+            {"permission": value, "label": label}
+            for value, label in BusinessMemberPermission.Permission.choices
+        ]
+
+        return Response(
+            BusinessPermissionCatalogSerializer(catalog, many=True).data
+        )
+
+
+class BusinessMemberPermissionGrantView(APIView):
+    """Grant one explicit permission (active OWNER only)."""
+
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_actor_and_member(self, request, public_id, member_public_id):
+        """Resolve the Business, enforce active OWNER, then resolve the member."""
+        business = Business.objects.filter(public_id=public_id).first()
+        if business is None:
+            return None, None, None
+        actor = require_permission(
+            request.user,
+            business,
+            BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+            write=True,
+        )
+        if not actor.is_owner:
+            raise PermissionDenied("Forbidden.")
+        member = (
+            BusinessMember.objects.filter(
+                business=business,
+            )
+            .exclude(status=BusinessMember.Status.REMOVED)
+            .filter(public_id=member_public_id)
+            .first()
+        )
+        return business, actor, member
+
+    def get(self, request, public_id, member_public_id):
+        """List a member's explicit permissions (VIEW_MEMBERS)."""
+        business = Business.objects.filter(public_id=public_id).first()
+        if business is None:
+            return Response({"detail": "Not found."}, status=404)
+        require_permission(
+            request.user,
+            business,
+            BusinessMemberPermission.Permission.VIEW_MEMBERS,
+        )
+        member = (
+            member_queryset(business)
+            .filter(public_id=member_public_id)
+            .first()
+        )
+        if member is None:
+            return Response({"detail": "Not found."}, status=404)
+
+        if member.is_owner:
+            permissions = list(BusinessMemberPermission.Permission.values)
+        else:
+            prefetched = getattr(member, "_prefetched_permissions", None)
+            if prefetched is not None:
+                permissions = [row.permission for row in prefetched]
+            else:
+                permissions = list(
+                    member.permissions.order_by("permission").values_list(
+                        "permission",
+                        flat=True,
+                    )
+                )
+
+        return Response(
+            BusinessMemberPermissionSerializer(
+                [{"permission": value} for value in permissions],
+                many=True,
+            ).data
+        )
+
+    def post(self, request, public_id, member_public_id):
+        business, actor, member = self.get_actor_and_member(
+            request,
+            public_id,
+            member_public_id,
+        )
+        if member is None:
+            return Response({"detail": "Not found."}, status=404)
+
+        serializer = BusinessMemberPermissionGrantSerializer(
+            data=request.data,
+        )
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            grant_permission(
+                actor,
+                member,
+                serializer.validated_data["permission"],
+            )
+        except DjangoValidationError as error:
+            return Response({"detail": str(error)}, status=400)
+
+        return Response(
+            BusinessMemberPermissionSerializer(
+                {"permission": serializer.validated_data["permission"]},
+            ).data,
+            status=201,
+        )
+
+
+class BusinessMemberPermissionDetailView(APIView):
+    """Revoke one explicit permission (active OWNER only)."""
+
+    http_method_names = ["delete", "head", "options"]
+
+    def get_actor_and_member(self, request, public_id, member_public_id):
+        """Resolve the Business, enforce active OWNER, then resolve the member."""
+        business = Business.objects.filter(public_id=public_id).first()
+        if business is None:
+            return None, None, None
+        actor = require_permission(
+            request.user,
+            business,
+            BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+            write=True,
+        )
+        if not actor.is_owner:
+            raise PermissionDenied("Forbidden.")
+        member = (
+            BusinessMember.objects.filter(
+                business=business,
+            )
+            .exclude(status=BusinessMember.Status.REMOVED)
+            .filter(public_id=member_public_id)
+            .first()
+        )
+        return business, actor, member
+
+    def delete(self, request, public_id, member_public_id, permission):
+        business, actor, member = self.get_actor_and_member(
+            request,
+            public_id,
+            member_public_id,
+        )
+        if member is None:
+            return Response({"detail": "Not found."}, status=404)
+
+        try:
+            validate_permission(permission)
+            revoke_permission(actor, member, permission)
+        except DjangoValidationError as error:
+            return Response({"detail": str(error)}, status=400)
+
+        return Response(status=204)
+
+
 class BusinessPaymentMethodsView(APIView):
     serializer_class = BusinessPaymentMethodSerializer
 
@@ -531,6 +709,46 @@ BusinessMemberReactivateView.post = extend_schema(
     request=None,
     responses={200: BusinessMemberSerializer, 400: None, 403: None, 404: None},
 )(BusinessMemberReactivateView.post)
+BusinessMemberPermissionGrantView.get = extend_schema(
+    tags=["Businesses"],
+    operation_id="business_member_permission_list",
+    parameters=[_business_id, _member_id],
+    responses={200: BusinessMemberPermissionSerializer(many=True), 403: None, 404: None},
+)(BusinessMemberPermissionGrantView.get)
+BusinessMemberPermissionGrantView.post = extend_schema(
+    tags=["Businesses"],
+    operation_id="business_member_permission_grant",
+    parameters=[_business_id, _member_id],
+    request=BusinessMemberPermissionGrantSerializer,
+    responses={
+        201: BusinessMemberPermissionSerializer,
+        400: None,
+        403: None,
+        404: None,
+    },
+)(BusinessMemberPermissionGrantView.post)
+BusinessMemberPermissionDetailView.delete = extend_schema(
+    tags=["Businesses"],
+    operation_id="business_member_permission_revoke",
+    parameters=[
+        _business_id,
+        _member_id,
+        OpenApiParameter(
+            "permission",
+            str,
+            OpenApiParameter.PATH,
+            description="Permission serveur enregistrée, par exemple VIEW_MEMBERS.",
+        ),
+    ],
+    request=None,
+    responses={204: None, 400: None, 403: None, 404: None},
+)(BusinessMemberPermissionDetailView.delete)
+BusinessPermissionCatalogView.get = extend_schema(
+    tags=["Businesses"],
+    operation_id="business_permission_catalog",
+    parameters=[_business_id],
+    responses={200: BusinessPermissionCatalogSerializer(many=True), 403: None, 404: None},
+)(BusinessPermissionCatalogView.get)
 BusinessPaymentMethodsView.get = extend_schema(
     tags=["Business Payment Methods"],
     operation_id="business_payment_method_list",
