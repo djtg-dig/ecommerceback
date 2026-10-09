@@ -1,11 +1,14 @@
-from drf_spectacular.utils import OpenApiParameter, extend_schema
-from rest_framework import permissions
+from django.db.models import Prefetch
+from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
+from rest_framework import permissions, serializers
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (
     Business,
     BusinessCategory,
+    BusinessMember,
     BusinessMemberPermission,
     BusinessPaymentMethod,
 )
@@ -27,6 +30,33 @@ def accessible(identity):
         members__identity=identity,
         members__status="ACTIVE",
     ).distinct()
+
+
+class MemberPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 50
+
+
+def member_queryset(business):
+    """Return non-removed memberships with explicit permissions prefetched."""
+    return (
+        BusinessMember.objects.filter(
+            business=business,
+        )
+        .exclude(status=BusinessMember.Status.REMOVED)
+        .select_related("business")
+        .prefetch_related(
+            Prefetch(
+                "permissions",
+                queryset=BusinessMemberPermission.objects.order_by(
+                    "permission"
+                ),
+                to_attr="_prefetched_permissions",
+            )
+        )
+        .order_by("-is_owner", "joined_at", "public_id")
+    )
 
 
 class BusinessesView(APIView):
@@ -108,12 +138,36 @@ class BusinessMembersView(APIView):
             BusinessMemberPermission.Permission.VIEW_MEMBERS,
         )
 
-        serializer = BusinessMemberSerializer(
-            business.members.all(),
-            many=True,
+        paginator = MemberPagination()
+        page = paginator.paginate_queryset(
+            member_queryset(business), request
         )
 
-        return Response(serializer.data)
+        return paginator.get_paginated_response(
+            BusinessMemberSerializer(page, many=True).data
+        )
+
+
+class BusinessMemberDetailView(APIView):
+    def get(self, request, public_id, member_public_id):
+        business = Business.objects.filter(public_id=public_id).first()
+        if business is None:
+            return Response({"detail": "Not found."}, status=404)
+        require_permission(
+            request.user,
+            business,
+            BusinessMemberPermission.Permission.VIEW_MEMBERS,
+        )
+
+        member = (
+            member_queryset(business)
+            .filter(public_id=member_public_id)
+            .first()
+        )
+        if member is None:
+            return Response({"detail": "Not found."}, status=404)
+
+        return Response(BusinessMemberSerializer(member).data)
 
 
 class BusinessPaymentMethodsView(APIView):
@@ -223,6 +277,21 @@ _business_id = OpenApiParameter(
     OpenApiParameter.PATH,
     description="Identifiant public Business, format SH + 10 caractères.",
 )
+_member_id = OpenApiParameter(
+    "member_public_id",
+    str,
+    OpenApiParameter.PATH,
+    description="Identifiant public BusinessMember, format BM + 10 caractères.",
+)
+_paginated_business_members = inline_serializer(
+    name="PaginatedBusinessMemberList",
+    fields={
+        "count": serializers.IntegerField(),
+        "next": serializers.URLField(allow_null=True),
+        "previous": serializers.URLField(allow_null=True),
+        "results": BusinessMemberSerializer(many=True),
+    },
+)
 _payment_method_id = OpenApiParameter(
     "method_public_id",
     str,
@@ -257,9 +326,28 @@ BusinessDetailView.patch = extend_schema(
 BusinessMembersView.get = extend_schema(
     tags=["Businesses"],
     operation_id="business_member_list",
-    parameters=[_business_id],
-    responses={200: BusinessMemberSerializer(many=True), 403: None, 404: None},
+    parameters=[
+        _business_id,
+        OpenApiParameter("page", int, OpenApiParameter.QUERY),
+        OpenApiParameter(
+            "page_size",
+            int,
+            OpenApiParameter.QUERY,
+            description="Taille de page, de 1 à 50 (défaut 20).",
+        ),
+    ],
+    responses={
+        200: _paginated_business_members,
+        403: None,
+        404: None,
+    },
 )(BusinessMembersView.get)
+BusinessMemberDetailView.get = extend_schema(
+    tags=["Businesses"],
+    operation_id="business_member_retrieve",
+    parameters=[_business_id, _member_id],
+    responses={200: BusinessMemberSerializer, 403: None, 404: None},
+)(BusinessMemberDetailView.get)
 BusinessPaymentMethodsView.get = extend_schema(
     tags=["Business Payment Methods"],
     operation_id="business_payment_method_list",

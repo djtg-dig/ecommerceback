@@ -76,3 +76,14 @@ Les quatre permissions ajoutées par P1-A3.7 ne sont attribuées automatiquement
 à aucun membre existant. L'OWNER actif les possède implicitement comme toutes
 les permissions enregistrées ; les autres membres doivent recevoir chaque droit
 explicitement du propriétaire.
+
+## Consultation des membres
+
+`GET /api/v1/businesses/{SH}/members/` et
+`GET /api/v1/businesses/{SH}/members/{BM}/` exigent `VIEW_MEMBERS` et
+projetent `public_id`, `title`, `is_owner`, `status`, `permissions` et
+`joined_at`. La liste est paginée côté serveur (20 par défaut, 50 au maximum)
+et exclut les membres `REMOVED`. Les permissions affichées sont les
+permissions explicites du registre, préchargées en une requête ; l'OWNER voit
+ses droits implicites. Aucune donnée Carri Account ni UUID interne n'est
+exposée.

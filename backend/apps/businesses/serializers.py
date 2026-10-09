@@ -101,16 +101,14 @@ class BusinessSerializer(serializers.ModelSerializer):
 
 
 class BusinessMemberSerializer(serializers.ModelSerializer):
-    identity_id = serializers.UUIDField(read_only=True)
+    """Compact administrative projection of one Business membership."""
+
     permissions = serializers.SerializerMethodField()
 
     class Meta:
         model = BusinessMember
         fields = (
-            "id",
             "public_id",
-            "identity_id",
-            "role",
             "title",
             "is_owner",
             "status",
@@ -123,6 +121,9 @@ class BusinessMemberSerializer(serializers.ModelSerializer):
     def get_permissions(self, member):
         if member.is_owner:
             return list(BusinessMemberPermission.Permission.values)
+        prefetched = getattr(member, "_prefetched_permissions", None)
+        if prefetched is not None:
+            return [row.permission for row in prefetched]
         return list(
             member.permissions.values_list("permission", flat=True)
         )

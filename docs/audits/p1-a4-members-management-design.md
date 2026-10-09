@@ -365,6 +365,31 @@ ne modifie pas Carri Account et n'introduit pas encore les invitations. Les API
 de lecture paginées et leurs mesures anti-N+1 restent dans P1-A4.3 ; les routes
 de cycle de vie restent dans P1-A4.6.
 
+État de P1-A4.3 — lectures membres, livré le 9 octobre 2026 :
+
+- `GET /api/v1/businesses/{SH}/members/` est paginé côté serveur
+  (`page_size=20` par défaut, `page_size` de 1 à 50, paramètre `page`) et
+  retourne `{count, next, previous, results}`. La projection compacte d'un
+  membre est `{public_id, title, is_owner, status, permissions, joined_at}` :
+  les UUID internes `id` et `identity_id`, le rôle legacy `role` et toute
+  donnée Carri Account ne sont plus exposés. Les membres `REMOVED` sont
+  exclus. L'ordre est `is_owner` descendant puis `joined_at` et `public_id`
+  croissants, donc stable et déterministe.
+- `GET /api/v1/businesses/{SH}/members/{BM}/` retourne la même projection
+  pour un membre de l'entreprise, `404` pour un membre inexistant, retiré ou
+  d'une autre entreprise.
+- Les deux endpoints exigent `VIEW_MEMBERS` : OWNER actif implicite, membre
+  actif avec la permission explicite, `403` pour un membre suspendu ou sans
+  droit, `404` pour une appartenance absente ou retirée. Les lectures
+  restent possibles sur un Business `SUSPENDED` ou `ARCHIVED`.
+- Les permissions affichées sont les permissions explicites du registre
+  `BusinessMemberPermission` (droits implicites complets pour l'OWNER),
+  lues depuis un `Prefetch(..., to_attr="_prefetched_permissions")` : aucune
+  requête supplémentaire par ligne. Le nombre de requêtes reste constant
+  quelle que soit la taille de l'entreprise.
+- Aucune mutation, invitation, suspension, réactivation ou modification de
+  permission n'est introduite dans ce lot.
+
 1. **P1-A4.2 — Prérequis identité et modèles** : ajouter
    `BusinessMember.public_id`, les métadonnées de cycle de vie et le retrait
    logique, puis migration, backfill et tests. Le contrat e-mail Carri, la
