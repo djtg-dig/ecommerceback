@@ -1,5 +1,6 @@
 from decimal import Decimal
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
 from rest_framework import serializers, status
 from rest_framework.pagination import PageNumberPagination
@@ -13,11 +14,6 @@ from .services import SaleReturnIdempotencyConflict, cancel, complete, create_sa
 
 
 class M:
-    def b(self, r, x):
-        return Business.objects.filter(
-            public_id=x, members__identity=r.user, members__status="ACTIVE"
-        ).first()
-
     def nf(self):
         return Response({"detail": "Not found."}, 404)
 
@@ -38,7 +34,12 @@ class M:
 
 class Customers(M, APIView):
     def get(self, r, business_public_id):
-        b = self.b(r, business_public_id)
+        b = self.authorized_business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_CUSTOMERS,
+            write=False,
+        )
         return (
             Response(
                 CustomerSerializer(Customer.objects.filter(business=b), many=True).data
@@ -48,7 +49,11 @@ class Customers(M, APIView):
         )
 
     def post(self, r, business_public_id):
-        b = self.b(r, business_public_id)
+        b = self.authorized_business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.MANAGE_CUSTOMERS,
+        )
         if not b:
             return self.nf()
         s = CustomerSerializer(data=r.data)
@@ -56,9 +61,54 @@ class Customers(M, APIView):
         return Response(CustomerSerializer(s.save(business=b)).data, 201)
 
 
+class PosCustomerPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 50
+
+
+class PosCustomerSearch(M, APIView):
+    """Return a compact active-customer projection for customer selection."""
+
+    serializer_class = PosCustomerSerializer
+
+    def get(self, request, business_public_id):
+        business = self.authorized_business(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.USE_POS,
+            write=False,
+        )
+        if not business:
+            return self.nf()
+
+        customers = Customer.objects.filter(
+            business=business,
+            is_active=True,
+        ).order_by("name", "public_id")
+        query = request.query_params.get("q", "").strip()
+        if query:
+            customers = customers.filter(
+                Q(public_id__iexact=query)
+                | Q(name__icontains=query)
+                | Q(phone__icontains=query)
+            )
+
+        paginator = PosCustomerPagination()
+        page = paginator.paginate_queryset(customers, request)
+        return paginator.get_paginated_response(
+            PosCustomerSerializer(page, many=True).data
+        )
+
+
 class Sales(M, APIView):
     def get(self, r, business_public_id):
-        b = self.b(r, business_public_id)
+        b = self.authorized_business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_SALES,
+            write=False,
+        )
         return (
             Response(SaleSerializer(Sale.objects.filter(business=b), many=True).data)
             if b
@@ -84,7 +134,12 @@ class SD(Sales):
         return Sale.objects.filter(business=b, public_id=x).first()
 
     def get(self, r, business_public_id, sale_public_id):
-        b = self.b(r, business_public_id)
+        b = self.authorized_business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_SALES,
+            write=False,
+        )
         o = self.o(b, sale_public_id) if b else None
         return Response(SaleSerializer(o).data) if o else self.nf()
 
@@ -107,7 +162,12 @@ class SD(Sales):
 
 class Lines(SD):
     def get(self, r, business_public_id, sale_public_id):
-        b = self.b(r, business_public_id)
+        b = self.authorized_business(
+            r,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_SALES,
+            write=False,
+        )
         s = self.o(b, sale_public_id) if b else None
         return (
             Response(LineSerializer(s.lines.all(), many=True).data) if s else self.nf()
@@ -276,6 +336,7 @@ class SaleReturns(M, APIView):
 
 # Schema introspection metadata for the real APIView operations.
 Customers.serializer_class = CustomerSerializer
+PosCustomerSearch.serializer_class = PosCustomerSerializer
 Sales.serializer_class = SaleSerializer
 SD.serializer_class = SaleSerializer
 Lines.serializer_class = LineSerializer
@@ -288,7 +349,9 @@ Complete.http_method_names = ["post", "options"]
 Cancel.http_method_names = ["post", "options"]
 
 Sales.get = extend_schema(
-    tags=["Sales"], operation_id="sale_list", responses={200: SaleSerializer(many=True)}
+    tags=["Sales"],
+    operation_id="sale_list",
+    responses={200: SaleSerializer(many=True), 403: None, 404: None},
 )(Sales.get)
 Sales.post = extend_schema(
     tags=["Sales"],
@@ -297,7 +360,9 @@ Sales.post = extend_schema(
     responses={201: SaleSerializer, 403: None, 404: None},
 )(Sales.post)
 SD.get = extend_schema(
-    tags=["Sales"], operation_id="sale_retrieve", responses={200: SaleSerializer}
+    tags=["Sales"],
+    operation_id="sale_retrieve",
+    responses={200: SaleSerializer, 403: None, 404: None},
 )(SD.get)
 SD.patch = extend_schema(
     tags=["Sales"],
@@ -308,7 +373,7 @@ SD.patch = extend_schema(
 Lines.get = extend_schema(
     tags=["Sales"],
     operation_id="sale_line_list",
-    responses={200: LineSerializer(many=True)},
+    responses={200: LineSerializer(many=True), 403: None, 404: None},
 )(Lines.get)
 Lines.post = extend_schema(
     tags=["Sales"],
@@ -319,14 +384,43 @@ Lines.post = extend_schema(
 Customers.get = extend_schema(
     tags=["Customers"],
     operation_id="customer_list",
-    responses={200: CustomerSerializer(many=True)},
+    responses={200: CustomerSerializer(many=True), 403: None, 404: None},
 )(Customers.get)
 Customers.post = extend_schema(
     tags=["Customers"],
     operation_id="customer_create",
     request=CustomerSerializer,
-    responses={201: CustomerSerializer},
+    responses={201: CustomerSerializer, 400: None, 403: None, 404: None},
 )(Customers.post)
+_paginated_pos_customers = inline_serializer(
+    name="PaginatedPosCustomerList",
+    fields={
+        "count": serializers.IntegerField(),
+        "next": serializers.URLField(allow_null=True),
+        "previous": serializers.URLField(allow_null=True),
+        "results": PosCustomerSerializer(many=True),
+    },
+)
+PosCustomerSearch.get = extend_schema(
+    tags=["Customers"],
+    operation_id="pos_customer_search",
+    parameters=[
+        OpenApiParameter(
+            "q",
+            str,
+            OpenApiParameter.QUERY,
+            description="Optional public ID, name or phone search.",
+        ),
+        OpenApiParameter("page", int, OpenApiParameter.QUERY),
+        OpenApiParameter(
+            "page_size",
+            int,
+            OpenApiParameter.QUERY,
+            description="Page size, from 1 to 50 (default 20).",
+        ),
+    ],
+    responses={200: _paginated_pos_customers, 403: None, 404: None},
+)(PosCustomerSearch.get)
 
 Complete.post = extend_schema(
     tags=["Sales"],

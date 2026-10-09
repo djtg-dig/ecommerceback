@@ -35,13 +35,18 @@ def business_with_members():
     manager_member = BusinessMember.objects.create(
         business=business, identity=manager, role="MANAGER"
     )
-    BusinessMember.objects.create(
+    employee_member = BusinessMember.objects.create(
         business=business, identity=employee, role="EMPLOYEE"
     )
     grant_permission(
         owner_member,
         manager_member,
         BusinessMemberPermission.Permission.MANAGE_PAYMENT_METHODS,
+    )
+    grant_permission(
+        owner_member,
+        employee_member,
+        BusinessMemberPermission.Permission.USE_POS,
     )
     return business, owner, manager, employee
 

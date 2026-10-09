@@ -7,6 +7,7 @@ from apps.businesses.models import Business, BusinessMember, BusinessMemberPermi
 from apps.businesses.permissions import (
     has_permission,
     membership_for,
+    require_any_permission,
     require_permission,
 )
 from apps.businesses.services import grant_permission, revoke_permission
@@ -61,6 +62,32 @@ def test_individual_permission_can_be_granted_required_and_revoked():
     assert not has_permission(member, Permission.USE_POS)
     with pytest.raises(PermissionDenied):
         require_permission(member_identity, business, Permission.USE_POS)
+
+
+@pytest.mark.django_db
+def test_any_permission_gate_accepts_one_explicit_right_and_rejects_unknown():
+    business, _, member_identity, owner, member = create_memberships()
+
+    with pytest.raises(PermissionDenied):
+        require_any_permission(
+            member_identity,
+            business,
+            (Permission.VIEW_PAYMENT_METHODS, Permission.USE_POS),
+        )
+
+    grant_permission(owner, member, Permission.USE_POS)
+    assert require_any_permission(
+        member_identity,
+        business,
+        (Permission.VIEW_PAYMENT_METHODS, Permission.USE_POS),
+    ) == member
+
+    with pytest.raises(ValidationError, match="Unknown Business permission"):
+        require_any_permission(
+            member_identity,
+            business,
+            (Permission.USE_POS, "CLIENT_PERMISSION"),
+        )
 
     grant_permission(owner, member, Permission.USE_POS)
     assert require_permission(member_identity, business, Permission.USE_POS) == member

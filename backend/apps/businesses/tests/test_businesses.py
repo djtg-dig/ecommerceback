@@ -8,7 +8,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.accounts.models import CarriIdentity
 from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
-from apps.businesses.permissions import can_manage_business, has_permission
+from apps.businesses.permissions import has_permission
 from apps.businesses.services import grant_permission, revoke_permission
 
 
@@ -165,7 +165,6 @@ def test_professional_title_never_grants_permissions():
     )
 
     assert not member.is_owner
-    assert not can_manage_business(member)
     assert not has_permission(
         member,
         BusinessMemberPermission.Permission.UPDATE_BUSINESS,
@@ -265,7 +264,6 @@ def test_migration_preserves_old_roles_without_privilege_escalation():
     assert manager_m.is_owner is False
     assert manager_m.title == "Gestionnaire"
     assert not has_permission(manager_m, BusinessMemberPermission.Permission.UPDATE_BUSINESS)
-    assert not can_manage_business(manager_m)
     assert auth(old_manager).patch(
         f"/api/v1/businesses/{business.public_id}/",
         {"name": "Forbidden legacy manager update"},

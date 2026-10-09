@@ -17,6 +17,8 @@ mais le moteur d'autorisation ne le consulte jamais.
 - `membership_for` recherche une appartenance dans le seul Business demandé ;
 - `has_permission` évalue une permission enregistrée côté serveur ;
 - `require_permission` renvoie le membre autorisé ou lève l'erreur API canonique.
+- `require_any_permission` couvre les rares projections volontairement partagées
+  entre deux capacités, sans consulter le titre ni le rôle historique.
 
 Un OWNER actif possède implicitement toutes les permissions connues, sans ligne
 `BusinessMemberPermission`. Un autre membre actif ne possède que ses permissions
@@ -42,5 +44,28 @@ propriétaire. Un titre, un ancien rôle ou une valeur fournie par le client ne
 peut donc pas provoquer d'élévation de privilèges.
 
 La migration progressive des endpoints métier vers `require_permission` est le
-périmètre de P1-A3. Jusqu'à cette migration, les contrôles existants continuent
-d'utiliser les helpers transitoires adossés au même moteur.
+périmètre de P1-A3. Les helpers transitoires fondés sur `UPDATE_BUSINESS` ont été
+retirés à l'issue de P1-A3.7.
+
+## Permissions des clients, ventes et moyens de paiement
+
+- `VIEW_PAYMENT_METHODS` autorise la consultation administrative des moyens
+  actifs et inactifs ;
+- `MANAGE_PAYMENT_METHODS` autorise leur création et leur modification ;
+- `VIEW_CUSTOMERS` autorise la consultation du référentiel client complet ;
+- `MANAGE_CUSTOMERS` autorise la création administrative de clients ;
+- `VIEW_SALES` autorise la liste des ventes, leur détail et leurs lignes ;
+- `USE_POS` autorise le parcours d'encaissement, sans accorder les lectures
+  administratives précédentes.
+
+Un membre `USE_POS` peut consulter les moyens de paiement actifs sur
+`GET /payment-methods/` et utiliser
+`GET /customers/pos/search/`. Cette recherche est paginée et ne retourne que
+`public_id`, `name` et `phone` pour les clients actifs. Elle n'expose ni notes,
+ni adresse, ni historique de ventes. La création via `POST /customers/` exige
+toujours `MANAGE_CUSTOMERS` ; `USE_POS` ne crée aucun client implicitement.
+
+Les quatre permissions ajoutées par P1-A3.7 ne sont attribuées automatiquement
+à aucun membre existant. L'OWNER actif les possède implicitement comme toutes
+les permissions enregistrées ; les autres membres doivent recevoir chaque droit
+explicitement du propriétaire.

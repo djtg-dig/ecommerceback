@@ -9,7 +9,7 @@ from .models import (
     BusinessMemberPermission,
     BusinessPaymentMethod,
 )
-from .permissions import can_manage_business, membership_for, require_permission
+from .permissions import has_permission, require_any_permission, require_permission
 from .serializers import (
     BusinessCreateSerializer,
     BusinessMemberSerializer,
@@ -119,8 +119,19 @@ class BusinessMembersView(APIView):
 class BusinessPaymentMethodsView(APIView):
     serializer_class = BusinessPaymentMethodSerializer
 
-    def get_business(self, request, public_id):
-        return accessible(request.user).filter(public_id=public_id).first()
+    def get_readable_business(self, request, public_id):
+        business = Business.objects.filter(public_id=public_id).first()
+        if business is None:
+            return None, None
+        member = require_any_permission(
+            request.user,
+            business,
+            (
+                BusinessMemberPermission.Permission.VIEW_PAYMENT_METHODS,
+                BusinessMemberPermission.Permission.USE_POS,
+            ),
+        )
+        return business, member
 
     def get_authorized_business(self, request, public_id):
         business = Business.objects.filter(public_id=public_id).first()
@@ -135,11 +146,14 @@ class BusinessPaymentMethodsView(APIView):
         return business
 
     def get(self, request, public_id):
-        business = self.get_business(request, public_id)
+        business, member = self.get_readable_business(request, public_id)
         if not business:
             return Response({"detail": "Not found."}, status=404)
         methods = business.payment_methods.all()
-        if not can_manage_business(membership_for(request.user, business)):
+        if not has_permission(
+            member,
+            BusinessMemberPermission.Permission.VIEW_PAYMENT_METHODS,
+        ):
             methods = methods.filter(is_active=True)
         return Response(BusinessPaymentMethodSerializer(methods, many=True).data)
 
@@ -155,17 +169,26 @@ class BusinessPaymentMethodsView(APIView):
 class BusinessPaymentMethodDetailView(BusinessPaymentMethodsView):
     serializer_class = BusinessPaymentMethodSerializer
     http_method_names = ["get", "patch", "head", "options"]
+
     def get_object(self, request, public_id, method_public_id):
-        business = self.get_business(request, public_id)
+        business, member = self.get_readable_business(request, public_id)
         if not business:
-            return None, None
-        return business, business.payment_methods.filter(public_id=method_public_id).first()
+            return None, None, None
+        method = business.payment_methods.filter(public_id=method_public_id).first()
+        return business, member, method
 
     def get(self, request, public_id, method_public_id):
-        business, method = self.get_object(request, public_id, method_public_id)
+        _business, member, method = self.get_object(
+            request,
+            public_id,
+            method_public_id,
+        )
         if not method:
             return Response({"detail": "Not found."}, status=404)
-        if not method.is_active and not can_manage_business(membership_for(request.user, business)):
+        if not method.is_active and not has_permission(
+            member,
+            BusinessMemberPermission.Permission.VIEW_PAYMENT_METHODS,
+        ):
             return Response({"detail": "Not found."}, status=404)
         return Response(BusinessPaymentMethodSerializer(method).data)
 
@@ -241,7 +264,11 @@ BusinessPaymentMethodsView.get = extend_schema(
     tags=["Business Payment Methods"],
     operation_id="business_payment_method_list",
     parameters=[_business_id],
-    responses={200: BusinessPaymentMethodSerializer(many=True), 404: None},
+    responses={
+        200: BusinessPaymentMethodSerializer(many=True),
+        403: None,
+        404: None,
+    },
 )(BusinessPaymentMethodsView.get)
 BusinessPaymentMethodsView.post = extend_schema(
     tags=["Business Payment Methods"],
@@ -259,7 +286,7 @@ BusinessPaymentMethodDetailView.get = extend_schema(
     tags=["Business Payment Methods"],
     operation_id="business_payment_method_retrieve",
     parameters=[_business_id, _payment_method_id],
-    responses={200: BusinessPaymentMethodSerializer, 404: None},
+    responses={200: BusinessPaymentMethodSerializer, 403: None, 404: None},
 )(BusinessPaymentMethodDetailView.get)
 BusinessPaymentMethodDetailView.patch = extend_schema(
     tags=["Business Payment Methods"],

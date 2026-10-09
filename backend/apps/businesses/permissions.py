@@ -24,27 +24,6 @@ def membership_for(identity, business, *, include_suspended=False):
     return memberships.first()
 
 
-def can_manage_business(member):
-    """Transitional gate backed by ownership or one explicit permission.
-
-    Existing endpoints still call this broad helper. Later API-specific lots can
-    replace it with their granular permission without consulting ``role``.
-    """
-    return has_permission(
-        member,
-        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
-        write=True,
-    )
-
-
-def can_view_members(member):
-    """Allow owners or members holding the explicit member-view permission."""
-    return has_permission(
-        member,
-        BusinessMemberPermission.Permission.VIEW_MEMBERS,
-    )
-
-
 def has_permission(member, permission, *, write=False):
     """Evaluate one registered permission from trusted membership data.
 
@@ -78,6 +57,26 @@ def require_permission(identity, business, permission, *, write=False):
     if member is None:
         raise NotFound("Not found.")
     if not has_permission(member, permission, write=write):
+        raise PermissionDenied("Forbidden.")
+
+    return member
+
+
+def require_any_permission(identity, business, permissions, *, write=False):
+    """Require at least one registered permission with canonical tenant errors."""
+    permissions = tuple(permissions)
+    if not permissions:
+        raise ValidationError({"permission": "At least one permission is required."})
+    for permission in permissions:
+        validate_permission(permission)
+
+    member = membership_for(identity, business, include_suspended=True)
+    if member is None:
+        raise NotFound("Not found.")
+    if not any(
+        has_permission(member, permission, write=write)
+        for permission in permissions
+    ):
         raise PermissionDenied("Forbidden.")
 
     return member

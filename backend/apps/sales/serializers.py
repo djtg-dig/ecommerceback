@@ -22,6 +22,15 @@ class CustomerSerializer(serializers.ModelSerializer):
         read_only_fields = ("public_id",)
 
 
+class PosCustomerSerializer(serializers.ModelSerializer):
+    """Compact customer identity used only to attach a customer at the POS."""
+
+    class Meta:
+        model = Customer
+        fields = ("public_id", "name", "phone")
+        read_only_fields = fields
+
+
 class SaleSerializer(serializers.ModelSerializer):
     customer = serializers.CharField(
         source="customer.public_id", read_only=True, allow_null=True
