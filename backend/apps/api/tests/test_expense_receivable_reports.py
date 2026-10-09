@@ -60,8 +60,8 @@ def test_expense_and_receivable_reports():
     assert receivables.data["total_outstanding"] == Decimal("50")
     assert receivables.data["results"][0]["outstanding_amount"] == Decimal("50")
     client.force_authenticate(user=employee)
-    assert client.get(f"/api/v1/businesses/{business.public_id}/reports/expenses/").status_code == 404
-    assert client.get(f"/api/v1/businesses/{business.public_id}/reports/receivables/").status_code == 404
+    assert client.get(f"/api/v1/businesses/{business.public_id}/reports/expenses/").status_code == 403
+    assert client.get(f"/api/v1/businesses/{business.public_id}/reports/receivables/").status_code == 403
 
 
 def test_expense_report_categories_periods_and_payments_do_not_change_charge():
@@ -77,7 +77,7 @@ def test_expense_report_categories_periods_and_payments_do_not_change_charge():
     grant_permission(
         owner_member,
         manager_member,
-        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+        BusinessMemberPermission.Permission.VIEW_REPORTS,
     )
     first = ExpenseCategory.objects.create(business=business, code="FIRST", name="First")
     second = ExpenseCategory.objects.create(business=business, code="SECOND", name="Second")
@@ -259,7 +259,7 @@ def test_receivables_report_permissions_and_business_isolation():
     grant_permission(
         owner_member,
         manager_member,
-        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+        BusinessMemberPermission.Permission.VIEW_REPORTS,
     )
     BusinessMember.objects.create(business=business, identity=employee, role="EMPLOYEE")
     other_customer = Customer.objects.create(business=other_business, name="Hidden")
@@ -300,10 +300,13 @@ def test_receivables_report_permissions_and_business_isolation():
         assert response.data["total_outstanding"] == Decimal("25")
         assert response.data["count"] == 1
 
-    for user in (employee, outsider):
-        client = APIClient()
-        client.force_authenticate(user=user)
-        assert client.get(url).status_code == 404
+    employee_client = APIClient()
+    employee_client.force_authenticate(user=employee)
+    assert employee_client.get(url).status_code == 403
+
+    outsider_client = APIClient()
+    outsider_client.force_authenticate(user=outsider)
+    assert outsider_client.get(url).status_code == 404
 
 
 def test_reports_measurements(capsys):

@@ -9,8 +9,8 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.businesses.models import Business
-from apps.businesses.permissions import can_manage_business, membership_for
+from apps.businesses.models import Business, BusinessMemberPermission
+from apps.businesses.permissions import require_permission
 from apps.expense_receivable_report_serializers import ReceivablesReportSerializer
 from apps.expense_receivable_reports import build_expenses_report, receivable_queryset, receivables_summary
 from apps.reporting import resolve_reporting_period
@@ -18,8 +18,15 @@ from apps.reporting import resolve_reporting_period
 
 class ReportBase(APIView):
     def business(self, request, business_public_id):
-        business = Business.objects.filter(public_id=business_public_id, members__identity=request.user, members__status="ACTIVE").first()
-        return business if business and can_manage_business(membership_for(request.user, business)) else None
+        business = Business.objects.filter(public_id=business_public_id).first()
+        if business is None:
+            return None
+        require_permission(
+            request.user,
+            business,
+            BusinessMemberPermission.Permission.VIEW_REPORTS,
+        )
+        return business
 
 
 class ExpensesReportView(ReportBase):
@@ -94,10 +101,10 @@ class ReceivablesReportView(ReportBase):
 
 
 period_params = [OpenApiParameter("period", str, enum=["today", "last_7_days", "last_30_days"]), OpenApiParameter("date_from", str), OpenApiParameter("date_to", str)]
-ExpensesReportView.get = extend_schema(tags=["Reporting"], operation_id="business_expenses_report", parameters=period_params + [OpenApiParameter("group_by", str, enum=["day", "week", "month"])], responses={200: dict, 400: None, 404: None})(ExpensesReportView.get)
+ExpensesReportView.get = extend_schema(tags=["Reporting"], operation_id="business_expenses_report", parameters=period_params + [OpenApiParameter("group_by", str, enum=["day", "week", "month"])], responses={200: dict, 400: None, 403: None, 404: None})(ExpensesReportView.get)
 ReceivablesReportView.get = extend_schema(
     tags=["Reporting"],
     operation_id="business_receivables_report",
     parameters=[OpenApiParameter("page", int), OpenApiParameter("page_size", int)],
-    responses={200: ReceivablesReportSerializer, 404: None},
+    responses={200: ReceivablesReportSerializer, 403: None, 404: None},
 )(ReceivablesReportView.get)

@@ -32,7 +32,7 @@ def test_purchase_reports_received_and_debts():
     assert c.get(base+"purchases/",{"group_by":"week"}).status_code==200 and c.get(base+"purchases/",{"group_by":"month"}).status_code==200
     debts=c.get(base+"supplier-debts/").data; assert debts["total_outstanding"]==Decimal("70000") and debts["open_purchases_count"]==2
     assert c.get(base+"purchases/",{"group_by":"bad"}).status_code==400
-    assert client(employee).get(base+"purchases/").status_code==404
+    assert client(employee).get(base+"purchases/").status_code==403
 def test_purchase_report_measurement(capsys):
     business,owner,_,product=setup("measure"); c=client(owner); base=f"/api/v1/businesses/{business.public_id}/reports/"
     with CaptureQueriesContext(connection) as ps:c.get(base+"purchases/")

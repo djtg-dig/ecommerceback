@@ -42,7 +42,7 @@ def make_context():
     grant_permission(
         owner_member,
         manager_member,
-        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+        BusinessMemberPermission.Permission.VIEW_FINANCIAL_SUMMARY,
     )
     category = ExpenseCategory.objects.create(business=business, code="FIN", name="Finance")
     expense = Expense.objects.create(
@@ -166,7 +166,7 @@ def test_finance_read_api_is_manager_only_tenant_scoped_and_get_only():
     root = f"/api/v1/businesses/{business.public_id}/"
     assert authenticated_client(owner).get(root + "financial-movements/").status_code == 200
     assert authenticated_client(manager).get(root + "financial-movements/").status_code == 200
-    assert authenticated_client(employee).get(root + "financial-movements/").status_code == 404
+    assert authenticated_client(employee).get(root + "financial-movements/").status_code == 403
     assert authenticated_client(outsider).get(root + "financial-movements/").status_code == 404
     assert authenticated_client(owner).post(root + "financial-movements/", {}, format="json").status_code == 405
     assert authenticated_client(owner).get(

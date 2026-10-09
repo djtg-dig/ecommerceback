@@ -115,14 +115,14 @@ def test_dashboard_permissions_and_period_validation():
     grant_permission(
         memberships["OWNER"],
         memberships["MANAGER"],
-        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+        BusinessMemberPermission.Permission.VIEW_DASHBOARD,
     )
     url=f'/api/v1/businesses/{business.public_id}/dashboard/'
     def api(user):
         c=APIClient();c.force_authenticate(user=user);return c
     for user in (owner,manager):
         response=api(user).get(url);assert response.status_code==200;assert set(response.data)=={'generated_at','currency','period','sales','cash','receivables','inventory','purchases'}
-    assert api(employee).get(url).status_code==404
+    assert api(employee).get(url).status_code==403
     assert api(outsider).get(url).status_code==404
     assert api(owner).get(url,{'period':'last_7_days'}).status_code==200
     assert api(owner).get(url,{'period':'last_30_days'}).status_code==200

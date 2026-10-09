@@ -5,8 +5,12 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.businesses.models import Business, BusinessPaymentMethod
-from apps.businesses.permissions import can_manage_business, membership_for
+from apps.businesses.models import (
+    Business,
+    BusinessMemberPermission,
+    BusinessPaymentMethod,
+)
+from apps.businesses.permissions import require_permission
 from apps.common.choices import PaymentMethod
 
 from .models import FinancialMovement, PaymentTransaction
@@ -26,19 +30,21 @@ FILTER_PARAMETERS = [
 
 
 class FinanceBusinessAPIView(APIView):
-    """Restrict financial reporting to active owners and managers."""
+    """Restrict financial reporting to explicitly authorized members."""
 
     http_method_names = ["get", "head", "options"]
 
     def get_business(self, request, business_public_id):
-        business = Business.objects.filter(
-            public_id=business_public_id,
-            members__identity=request.user,
-            members__status="ACTIVE",
-        ).first()
-        if business and can_manage_business(membership_for(request.user, business)):
-            return business
-        return None
+        business = Business.objects.filter(public_id=business_public_id).first()
+        if business is None:
+            return None
+
+        require_permission(
+            request.user,
+            business,
+            BusinessMemberPermission.Permission.VIEW_FINANCIAL_SUMMARY,
+        )
+        return business
 
     @staticmethod
     def not_found():
@@ -82,7 +88,15 @@ class FinanceBusinessAPIView(APIView):
 
 
 class FinancialMovementListView(FinanceBusinessAPIView):
-    @extend_schema(parameters=FILTER_PARAMETERS, responses=FinancialMovementSerializer(many=True))
+    @extend_schema(
+        parameters=FILTER_PARAMETERS,
+        responses={
+            200: FinancialMovementSerializer(many=True),
+            400: None,
+            403: None,
+            404: None,
+        },
+    )
     def get(self, request, business_public_id):
         business = self.get_business(request, business_public_id)
         if not business:
@@ -95,7 +109,9 @@ class FinancialMovementListView(FinanceBusinessAPIView):
 
 
 class FinancialMovementDetailView(FinanceBusinessAPIView):
-    @extend_schema(responses=FinancialMovementSerializer)
+    @extend_schema(
+        responses={200: FinancialMovementSerializer, 403: None, 404: None}
+    )
     def get(self, request, business_public_id, movement_public_id):
         business = self.get_business(request, business_public_id)
         movement = (
@@ -109,7 +125,10 @@ class FinancialMovementDetailView(FinanceBusinessAPIView):
 
 
 class FinancialSummaryView(FinanceBusinessAPIView):
-    @extend_schema(parameters=FILTER_PARAMETERS, responses=dict)
+    @extend_schema(
+        parameters=FILTER_PARAMETERS,
+        responses={200: dict, 400: None, 403: None, 404: None},
+    )
     def get(self, request, business_public_id):
         business = self.get_business(request, business_public_id)
         if not business:

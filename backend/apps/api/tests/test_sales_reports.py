@@ -38,7 +38,7 @@ def make_context(suffix):
     grant_permission(
         owner_member,
         manager_member,
-        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+        BusinessMemberPermission.Permission.VIEW_REPORTS,
     )
     category, _ = ProductCategory.objects.get_or_create(code="REPORTS", defaults={"name": "Reports", "slug": "reports"})
     return business, owner, manager, employee, category
@@ -107,7 +107,7 @@ def test_sales_report_empty_permissions_periods_and_invalid_parameters():
             "sales_count": 0,
             "returns_count": 0,
         }
-    assert api(employee).get(url).status_code == 404
+    assert api(employee).get(url).status_code == 403
     assert api(owner).get(url, {"group_by": "year"}).status_code == 400
     assert api(owner).get(url, {"period": "bad"}).status_code == 400
     assert api(owner).get(url, {"date_from": "2026-02-02"}).status_code == 400
@@ -174,7 +174,7 @@ def test_product_report_groups_variants_uses_snapshots_orders_and_limits():
     assert api(manager).get(
         f"/api/v1/businesses/{business.public_id}/reports/products/"
     ).status_code == 200
-    assert api(employee).get(f"/api/v1/businesses/{business.public_id}/reports/products/").status_code == 404
+    assert api(employee).get(f"/api/v1/businesses/{business.public_id}/reports/products/").status_code == 403
     assert api(owner).get(f"/api/v1/businesses/{business.public_id}/reports/products/", {"limit": 51}).status_code == 400
 
 

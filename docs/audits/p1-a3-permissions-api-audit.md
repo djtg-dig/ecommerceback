@@ -161,29 +161,29 @@ donnerait au vendeur des droits de référentiel non explicitement décidés.
 
 | Méthode | Chemin | Vue ; service | Contrôle actuel | Permission cible | Statut |
 |---|---|---|---|---|---|
-| GET | `/businesses/{SH}/financial-movements/` | `FinancialMovementListView`; queryset | `can_manage_business`, refus masqué en 404 | `VIEW_FINANCIAL_SUMMARY` | à migrer |
-| GET | `/businesses/{SH}/financial-movements/{FM}/` | `FinancialMovementDetailView`; queryset | `can_manage_business`, refus masqué en 404 | `VIEW_FINANCIAL_SUMMARY` | à migrer |
-| GET | `/businesses/{SH}/financial-summary/` | `FinancialSummaryView`; `financial_summary` | `can_manage_business`, refus masqué en 404 | `VIEW_FINANCIAL_SUMMARY` | à migrer |
+| GET | `/businesses/{SH}/financial-movements/` | `FinancialMovementListView`; queryset | `require_permission(..., VIEW_FINANCIAL_SUMMARY)` | `VIEW_FINANCIAL_SUMMARY` | conforme — P1-A3.5 |
+| GET | `/businesses/{SH}/financial-movements/{FM}/` | `FinancialMovementDetailView`; queryset | `require_permission(..., VIEW_FINANCIAL_SUMMARY)` | `VIEW_FINANCIAL_SUMMARY` | conforme — P1-A3.5 |
+| GET | `/businesses/{SH}/financial-summary/` | `FinancialSummaryView`; `financial_summary` | `require_permission(..., VIEW_FINANCIAL_SUMMARY)` | `VIEW_FINANCIAL_SUMMARY` | conforme — P1-A3.5 |
 
 ### Dashboard, rentabilité et rapports — 8 opérations
 
 | Méthode | Chemin | Vue ; service | Contrôle actuel | Permission cible | Statut |
 |---|---|---|---|---|---|
-| GET | `/businesses/{SH}/dashboard/` | `DashboardView`; `build_dashboard` | `can_manage_business`, refus masqué en 404 | `VIEW_DASHBOARD` | à migrer |
-| GET | `/businesses/{SH}/profitability-summary/` | `ProfitabilitySummaryView`; `build_profitability_summary` | `can_manage_business`, refus masqué en 404 | `VIEW_PROFITABILITY` | à migrer |
-| GET | `/businesses/{SH}/reports/sales/` | `SalesReportView`; `build_sales_series` | `can_manage_business`, refus masqué en 404 | `VIEW_REPORTS` | à migrer |
-| GET | `/businesses/{SH}/reports/products/` | `ProductReportView`; `build_product_top` | `can_manage_business`, refus masqué en 404 | `VIEW_REPORTS` | à migrer |
-| GET | `/businesses/{SH}/reports/expenses/` | `ExpensesReportView`; `build_expenses_report` | `can_manage_business`, refus masqué en 404 | `VIEW_REPORTS` | à migrer |
-| GET | `/businesses/{SH}/reports/receivables/` | `ReceivablesReportView`; agrégations | `can_manage_business`, refus masqué en 404 | `VIEW_REPORTS` | à migrer |
-| GET | `/businesses/{SH}/reports/purchases/` | `PurchasesReportView`; `build_purchases_report` | `can_manage_business`, refus masqué en 404 | `VIEW_REPORTS` | à migrer |
-| GET | `/businesses/{SH}/reports/supplier-debts/` | `SupplierDebtsReportView`; `debt_queryset` | `can_manage_business`, refus masqué en 404 | `VIEW_REPORTS` | à migrer |
+| GET | `/businesses/{SH}/dashboard/` | `DashboardView`; `build_dashboard` | `require_permission(..., VIEW_DASHBOARD)` | `VIEW_DASHBOARD` | conforme — P1-A3.5 |
+| GET | `/businesses/{SH}/profitability-summary/` | `ProfitabilitySummaryView`; `build_profitability_summary` | `require_permission(..., VIEW_PROFITABILITY)` | `VIEW_PROFITABILITY` | conforme — P1-A3.5 |
+| GET | `/businesses/{SH}/reports/sales/` | `SalesReportView`; `build_sales_series` | `require_permission(..., VIEW_REPORTS)` | `VIEW_REPORTS` | conforme — P1-A3.5 |
+| GET | `/businesses/{SH}/reports/products/` | `ProductReportView`; `build_product_top` | `require_permission(..., VIEW_REPORTS)` | `VIEW_REPORTS` | conforme — P1-A3.5 |
+| GET | `/businesses/{SH}/reports/expenses/` | `ExpensesReportView`; `build_expenses_report` | `require_permission(..., VIEW_REPORTS)` | `VIEW_REPORTS` | conforme — P1-A3.5 |
+| GET | `/businesses/{SH}/reports/receivables/` | `ReceivablesReportView`; agrégations | `require_permission(..., VIEW_REPORTS)` | `VIEW_REPORTS` | conforme — P1-A3.5 |
+| GET | `/businesses/{SH}/reports/purchases/` | `PurchasesReportView`; `build_purchases_report` | `require_permission(..., VIEW_REPORTS)` | `VIEW_REPORTS` | conforme — P1-A3.5 |
+| GET | `/businesses/{SH}/reports/supplier-debts/` | `SupplierDebtsReportView`; `debt_queryset` | `require_permission(..., VIEW_REPORTS)` | `VIEW_REPORTS` | conforme — P1-A3.5 |
 
 ## Synthèse chiffrée
 
 | Statut | Opérations |
 |---|---:|
-| Conforme | 61 |
-| À migrer | 18 |
+| Conforme | 72 |
+| À migrer | 7 |
 | À clarifier | 7 |
 | **Total** | **86** |
 
@@ -192,8 +192,8 @@ donnerait au vendeur des droits de référentiel non explicitement décidés.
 Quatre familles de contrôles doivent disparaître progressivement des vues :
 
 1. `can_manage_business`, helper transitoire fondé sur `UPDATE_BUSINESS`, protège
-   encore 16 opérations de configuration Business, Finance et reporting avec
-   une permission trop générale ;
+   encore 5 opérations de configuration Business avec une permission trop
+   générale ou une politique de lecture à clarifier ;
 2. les recherches directes `members__identity` + `members__status="ACTIVE"`
    sont répétées dans presque chaque mixin et contournent `membership_for` /
    `require_permission` ;
@@ -256,18 +256,19 @@ au modèle ni à une migration.
 3. **Business inactif mutable — corrigé pour P1-A3.2** : les neuf opérations
    migrées utilisent `write=True` pour leurs mutations ; `SUSPENDED` et
    `ARCHIVED` sont refusés.
-4. **Lecture sensible trop large — partiellement corrigée P1-A3.4** : achats,
-   fournisseurs, dépenses, catalogue et stock exigent désormais leur permission
-   de lecture. Tout membre actif peut encore lire clients, ventes et créances
-   indépendamment de ses permissions individuelles.
+4. **Lecture sensible trop large — partiellement corrigée P1-A3.5** : les
+   projections financières et tous les rapports exigent désormais leur
+   permission dédiée. Tout membre actif peut encore lire clients, ventes et
+   créances indépendamment de ses permissions individuelles.
 
 ### Cohérence 403/404
 
 Le moteur P1-A2 définit : absence de membership = 404 ; membership existant mais
 non autorisé ou suspendu = 403. Les vues Sales/Receivables migrées en P1-A3.2 et
-Purchases/Expenses migrées en P1-A3.3 et Catalog/Inventory migrées en P1-A3.4
-appliquent désormais cette distinction en résolvant d'abord le Business puis en
-appelant `require_permission`. Les autres scopes directs et usages de
+Purchases/Expenses migrées en P1-A3.3, Catalog/Inventory migrées en P1-A3.4 et
+les projections financières migrées en P1-A3.5 appliquent désormais cette
+distinction en résolvant d'abord le Business puis en appelant
+`require_permission`. Les autres scopes directs et usages de
 `can_manage_business` restent à harmoniser.
 
 ## Matrice fonctionnelle condensée
@@ -361,11 +362,25 @@ suspendus ou archivés. Les règles existantes des produits archivés sont
 préservées. Le coût SQL de l'autorisation POS ajoute deux requêtes fixes, sans
 N+1 : le nombre de requêtes reste identique entre petit et grand jeux de données.
 
-### P1-A3.5 — Finance, Dashboard, rentabilité et rapports
+### P1-A3.5 — Finance, Dashboard, rentabilité et rapports — terminé
 
 Remplacer `UPDATE_BUSINESS` par les permissions de lecture dédiées. Tester chaque
 projection, l'absence de fuite financière, les périodes et le comportement des
 Business inactifs.
+
+Endpoints effectivement migrés :
+
+- les 3 lectures du journal et de la synthèse Finance utilisent
+  `VIEW_FINANCIAL_SUMMARY` ;
+- Dashboard utilise `VIEW_DASHBOARD` et la synthèse de rentabilité utilise
+  `VIEW_PROFITABILITY` ;
+- les 6 rapports Sales, Products, Expenses, Receivables, Purchases et dettes
+  fournisseurs utilisent `VIEW_REPORTS`.
+
+Les tests couvrent l'OWNER, l'ancien MANAGER sans permission, chaque permission
+explicite, les titres sans effet, le membre suspendu, l'isolation tenant et les
+Business suspendus ou archivés. Les calculs et agrégations métier sont inchangés
+et les mesures existantes confirment l'absence de N+1.
 
 ### P1-A3.6 — Administration Business
 
@@ -386,9 +401,9 @@ serializers, et peut être validé indépendamment avant le suivant.
 ## Conclusion
 
 L'isolation par Business est globalement présente et aucun rôle ou titre legacy
-ne confère de privilège. Après P1-A3.4, 18 opérations ont encore une permission
+ne confère de privilège. Après P1-A3.5, 7 opérations ont encore une permission
 existante mais n'utilisent pas le moteur avec cette permission, et 7 nécessitent
-une décision de granularité. Les opérations Sales/Returns/Receivables critiques
-ainsi que les périmètres Purchases/Expenses et Catalog/Inventory sont désormais
-centralisés ; la création de client et les autres lectures sensibles trop larges
-restent les priorités documentées.
+une décision de granularité. Les opérations Sales/Returns/Receivables critiques,
+les périmètres Purchases/Expenses et Catalog/Inventory ainsi que toutes les
+projections financières sont désormais centralisés ; la création de client et
+les autres lectures sensibles trop larges restent les priorités documentées.

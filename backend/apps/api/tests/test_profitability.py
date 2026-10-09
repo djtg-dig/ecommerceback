@@ -46,7 +46,7 @@ def context(subject_suffix=""):
     grant_permission(
         owner_member,
         manager_member,
-        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+        BusinessMemberPermission.Permission.VIEW_PROFITABILITY,
     )
     category, _ = ProductCategory.objects.get_or_create(
         code="PROFIT",
@@ -114,7 +114,7 @@ def test_profitability_empty_permissions_and_period_validation():
                 "net_result",
             )
         )
-    assert client(employee).get(url).status_code == 404
+    assert client(employee).get(url).status_code == 403
     assert client(owner).get(url, {"period": "bad"}).status_code == 400
     assert client(owner).get(url, {"date_from": "2026-01-02"}).status_code == 400
     assert client(owner).get(url, {"period": "today", "date_from": "2026-01-01", "date_to": "2026-01-02"}).status_code == 400
