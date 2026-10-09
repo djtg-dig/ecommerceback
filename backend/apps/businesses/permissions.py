@@ -18,7 +18,14 @@ def membership_for(identity, business, *, include_suspended=False):
         identity=identity,
         business=business,
     )
-    if not include_suspended:
+    if include_suspended:
+        memberships = memberships.filter(
+            status__in=(
+                BusinessMember.Status.ACTIVE,
+                BusinessMember.Status.SUSPENDED,
+            )
+        )
+    else:
         memberships = memberships.filter(status=BusinessMember.Status.ACTIVE)
 
     return memberships.first()
@@ -47,9 +54,10 @@ def has_permission(member, permission, *, write=False):
 def require_permission(identity, business, permission, *, write=False):
     """Return the authorized member or raise the API's canonical 404/403 errors.
 
-    A missing membership is deliberately indistinguishable from an unknown
-    Business. A suspended member is known to the tenant but has no authorization,
-    so it receives 403. Callers mark business mutations with ``write=True``.
+    A missing or removed membership is deliberately indistinguishable from an
+    unknown Business. A suspended member is known to the tenant but has no
+    authorization, so it receives 403. Callers mark business mutations with
+    ``write=True``.
     """
     validate_permission(permission)
     member = membership_for(identity, business, include_suspended=True)

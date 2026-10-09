@@ -2,6 +2,7 @@
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.utils import timezone
 
 from apps.common.choices import PaymentMethod
 
@@ -14,7 +15,7 @@ from .models import (
     BusinessMemberPermission,
     BusinessPaymentMethod,
 )
-from .permissions import validate_permission
+from .permissions import has_permission, validate_permission
 
 MAX_PUBLIC_ID_ATTEMPTS = 5
 DEFAULT_PAYMENT_METHODS = (
@@ -170,3 +171,39 @@ def revoke_permission(actor_member, member, permission):
             member=target,
             permission=permission,
         ).delete()
+
+
+def remove_member(actor_member, member):
+    """Logically remove a non-owner and revoke access in one locked transaction."""
+    with transaction.atomic():
+        actor = BusinessMember.objects.select_for_update().get(pk=actor_member.pk)
+        target = BusinessMember.objects.select_for_update().get(pk=member.pk)
+        business = Business.objects.select_for_update().get(pk=actor.business_id)
+        actor.business = business
+
+        if actor.business_id != target.business_id or not has_permission(
+            actor,
+            BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+            write=True,
+        ):
+            raise ValidationError("An authorized member manager is required.")
+        if target.is_owner:
+            raise ValidationError("A Business owner cannot be removed.")
+        if actor.pk == target.pk:
+            raise ValidationError("A member cannot remove themselves.")
+        if target.status == BusinessMember.Status.REMOVED:
+            return target
+
+        target.status = BusinessMember.Status.REMOVED
+        target.removed_at = timezone.now()
+        target.removed_by = actor.identity
+        target.save(
+            update_fields=(
+                "status",
+                "removed_at",
+                "removed_by",
+                "updated_at",
+            )
+        )
+        target.permissions.all().delete()
+        return target

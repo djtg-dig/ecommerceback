@@ -12,6 +12,7 @@ def generate_public_id(prefix: str, length: int = PUBLIC_ID_SUFFIX_LENGTH) -> st
 
 
 def generate_business_public_id(): return generate_public_id("SH")
+def generate_business_member_public_id(): return generate_public_id("BM")
 def generate_product_public_id(): return generate_public_id("PR")
 def generate_product_variant_public_id(): return generate_public_id("PV")
 def generate_inventory_item_public_id(): return generate_public_id("IV")

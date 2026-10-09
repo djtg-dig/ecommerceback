@@ -108,6 +108,7 @@ class BusinessMemberSerializer(serializers.ModelSerializer):
         model = BusinessMember
         fields = (
             "id",
+            "public_id",
             "identity_id",
             "role",
             "title",
@@ -116,6 +117,7 @@ class BusinessMemberSerializer(serializers.ModelSerializer):
             "permissions",
             "joined_at",
         )
+        read_only_fields = fields
 
     @extend_schema_field(serializers.ListField(child=serializers.CharField()))
     def get_permissions(self, member):

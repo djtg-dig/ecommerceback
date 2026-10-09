@@ -25,9 +25,16 @@ Un OWNER actif possède implicitement toutes les permissions connues, sans ligne
 explicitement accordées. Une permission inconnue est refusée, y compris pour un
 OWNER. Un membre suspendu ne dispose d'aucun droit.
 
-L'absence d'appartenance produit une réponse `404`, afin de ne pas révéler les
-données d'un autre tenant. Une appartenance existante sans droit suffisant,
-y compris une appartenance suspendue, produit `403`.
+Chaque appartenance possède un identifiant public opaque préfixé `BM`. Le statut
+`REMOVED` représente un retrait logique terminal : le membre est conservé pour
+la traçabilité, ses permissions individuelles sont supprimées dans la même
+transaction et il est ensuite traité comme absent par les API métier. Le retrait
+physique d'un `BusinessMember` est interdit. Le propriétaire unique ne peut pas
+être retiré, suspendu ou rétrogradé.
+
+L'absence d'appartenance ou une appartenance retirée produit une réponse `404`,
+afin de ne pas révéler les données d'un autre tenant. Une appartenance existante
+sans droit suffisant, y compris une appartenance suspendue, produit `403`.
 
 Les lectures administratives autorisées restent possibles lorsque le Business
 est `SUSPENDED` ou `ARCHIVED`. Toute opération métier doit appeler le moteur avec

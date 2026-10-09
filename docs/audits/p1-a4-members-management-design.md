@@ -358,9 +358,18 @@ sans créer de membership.
 
 ## 8. Plan d'implémentation par petits lots
 
-1. **P1-A4.2 — Prérequis identité et modèles** : valider le contrat e-mail
-   Carri, ajouter la projection vérifiée, `BusinessMember.public_id`, le retrait
-   logique et `BusinessMemberInvitation`, puis migrations/backfills/tests.
+État de P1-A4.2 : le lot de fondations livre `BusinessMember.public_id`, les
+métadonnées de cycle de vie, le statut `REMOVED`, le retrait logique
+transactionnel et le backfill. Conformément au périmètre validé pour ce lot, il
+ne modifie pas Carri Account et n'introduit pas encore les invitations. Les API
+de lecture paginées et leurs mesures anti-N+1 restent dans P1-A4.3 ; les routes
+de cycle de vie restent dans P1-A4.6.
+
+1. **P1-A4.2 — Prérequis identité et modèles** : ajouter
+   `BusinessMember.public_id`, les métadonnées de cycle de vie et le retrait
+   logique, puis migration, backfill et tests. Le contrat e-mail Carri, la
+   projection vérifiée et `BusinessMemberInvitation` sont reportés au lot
+   d'invitations afin de ne pas modifier Carri Account dans ce lot.
 2. **P1-A4.3 — Lectures membres** : liste/détail paginés, projections compactes,
    préchargement des permissions et mesures anti-N+1.
 3. **P1-A4.4 — Administration des invitations** : créer/lister/détailler,

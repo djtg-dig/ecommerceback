@@ -8,6 +8,7 @@ from apps.accounts.models import CarriIdentity
 from apps.common.choices import PaymentMethod
 
 from .identifiers import (
+    generate_business_member_public_id,
     generate_business_payment_method_public_id,
     generate_business_public_id,
 )
@@ -147,8 +148,15 @@ class BusinessMember(models.Model):
     class Status(models.TextChoices):
         ACTIVE = "ACTIVE", "Active"
         SUSPENDED = "SUSPENDED", "Suspended"
+        REMOVED = "REMOVED", "Removed"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    public_id = models.CharField(
+        max_length=12,
+        unique=True,
+        editable=False,
+        db_index=True,
+    )
     identity = models.ForeignKey(
         CarriIdentity,
         on_delete=models.PROTECT,
@@ -170,6 +178,22 @@ class BusinessMember(models.Model):
         max_length=10,
         choices=Status.choices,
         default=Status.ACTIVE,
+    )
+    suspended_at = models.DateTimeField(null=True, blank=True)
+    suspended_by = models.ForeignKey(
+        CarriIdentity,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="business_members_suspended",
+    )
+    removed_at = models.DateTimeField(null=True, blank=True)
+    removed_by = models.ForeignKey(
+        CarriIdentity,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="business_members_removed",
     )
     joined_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -194,6 +218,8 @@ class BusinessMember(models.Model):
             self.is_owner = True
             if not self.title:
                 self.title = "Gérant"
+        if not self.public_id:
+            self.public_id = generate_business_member_public_id()
         self.full_clean()
         super().save(*args, **kwargs)
 
@@ -211,6 +237,9 @@ class BusinessMember(models.Model):
 
         previous = type(self).objects.get(pk=self.pk)
 
+        if previous.status == self.Status.REMOVED and self.status != self.Status.REMOVED:
+            errors["status"] = "A removed business member cannot be reactivated."
+
         removes_active_owner = previous.is_owner and (
             not self.is_owner or self.status != self.Status.ACTIVE
         )
@@ -227,9 +256,7 @@ class BusinessMember(models.Model):
             raise ValidationError(errors)
 
     def delete(self, *args, **kwargs):
-        if self.is_owner:
-            raise ValidationError("A business owner cannot be deleted.")
-        return super().delete(*args, **kwargs)
+        raise ValidationError("Business members must be removed logically.")
 
 
 class BusinessMemberPermission(models.Model):
