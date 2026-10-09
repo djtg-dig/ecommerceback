@@ -2,7 +2,7 @@ import base64
 import hashlib
 import logging
 import secrets
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime, timedelta, timezone as dt_timezone
 from urllib.parse import urlencode
 
 from django.conf import settings
@@ -15,7 +15,15 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import CarriIdentity, IDTokenReplay, OAuthHandoff, OAuthLoginAttempt
-from .services.oidc import InvalidOIDCToken, OIDCError, OIDCUnavailable, discovery, exchange_web_code, validate_id_token
+from .services.oidc import (
+    InvalidOIDCToken,
+    OIDCError,
+    OIDCUnavailable,
+    discovery,
+    exchange_web_code,
+    validate_id_token,
+    verified_userinfo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +33,30 @@ def _pair(identity):
     return {"access": str(refresh.access_token), "refresh": str(refresh)}
 
 
-def _identity(subject):
+def _identity(subject, *, verified_email, auth_time):
+    if type(auth_time) is not int:
+        raise InvalidOIDCToken("Identity token auth_time is missing.")
+    authenticated_at = datetime.fromtimestamp(auth_time, tz=dt_timezone.utc)
+    now = timezone.now()
+    if authenticated_at > now + timedelta(
+        seconds=settings.CARRI_ACCOUNT_ID_TOKEN_CLOCK_SKEW_SECONDS
+    ):
+        raise InvalidOIDCToken("Identity token auth_time is invalid.")
     identity, _ = CarriIdentity.objects.get_or_create(carri_subject=subject)
-    identity.last_login_at = timezone.now()
-    identity.save(update_fields=["last_login_at"])
+    identity.verified_email = verified_email
+    identity.email_verified = True
+    identity.email_verified_at = now
+    identity.last_oidc_auth_at = authenticated_at
+    identity.last_login_at = now
+    identity.save(
+        update_fields=[
+            "verified_email",
+            "email_verified",
+            "email_verified_at",
+            "last_oidc_auth_at",
+            "last_login_at",
+        ]
+    )
     return identity
 
 
@@ -66,11 +94,19 @@ class CarriMobileExchangeView(APIView):
                 require_nonce=True,
                 require_at_hash=True,
             )
+            email = verified_userinfo(
+                access_token=access_token,
+                subject=payload["sub"],
+            )
             expires_at = datetime.fromtimestamp(payload["exp"], tz=dt_timezone.utc)
             token_hash = hashlib.sha256(id_token.encode()).hexdigest()
             with transaction.atomic():
                 IDTokenReplay.objects.create(token_hash=token_hash, expires_at=expires_at)
-                identity = _identity(payload["sub"])
+                identity = _identity(
+                    payload["sub"],
+                    verified_email=email,
+                    auth_time=payload.get("auth_time"),
+                )
             logger.info("carri.mobile_exchange.success identity=%s", identity.pk)
             return Response(_pair(identity), status=status.HTTP_200_OK)
         except IntegrityError:
@@ -93,6 +129,12 @@ class CarriLoginView(APIView):
             return _error("Authentication service is unavailable.", status.HTTP_503_SERVICE_UNAVAILABLE)
         try:
             metadata = discovery()
+            scopes = settings.CARRI_ACCOUNT_SCOPES.split()
+            supported_scopes = set(metadata.get("scopes_supported", ()))
+            if not {"openid", "email"}.issubset(scopes) or not set(scopes).issubset(
+                supported_scopes
+            ):
+                raise OIDCError("Carri Account does not support the required scopes.")
             state, nonce, verifier = _random(), _random(), _random(64)
             OAuthLoginAttempt.create(
                 state=state, nonce=nonce, code_verifier=verifier,
@@ -101,7 +143,8 @@ class CarriLoginView(APIView):
             )
             query = urlencode({
                 "response_type": "code", "client_id": settings.CARRI_ACCOUNT_CLIENT_ID,
-                "redirect_uri": settings.CARRI_ACCOUNT_REDIRECT_URI, "scope": "openid",
+                "redirect_uri": settings.CARRI_ACCOUNT_REDIRECT_URI,
+                "scope": " ".join(scopes),
                 "state": state, "nonce": nonce, "code_challenge": _challenge(verifier),
                 "code_challenge_method": "S256",
             })
@@ -138,7 +181,15 @@ class CarriCallbackView(APIView):
                     nonce=attempt.nonce, access_token=tokens.get("access_token"), require_nonce=True,
                     require_at_hash=bool(tokens.get("access_token")),
                 )
-                identity = _identity(payload["sub"])
+                email = verified_userinfo(
+                    access_token=tokens.get("access_token", ""),
+                    subject=payload["sub"],
+                )
+                identity = _identity(
+                    payload["sub"],
+                    verified_email=email,
+                    auth_time=payload.get("auth_time"),
+                )
                 attempt.consumed_at = timezone.now()
                 attempt.save(update_fields=["consumed_at"])
                 handoff = OAuthHandoff.create_for(identity, settings.CARRI_ACCOUNT_HANDOFF_TTL_SECONDS)

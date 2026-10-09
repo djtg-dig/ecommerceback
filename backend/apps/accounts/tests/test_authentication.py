@@ -18,21 +18,40 @@ from apps.accounts.services import oidc
 @override_settings(CARRI_ACCOUNT_ANDROID_CLIENT_ID="android-client", CARRI_ACCOUNT_ISSUER="https://issuer.example")
 def test_mobile_exchange_creates_and_reuses_identity():
     client = APIClient()
-    payload = {"sub": "carri-subject", "exp": int((datetime.now(timezone.utc) + timedelta(minutes=5)).timestamp())}
-    with patch("apps.accounts.views.validate_id_token", return_value=payload):
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": "carri-subject",
+        "auth_time": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=5)).timestamp()),
+    }
+    with patch("apps.accounts.views.validate_id_token", return_value=payload), patch(
+        "apps.accounts.views.verified_userinfo",
+        return_value="verified@example.com",
+    ):
         first = client.post("/api/v1/auth/carri/mobile/exchange/", {"id_token": "one", "access_token": "access", "nonce": "nonce"}, format="json")
         second = client.post("/api/v1/auth/carri/mobile/exchange/", {"id_token": "two", "access_token": "access", "nonce": "nonce"}, format="json")
     assert first.status_code == 200
     assert second.status_code == 200
-    assert CarriIdentity.objects.filter(carri_subject="carri-subject").count() == 1
+    identity = CarriIdentity.objects.get(carri_subject="carri-subject")
+    assert identity.verified_email == "verified@example.com"
+    assert identity.email_verified is True
+    assert identity.has_fresh_verified_email()
 
 
 @pytest.mark.django_db
 @override_settings(CARRI_ACCOUNT_ANDROID_CLIENT_ID="android-client")
 def test_mobile_exchange_rejects_replay_and_incomplete_payload():
     client = APIClient()
-    payload = {"sub": "carri-subject", "exp": int((datetime.now(timezone.utc) + timedelta(minutes=5)).timestamp())}
-    with patch("apps.accounts.views.validate_id_token", return_value=payload):
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": "carri-subject",
+        "auth_time": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=5)).timestamp()),
+    }
+    with patch("apps.accounts.views.validate_id_token", return_value=payload), patch(
+        "apps.accounts.views.verified_userinfo",
+        return_value="verified@example.com",
+    ):
         assert client.post("/api/v1/auth/carri/mobile/exchange/", {"id_token": "same", "access_token": "access", "nonce": "nonce"}, format="json").status_code == 200
         assert client.post("/api/v1/auth/carri/mobile/exchange/", {"id_token": "same", "access_token": "access", "nonce": "nonce"}, format="json").status_code == 400
     assert client.post("/api/v1/auth/carri/mobile/exchange/", {"id_token": "only"}, format="json").status_code == 400
@@ -56,12 +75,23 @@ def test_web_callback_consumes_state_once_and_returns_handoff():
     OAuthLoginAttempt.create(state=state, nonce="nonce", code_verifier="verifier", redirect_uri="https://app.example/callback")
     client = APIClient()
     token_payload = {"id_token": "id", "access_token": "access"}
-    with patch("apps.accounts.views.exchange_web_code", return_value=token_payload), patch("apps.accounts.views.validate_id_token", return_value={"sub": "web-sub"}):
+    id_payload = {
+        "sub": "web-sub",
+        "auth_time": int(datetime.now(timezone.utc).timestamp()),
+    }
+    with patch("apps.accounts.views.exchange_web_code", return_value=token_payload), patch(
+        "apps.accounts.views.validate_id_token",
+        return_value=id_payload,
+    ), patch(
+        "apps.accounts.views.verified_userinfo",
+        return_value="web@example.com",
+    ):
         response = client.get("/api/v1/auth/carri/callback/", {"state": state, "code": "code"})
         reused = client.get("/api/v1/auth/carri/callback/", {"state": state, "code": "code"})
     assert response.status_code == 200
     assert "handoff" in response.json()
     assert reused.status_code == 400
+    assert CarriIdentity.objects.get(carri_subject="web-sub").verified_email == "web@example.com"
 
 
 def _signed_token(private_key, claims, *, alg="RS256", kid="key-1"):

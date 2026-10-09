@@ -10,6 +10,8 @@ import jwt
 import requests
 from django.conf import settings
 from django.core.cache import cache
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.utils import timezone
 from jwt.algorithms import RSAAlgorithm
 
@@ -25,6 +27,10 @@ class OIDCUnavailable(OIDCError):
 
 
 class InvalidOIDCToken(OIDCError):
+    pass
+
+
+class InvalidOIDCUserInfo(OIDCError):
     pass
 
 
@@ -129,6 +135,53 @@ def validate_id_token(*, id_token, audience, nonce=None, access_token=None, requ
         if not claim or not hmac.compare_digest(str(claim), _at_hash(access_token)):
             raise InvalidOIDCToken("Identity token access-token binding is invalid.")
     return payload
+
+
+def fetch_userinfo(access_token):
+    """Fetch Carri userinfo without ever logging or persisting the bearer token."""
+    if not isinstance(access_token, str) or not access_token:
+        raise InvalidOIDCUserInfo("Carri access token is missing.")
+    endpoint = discovery().get("userinfo_endpoint")
+    if not endpoint:
+        raise OIDCError("Carri Account discovery has no userinfo endpoint.")
+    try:
+        response = requests.get(
+            endpoint,
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=settings.CARRI_ACCOUNT_HTTP_TIMEOUT_SECONDS,
+        )
+        if response.status_code in (401, 403):
+            raise InvalidOIDCUserInfo("Carri userinfo rejected the access token.")
+        response.raise_for_status()
+    except InvalidOIDCUserInfo:
+        raise
+    except requests.RequestException as exc:
+        raise OIDCUnavailable("Carri Account userinfo is unavailable.") from exc
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise InvalidOIDCUserInfo("Carri userinfo returned invalid JSON.") from exc
+    if not isinstance(data, dict):
+        raise InvalidOIDCUserInfo("Carri userinfo payload is invalid.")
+    return data
+
+
+def verified_userinfo(*, access_token, subject):
+    """Return a normalized email proven by userinfo for one validated subject."""
+    data = fetch_userinfo(access_token)
+    if data.get("public_id") != subject:
+        raise InvalidOIDCUserInfo("Carri userinfo subject does not match the ID token.")
+    if type(data.get("email_verified")) is not bool or not data["email_verified"]:
+        raise InvalidOIDCUserInfo("Carri userinfo email is not verified.")
+    email = data.get("email")
+    if not isinstance(email, str):
+        raise InvalidOIDCUserInfo("Carri userinfo email is missing.")
+    email = email.strip().lower()
+    try:
+        validate_email(email)
+    except ValidationError as exc:
+        raise InvalidOIDCUserInfo("Carri userinfo email is invalid.") from exc
+    return email
 
 
 def exchange_web_code(*, code, code_verifier, redirect_uri):

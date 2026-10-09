@@ -129,7 +129,7 @@ traçabilité. Une seule invitation `PENDING` (puis `EXPIRED`) existe par
 transactionnelle et verrouillée ; elle exige l'OWNER actif ou
 `MANAGE_MEMBERS` explicite, un Business actif, et n'attribue aucune
 permission ni ne crée de membre. L'acceptation, le refus, le renvoi et la
-révocation sont reportés : `CarriIdentity` ne persiste que `carri_subject`
-et les flux OIDC existants ne demandent pas le scope `email`, donc aucune
-preuve d'adresse vérifiée n'est disponible tant que Carri Account ne
-garantit pas les claims `email` et `email_verified`.
+révocation sont reportés. `CarriIdentity` conserve désormais une projection
+d'adresse obtenue exclusivement par `userinfo` après validation de l'ID token,
+ainsi que les dates nécessaires au contrôle de fraîcheur de 10 minutes. Les
+endpoints d'acceptation et de refus restent hors du présent lot.

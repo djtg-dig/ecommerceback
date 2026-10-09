@@ -12,7 +12,10 @@ erDiagram
   PRODUCT ||--o{ PRODUCT_VARIANT : has
 ```
 
-- **CarriIdentity** : PK UUID, `carri_subject` unique, projection minimale OIDC. Suppression protégée par les memberships.
+- **CarriIdentity** : PK UUID, `carri_subject` unique et immuable, projection
+  OIDC de l'e-mail vérifié sans unicité globale, dates d'observation de
+  `userinfo`, de `auth_time` et de dernière connexion. Suppression protégée par
+  les memberships.
 - **OAuthLoginAttempt** : state hashé unique, nonce, verifier PKCE, expiration et consommation.
 - **IDTokenReplay** : hash unique de preuve mobile et expiration.
 - **OAuthHandoff** : hash unique, identité, expiration et consommation.

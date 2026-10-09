@@ -500,22 +500,14 @@ le 9 octobre 2026 :
   invitation sur un Business `SUSPENDED` ou `ARCHIVED` ;
   isolation stricte entre entreprises ; aucune création de
   `BusinessMember` ni de permission lors de l'envoi.
-- Blocage documenté — vérification de l'adresse Carri :
-  `CarriIdentity` ne persiste que `carri_subject` ; les flux
-  OIDC existants demandent le seul scope `openid` (web) ou ne
-  capturent que `sub` (mobile). Aucun claim `email` ni
-  `email_verified` n'est donc disponible côté ecommerce, et
-  Carri Account ne peut pas être modifié dans ce lot. Par
-  conséquent, l'acceptation d'invitation — qui exige de
-  comparer l'adresse Carri vérifiée du destinataire à
-  l'adresse de l'invitation — ne peut pas être autorisée de
-  manière fiable. Conformément à la contrainte du lot, les
-  endpoints d'acceptation/refus (`POST
-  .../member-invitations/{MI}/accept/` et `.../decline/`) ne
-  sont pas implémentés tant que le contrat Carri Account ne
-  garantit pas les claims `email` et `email_verified` avec le
-  scope `openid email`. Le renvoi et la révocation sont
-  également reportés au lot d'administration des invitations.
+- Preuve d'adresse Carri — P1-A4.8 : les flux Web demandent
+  `openid email` et les flux Web/mobile appellent `userinfo`
+  après validation de l'ID token. E-commerce exige la
+  correspondance exacte `public_id == sub`, un booléen
+  `email_verified=true`, puis conserve l'adresse normalisée et
+  les horodatages serveur. La preuve est fraîche pendant dix
+  minutes. Les endpoints d'acceptation/refus restent
+  volontairement non implémentés dans ce lot.
 - Différences avec Kisinet : Kisinet lie l'invitation à un
   utilisateur local existant (`invited_user`) et envoie
   l'e-mail via `transaction.on_commit` ; E-commerce référence
@@ -551,7 +543,7 @@ livraison sécurisée soient disponibles.
 
 | Décision | Recommandation | Caractère bloquant |
 |---|---|---|
-| Claims Carri `email`/`email_verified`, unicité et changement d'adresse | Confirmer le contrat Carri, demander `openid email`, conserver `sub` comme seule identité. | **Bloque invitations/acceptation.** |
+| Claims Carri `email`/`email_verified`, unicité et changement d'adresse | Contrat confirmé via `userinfo`; `openid email`, preuve fraîche dix minutes et `sub` comme seule identité. Définir encore la politique de changement d'adresse. | Preuve disponible ; endpoints d'acceptation encore à implémenter. |
 | Fournisseur d'e-mail, URL/deep link et gestion des échecs | Adaptateur serveur + `transaction.on_commit`; aucun secret dans les logs. | **Bloque envoi/renvoi réel.** |
 | Durée de validité | 72 heures, configurable. | Non bloquant si cette valeur est validée. |
 | Limite de renvoi | Délai minimum de 60 secondes et plafond journalier par invitation/Business. | À valider avant exposition publique. |

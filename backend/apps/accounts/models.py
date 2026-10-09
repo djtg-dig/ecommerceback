@@ -3,6 +3,7 @@ import secrets
 import uuid
 from datetime import timedelta
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
@@ -11,6 +12,10 @@ from django.utils import timezone
 class CarriIdentity(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     carri_subject = models.CharField(max_length=255, unique=True)
+    verified_email = models.EmailField(blank=True, default="", db_index=True)
+    email_verified = models.BooleanField(default=False)
+    email_verified_at = models.DateTimeField(null=True, blank=True)
+    last_oidc_auth_at = models.DateTimeField(null=True, blank=True)
     linked_at = models.DateTimeField(auto_now_add=True)
     last_login_at = models.DateTimeField(null=True, blank=True)
 
@@ -24,6 +29,22 @@ class CarriIdentity(models.Model):
     @property
     def is_active(self):
         return True
+
+    def has_fresh_verified_email(self, *, now=None):
+        """Return whether Carri recently proved both the email and authentication."""
+        now = now or timezone.now()
+        max_age = timedelta(
+            seconds=settings.CARRI_ACCOUNT_EMAIL_PROOF_MAX_AGE_SECONDS
+        )
+        cutoff = now - max_age
+        return bool(
+            self.verified_email
+            and self.email_verified
+            and self.email_verified_at
+            and self.last_oidc_auth_at
+            and cutoff <= self.email_verified_at <= now
+            and cutoff <= self.last_oidc_auth_at <= now
+        )
 
     def save(self, *args, **kwargs):
         if not self._state.adding:
