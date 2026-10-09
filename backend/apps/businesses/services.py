@@ -207,3 +207,97 @@ def remove_member(actor_member, member):
         )
         target.permissions.all().delete()
         return target
+
+
+def update_member_title(actor_member, member, title):
+    """Change one descriptive title without touching any authorization data."""
+    with transaction.atomic():
+        actor = BusinessMember.objects.select_for_update().get(pk=actor_member.pk)
+        target = BusinessMember.objects.select_for_update().get(pk=member.pk)
+        business = Business.objects.select_for_update().get(pk=actor.business_id)
+        actor.business = business
+
+        if actor.business_id != target.business_id or not has_permission(
+            actor,
+            BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+            write=True,
+        ):
+            raise ValidationError("An authorized member manager is required.")
+        if target.status == BusinessMember.Status.REMOVED:
+            raise ValidationError("A removed business member cannot be updated.")
+
+        target.title = title
+        target.save(update_fields=("title", "updated_at"))
+        return target
+
+
+def suspend_member(actor_member, member):
+    """Suspend an active non-owner; permissions stay but become inert."""
+    with transaction.atomic():
+        actor = BusinessMember.objects.select_for_update().get(pk=actor_member.pk)
+        target = BusinessMember.objects.select_for_update().get(pk=member.pk)
+        business = Business.objects.select_for_update().get(pk=actor.business_id)
+        actor.business = business
+
+        if actor.business_id != target.business_id or not has_permission(
+            actor,
+            BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+            write=True,
+        ):
+            raise ValidationError("An authorized member manager is required.")
+        if target.is_owner:
+            raise ValidationError("A Business owner cannot be suspended.")
+        if actor.pk == target.pk:
+            raise ValidationError("A member cannot suspend themselves.")
+        if target.status == BusinessMember.Status.REMOVED:
+            raise ValidationError("A removed business member cannot be suspended.")
+        if target.status == BusinessMember.Status.SUSPENDED:
+            return target
+
+        target.status = BusinessMember.Status.SUSPENDED
+        target.suspended_at = timezone.now()
+        target.suspended_by = actor.identity
+        target.save(
+            update_fields=(
+                "status",
+                "suspended_at",
+                "suspended_by",
+                "updated_at",
+            )
+        )
+        return target
+
+
+def reactivate_member(actor_member, member):
+    """Reactivate a suspended member with their existing permissions."""
+    with transaction.atomic():
+        actor = BusinessMember.objects.select_for_update().get(pk=actor_member.pk)
+        target = BusinessMember.objects.select_for_update().get(pk=member.pk)
+        business = Business.objects.select_for_update().get(pk=actor.business_id)
+        actor.business = business
+
+        if actor.business_id != target.business_id or not has_permission(
+            actor,
+            BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+            write=True,
+        ):
+            raise ValidationError("An authorized member manager is required.")
+        if target.is_owner:
+            raise ValidationError("A Business owner is already active.")
+        if target.status == BusinessMember.Status.REMOVED:
+            raise ValidationError("A removed business member cannot be reactivated.")
+        if target.status == BusinessMember.Status.ACTIVE:
+            return target
+
+        target.status = BusinessMember.Status.ACTIVE
+        target.suspended_at = None
+        target.suspended_by = None
+        target.save(
+            update_fields=(
+                "status",
+                "suspended_at",
+                "suspended_by",
+                "updated_at",
+            )
+        )
+        return target

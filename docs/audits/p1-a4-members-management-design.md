@@ -390,6 +390,47 @@ de cycle de vie restent dans P1-A4.6.
 - Aucune mutation, invitation, suspension, réactivation ou modification de
   permission n'est introduite dans ce lot.
 
+État de P1-A4.4 — administration du cycle de vie des membres, livré le
+9 octobre 2026 :
+
+- `PATCH /api/v1/businesses/{SH}/members/{BM}/` modifie uniquement
+  `title` (payload `{title}`, non vide). `is_owner`, `role`, `status`,
+  `identity`, `business` et les permissions restent read-only : une
+  tentative d'élévation par payload est ignorée. Le titre du propriétaire
+  peut être modifié sans affecter sa propriété.
+- `POST /api/v1/businesses/{SH}/members/{BM}/suspend/` suspend un
+  membre actif non propriétaire. La suspension conserve les permissions
+  enregistrées mais les rend immédiatement inopérantes (`403` pour les
+  lectures métier). Idempotente : une seconde suspension retourne le
+  même statut sans duplication.
+- `POST /api/v1/businesses/{SH}/members/{BM}/reactivate/` réactive un
+  membre suspendu et restaure ses permissions existantes, sans accorder
+  de nouveaux droits. Un membre actif reste actif (idempotent). Un
+  membre `REMOVED` retourne `404` et ne peut pas être réactivé par cet
+  endpoint.
+- `DELETE /api/v1/businesses/{SH}/members/{BM}/` retire logiquement un
+  membre non propriétaire : statut `REMOVED`, `removed_at`/`removed_by`
+  renseignés, permissions supprimées dans la même transaction. Le retrait
+  est idempotent (`204`). Le membre retiré reste absent des consultations
+  administratives ordinaires.
+- Les quatre opérations exigent `MANAGE_MEMBERS` avec `write=True` :
+  OWNER actif implicite ou membre actif avec la permission explicite.
+  Les anciens rôles ou titres ne confèrent aucun droit implicite. Un
+  membre suspendu ou retiré reçoit `403`/`404`. Les mutations sont
+  refusées (`403`) sur un Business `SUSPENDED` ou `ARCHIVED`.
+- Protections du propriétaire unique : impossible de le suspendre, de le
+  retirer ou de le rétrograder. Un administrateur non OWNER ne peut pas
+  agir sur lui-même (auto-suspension, auto-retrait).
+- Chaque service ouvre `transaction.atomic` et verrouille l'acteur, la
+  cible et le Business avec `select_for_update` avant toute réévaluation
+  d'autorisation et de statut, ce qui sérialise les opérations
+  concurrentes (suspension/réactivation/retrait concurrents).
+- Le nombre de requêtes reste constant quelle que soit la taille de
+  l'entreprise. Aucune donnée Carri Account ni UUID interne n'est
+  exposée dans les réponses.
+- Les invitations et l'attribution/révocation de permissions ne sont pas
+  introduites dans ce lot.
+
 1. **P1-A4.2 — Prérequis identité et modèles** : ajouter
    `BusinessMember.public_id`, les métadonnées de cycle de vie et le retrait
    logique, puis migration, backfill et tests. Le contrat e-mail Carri, la
@@ -397,12 +438,12 @@ de cycle de vie restent dans P1-A4.6.
    d'invitations afin de ne pas modifier Carri Account dans ce lot.
 2. **P1-A4.3 — Lectures membres** : liste/détail paginés, projections compactes,
    préchargement des permissions et mesures anti-N+1.
-3. **P1-A4.4 — Administration des invitations** : créer/lister/détailler,
+3. **P1-A4.4 — Cycle de vie membre** : titre, suspension, réactivation et
+   retrait logique avec protections OWNER, services transactionnels verrouillés.
+4. **P1-A4.5 — Administration des invitations** : créer/lister/détailler,
    révoquer/renvoyer, idempotence et adaptateur d'envoi après commit.
-4. **P1-A4.5 — Parcours invité** : liste personnelle, acceptation/refus,
+5. **P1-A4.6 — Parcours invité** : liste personnelle, acceptation/refus,
    vérification Carri et tests de concurrence.
-5. **P1-A4.6 — Cycle de vie membre** : titre, suspension, réactivation et
-   retrait logique avec protections OWNER.
 6. **P1-A4.7 — API des permissions** : endpoints OWNER-only autour des services
    existants, tests d'escalade et matrice complète.
 7. **P1-A4.8 — Validation finale** : OpenAPI, performance, documentation Flutter,

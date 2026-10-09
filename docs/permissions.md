@@ -82,8 +82,23 @@ explicitement du propriétaire.
 `GET /api/v1/businesses/{SH}/members/` et
 `GET /api/v1/businesses/{SH}/members/{BM}/` exigent `VIEW_MEMBERS` et
 projetent `public_id`, `title`, `is_owner`, `status`, `permissions` et
-`joined_at`. La liste est paginée côté serveur (20 par défaut, 50 au maximum)
-et exclut les membres `REMOVED`. Les permissions affichées sont les
+`joined_at`. La liste est paginée côté serveur (20 par défaut, 50 au
+maximum) et exclut les membres `REMOVED`. Les permissions affichées sont les
 permissions explicites du registre, préchargées en une requête ; l'OWNER voit
 ses droits implicites. Aucune donnée Carri Account ni UUID interne n'est
 exposée.
+
+## Cycle de vie des membres
+
+`PATCH .../members/{BM}/` (titre uniquement),
+`POST .../members/{BM}/suspend/`,
+`POST .../members/{BM}/reactivate/` et
+`DELETE .../members/{BM}/` exigent `MANAGE_MEMBERS` avec un Business actif
+(`write=True`). L'OWNER actif possède implicitement ce droit ; les autres
+membres doivent le recevoir explicitement. Chaque service verrouille l'acteur,
+la cible et le Business dans une transaction. Le propriétaire unique ne peut
+être suspendu, retiré ni rétrogradé, et un administrateur ne peut agir sur
+lui-même. La suspension conserve les permissions mais les rend inopérantes ;
+la réactivation restaure les mêmes permissions sans élévation ; le retrait
+supprime les permissions et est idempotent. Un membre `REMOVED` ne peut pas
+être réactivé par l'endpoint ordinaire.

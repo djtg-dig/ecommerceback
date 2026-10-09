@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Prefetch
 from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
 from rest_framework import permissions, serializers
@@ -16,12 +17,20 @@ from .permissions import has_permission, require_any_permission, require_permiss
 from .serializers import (
     BusinessCreateSerializer,
     BusinessMemberSerializer,
+    BusinessMemberTitleSerializer,
     BusinessSerializer,
     BusinessUpdateSerializer,
     CategorySerializer,
     BusinessPaymentMethodSerializer,
 )
-from .services import create_business, replace_categories
+from .services import (
+    create_business,
+    reactivate_member,
+    remove_member,
+    replace_categories,
+    suspend_member,
+    update_member_title,
+)
 
 
 def accessible(identity):
@@ -149,8 +158,13 @@ class BusinessMembersView(APIView):
 
 
 class BusinessMemberDetailView(APIView):
+    http_method_names = ["get", "patch", "delete", "head", "options"]
+
+    def get_business(self, public_id):
+        return Business.objects.filter(public_id=public_id).first()
+
     def get(self, request, public_id, member_public_id):
-        business = Business.objects.filter(public_id=public_id).first()
+        business = self.get_business(public_id)
         if business is None:
             return Response({"detail": "Not found."}, status=404)
         require_permission(
@@ -158,7 +172,6 @@ class BusinessMemberDetailView(APIView):
             business,
             BusinessMemberPermission.Permission.VIEW_MEMBERS,
         )
-
         member = (
             member_queryset(business)
             .filter(public_id=member_public_id)
@@ -168,6 +181,148 @@ class BusinessMemberDetailView(APIView):
             return Response({"detail": "Not found."}, status=404)
 
         return Response(BusinessMemberSerializer(member).data)
+
+    def patch(self, request, public_id, member_public_id):
+        business = self.get_business(public_id)
+        if business is None:
+            return Response({"detail": "Not found."}, status=404)
+
+        try:
+            actor = require_permission(
+                request.user,
+                business,
+                BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+                write=True,
+            )
+            member = (
+                BusinessMember.objects.filter(
+                    business=business,
+                )
+                .exclude(status=BusinessMember.Status.REMOVED)
+                .filter(public_id=member_public_id)
+                .first()
+            )
+            if member is None:
+                return Response({"detail": "Not found."}, status=404)
+            serializer = BusinessMemberTitleSerializer(
+                member,
+                data=request.data,
+            )
+            serializer.is_valid(raise_exception=True)
+            updated = update_member_title(
+                actor,
+                member,
+                serializer.validated_data["title"],
+            )
+        except DjangoValidationError as error:
+            return Response({"detail": str(error)}, status=400)
+
+        return Response(BusinessMemberSerializer(updated).data)
+
+    def delete(self, request, public_id, member_public_id):
+        business = self.get_business(public_id)
+        if business is None:
+            return Response({"detail": "Not found."}, status=404)
+
+        try:
+            actor = require_permission(
+                request.user,
+                business,
+                BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+                write=True,
+            )
+            member = (
+                BusinessMember.objects.filter(
+                    business=business,
+                )
+                .filter(public_id=member_public_id)
+                .first()
+            )
+            if member is None:
+                return Response({"detail": "Not found."}, status=404)
+            remove_member(actor, member)
+        except DjangoValidationError as error:
+            return Response({"detail": str(error)}, status=400)
+
+        return Response(status=204)
+
+
+class BusinessMemberSuspendView(APIView):
+    def get_member(self, request, public_id, member_public_id):
+        """Resolve the Business, enforce MANAGE_MEMBERS, then resolve the member."""
+        business = Business.objects.filter(public_id=public_id).first()
+        if business is None:
+            return None, None, None
+        actor = require_permission(
+            request.user,
+            business,
+            BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+            write=True,
+        )
+        member = (
+            BusinessMember.objects.filter(
+                business=business,
+            )
+            .exclude(status=BusinessMember.Status.REMOVED)
+            .filter(public_id=member_public_id)
+            .first()
+        )
+        return business, actor, member
+
+    def post(self, request, public_id, member_public_id):
+        business, actor, member = self.get_member(
+            request,
+            public_id,
+            member_public_id,
+        )
+        if member is None:
+            return Response({"detail": "Not found."}, status=404)
+
+        try:
+            suspended = suspend_member(actor, member)
+        except DjangoValidationError as error:
+            return Response({"detail": str(error)}, status=400)
+
+        return Response(BusinessMemberSerializer(suspended).data)
+
+
+class BusinessMemberReactivateView(APIView):
+    def get_member(self, request, public_id, member_public_id):
+        """Resolve the Business, enforce MANAGE_MEMBERS, then resolve the member."""
+        business = Business.objects.filter(public_id=public_id).first()
+        if business is None:
+            return None, None, None
+        actor = require_permission(
+            request.user,
+            business,
+            BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+            write=True,
+        )
+        member = (
+            BusinessMember.objects.filter(
+                business=business,
+            )
+            .exclude(status=BusinessMember.Status.REMOVED)
+            .filter(public_id=member_public_id)
+            .first()
+        )
+        return business, actor, member
+
+    def post(self, request, public_id, member_public_id):
+        business, actor, member = self.get_member(
+            request,
+            public_id,
+            member_public_id,
+        )
+        if member is None:
+            return Response({"detail": "Not found."}, status=404)
+
+        try:
+            reactivated = reactivate_member(actor, member)
+        except DjangoValidationError as error:
+            return Response({"detail": str(error)}, status=400)
+
+        return Response(BusinessMemberSerializer(reactivated).data)
 
 
 class BusinessPaymentMethodsView(APIView):
@@ -348,6 +503,34 @@ BusinessMemberDetailView.get = extend_schema(
     parameters=[_business_id, _member_id],
     responses={200: BusinessMemberSerializer, 403: None, 404: None},
 )(BusinessMemberDetailView.get)
+BusinessMemberDetailView.patch = extend_schema(
+    tags=["Businesses"],
+    operation_id="business_member_update",
+    parameters=[_business_id, _member_id],
+    request=BusinessMemberTitleSerializer,
+    responses={200: BusinessMemberSerializer, 400: None, 403: None, 404: None},
+)(BusinessMemberDetailView.patch)
+BusinessMemberDetailView.delete = extend_schema(
+    tags=["Businesses"],
+    operation_id="business_member_remove",
+    parameters=[_business_id, _member_id],
+    request=None,
+    responses={204: None, 400: None, 403: None, 404: None},
+)(BusinessMemberDetailView.delete)
+BusinessMemberSuspendView.post = extend_schema(
+    tags=["Businesses"],
+    operation_id="business_member_suspend",
+    parameters=[_business_id, _member_id],
+    request=None,
+    responses={200: BusinessMemberSerializer, 400: None, 403: None, 404: None},
+)(BusinessMemberSuspendView.post)
+BusinessMemberReactivateView.post = extend_schema(
+    tags=["Businesses"],
+    operation_id="business_member_reactivate",
+    parameters=[_business_id, _member_id],
+    request=None,
+    responses={200: BusinessMemberSerializer, 400: None, 403: None, 404: None},
+)(BusinessMemberReactivateView.post)
 BusinessPaymentMethodsView.get = extend_schema(
     tags=["Business Payment Methods"],
     operation_id="business_payment_method_list",

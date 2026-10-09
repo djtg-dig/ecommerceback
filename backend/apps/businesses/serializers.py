@@ -129,6 +129,15 @@ class BusinessMemberSerializer(serializers.ModelSerializer):
         )
 
 
+class BusinessMemberTitleSerializer(serializers.ModelSerializer):
+    """Title-only update; ownership, role, status and permissions stay read-only."""
+
+    class Meta:
+        model = BusinessMember
+        fields = ("title",)
+        extra_kwargs = {"title": {"required": True, "allow_blank": False}}
+
+
 class BusinessPaymentMethodSerializer(serializers.ModelSerializer):
     class Meta:
         model = BusinessPaymentMethod
