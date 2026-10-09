@@ -467,6 +467,64 @@ le 9 octobre 2026 :
   sont jamais restaurées automatiquement.
 - Les invitations ne sont pas introduites dans ce lot.
 
+État de P1-A4.6 — fondations des invitations par e-mail, livré
+le 9 octobre 2026 :
+
+- Modèle `BusinessMemberInvitation` créé (migration
+  `businesses.0009`) : `public_id` opaque préfixé `MI`,
+  `business`, `email`/`normalized_email`, `title`, `status`
+  (`PENDING`, `ACCEPTED`, `DECLINED`, `REVOKED`, `EXPIRED`),
+  `token_hash` SHA-256 unique, `expires_at`, `invited_by`,
+  `accepted_by`, `member`, `acted_at`, `last_sent_at`,
+  `resend_count`, `created_at`, `updated_at`. Contraintes
+  d'unicité conditionnelles : une seule invitation `PENDING`
+  et une seule `EXPIRED` par `(business, normalized_email)` ;
+  index `(business, status, created_at)` et `normalized_email`.
+  Aucune permission n'est stockée dans l'invitation et aucune
+  propriété OWNER n'est attribuable par invitation.
+- Service `invite_member` : création transactionnelle
+  (`transaction.atomic` + `select_for_update` sur le Business,
+  l'acteur et les invitations concurrentes). Le jeton brut est
+  généré via `secrets.token_urlsafe(32)`, retourné une seule
+  fois à l'appelant et jamais persisté en clair (seul le hash
+  SHA-256 est stocké). L'adresse est normalisée
+  (`trim` + `lower`) avant toute comparaison. Une invitation
+  `PENDING` expirée est d'abord marquée `EXPIRED` avant la
+  création d'une nouvelle, et la contrainte conditionnelle
+  protège la course entre deux créations concurrentes.
+  L'envoi réel d'e-mail est reporté : aucun fournisseur n'est
+  appelé dans ce lot.
+- Règles de sécurité : seul l'OWNER actif ou un membre actif
+  avec `MANAGE_MEMBERS` explicite peut inviter ; aucun droit
+  implicite fondé sur le titre ou l'ancien rôle ; aucune
+  invitation sur un Business `SUSPENDED` ou `ARCHIVED` ;
+  isolation stricte entre entreprises ; aucune création de
+  `BusinessMember` ni de permission lors de l'envoi.
+- Blocage documenté — vérification de l'adresse Carri :
+  `CarriIdentity` ne persiste que `carri_subject` ; les flux
+  OIDC existants demandent le seul scope `openid` (web) ou ne
+  capturent que `sub` (mobile). Aucun claim `email` ni
+  `email_verified` n'est donc disponible côté ecommerce, et
+  Carri Account ne peut pas être modifié dans ce lot. Par
+  conséquent, l'acceptation d'invitation — qui exige de
+  comparer l'adresse Carri vérifiée du destinataire à
+  l'adresse de l'invitation — ne peut pas être autorisée de
+  manière fiable. Conformément à la contrainte du lot, les
+  endpoints d'acceptation/refus (`POST
+  .../member-invitations/{MI}/accept/` et `.../decline/`) ne
+  sont pas implémentés tant que le contrat Carri Account ne
+  garantit pas les claims `email` et `email_verified` avec le
+  scope `openid email`. Le renvoi et la révocation sont
+  également reportés au lot d'administration des invitations.
+- Différences avec Kisinet : Kisinet lie l'invitation à un
+  utilisateur local existant (`invited_user`) et envoie
+  l'e-mail via `transaction.on_commit` ; E-commerce référence
+  l'invitation par adresse e-mail normalisée sans identité
+  préexistante, car `CarriIdentity` est créé uniquement à
+  partir du `sub` OIDC lors de l'authentification. L'envoi
+  d'e-mail et la notification sont donc reportés jusqu'à ce
+  que le contrat de vérification d'adresse soit confirmé.
+
 1. **P1-A4.2 — Prérequis identité et modèles** : ajouter
    `BusinessMember.public_id`, les métadonnées de cycle de vie et le retrait
    logique, puis migration, backfill et tests. Le contrat e-mail Carri, la

@@ -117,3 +117,19 @@ L'attribution répétée est idempotente, la révocation répétée aussi (`204`
 Les mutations sont refusées sur un Business `SUSPENDED` ou `ARCHIVED`.
 Aucun membre ne peut s'attribuer de permission ; les droits implicites du
 propriétaire ne sont jamais modifiés.
+
+## Invitations de membres (fondations)
+
+`BusinessMemberInvitation` stocke une invitation par e-mail avant toute
+appartenance : `public_id` opaque `MI`, adresse normalisée, titre descriptif,
+statut `PENDING`/`ACCEPTED`/`DECLINED`/`REVOKED`/`EXPIRED`, hash SHA-256
+du jeton (le secret brut n'est jamais stocké), expiration, auteur et
+traçabilité. Une seule invitation `PENDING` (puis `EXPIRED`) existe par
+`(business, normalized_email)`. La création `invite_member` est
+transactionnelle et verrouillée ; elle exige l'OWNER actif ou
+`MANAGE_MEMBERS` explicite, un Business actif, et n'attribue aucune
+permission ni ne crée de membre. L'acceptation, le refus, le renvoi et la
+révocation sont reportés : `CarriIdentity` ne persiste que `carri_subject`
+et les flux OIDC existants ne demandent pas le scope `email`, donc aucune
+preuve d'adresse vérifiée n'est disponible tant que Carri Account ne
+garantit pas les claims `email` et `email_verified`.

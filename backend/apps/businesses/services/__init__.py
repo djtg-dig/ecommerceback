@@ -6,8 +6,8 @@ from django.utils import timezone
 
 from apps.common.choices import PaymentMethod
 
-from .identifiers import generate_business_public_id
-from .models import (
+from ..identifiers import generate_business_public_id
+from ..models import (
     Business,
     BusinessCategory,
     BusinessCategoryMembership,
@@ -15,7 +15,7 @@ from .models import (
     BusinessMemberPermission,
     BusinessPaymentMethod,
 )
-from .permissions import has_permission, validate_permission
+from ..permissions import has_permission, validate_permission
 
 MAX_PUBLIC_ID_ATTEMPTS = 5
 DEFAULT_PAYMENT_METHODS = (

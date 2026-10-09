@@ -3,11 +3,13 @@ import uuid
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
+from django.utils import timezone
 
 from apps.accounts.models import CarriIdentity
 from apps.common.choices import PaymentMethod
 
 from .identifiers import (
+    generate_business_member_invitation_public_id,
     generate_business_member_public_id,
     generate_business_payment_method_public_id,
     generate_business_public_id,
@@ -316,3 +318,97 @@ class BusinessMemberPermission(models.Model):
             raise ValidationError("Owners have all permissions by design.")
         if self.member and self.member.status != BusinessMember.Status.ACTIVE:
             raise ValidationError("Permissions can only be granted to active members.")
+
+
+class BusinessMemberInvitation(models.Model):
+    """Email invitation to join a Business, before any membership exists."""
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        ACCEPTED = "ACCEPTED", "Accepted"
+        DECLINED = "DECLINED", "Declined"
+        REVOKED = "REVOKED", "Revoked"
+        EXPIRED = "EXPIRED", "Expired"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    public_id = models.CharField(
+        max_length=12,
+        unique=True,
+        editable=False,
+        db_index=True,
+    )
+    business = models.ForeignKey(
+        Business,
+        on_delete=models.CASCADE,
+        related_name="member_invitations",
+    )
+    email = models.EmailField()
+    normalized_email = models.EmailField(db_index=True)
+    title = models.CharField(max_length=120, blank=True)
+    status = models.CharField(
+        max_length=10,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    token_hash = models.CharField(max_length=64, unique=True, editable=False)
+    expires_at = models.DateTimeField(db_index=True)
+    invited_by = models.ForeignKey(
+        CarriIdentity,
+        on_delete=models.PROTECT,
+        related_name="business_member_invitations_sent",
+    )
+    accepted_by = models.ForeignKey(
+        CarriIdentity,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="business_member_invitations_accepted",
+    )
+    member = models.ForeignKey(
+        BusinessMember,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="business_member_invitations",
+    )
+    acted_at = models.DateTimeField(null=True, blank=True)
+    last_sent_at = models.DateTimeField(null=True, blank=True)
+    resend_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["business", "normalized_email"],
+                condition=Q(status="PENDING"),
+                name="unique_pending_business_member_invitation",
+            ),
+            models.UniqueConstraint(
+                fields=["business", "normalized_email"],
+                condition=Q(status="EXPIRED"),
+                name="unique_expired_business_member_invitation",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["business", "status", "created_at"],
+                name="biz_member_invitation_idx",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.public_id:
+            self.public_id = generate_business_member_invitation_public_id()
+        self.normalized_email = self.normalize_email(self.email)
+        super().save(*args, **kwargs)
+
+    @staticmethod
+    def normalize_email(email):
+        return (email or "").strip().lower()
+
+    @property
+    def is_expired(self):
+        return self.expires_at <= timezone.now()
