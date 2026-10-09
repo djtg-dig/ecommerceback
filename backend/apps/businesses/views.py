@@ -3,8 +3,13 @@ from rest_framework import permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Business, BusinessCategory, BusinessPaymentMethod
-from .permissions import can_manage_business, can_view_members, membership_for
+from .models import (
+    Business,
+    BusinessCategory,
+    BusinessMemberPermission,
+    BusinessPaymentMethod,
+)
+from .permissions import can_manage_business, membership_for, require_permission
 from .serializers import (
     BusinessCreateSerializer,
     BusinessMemberSerializer,
@@ -54,12 +59,15 @@ class BusinessDetailView(APIView):
         return Response(BusinessSerializer(business).data)
 
     def patch(self, request, public_id):
-        business = self.get_object(request, public_id)
-        if not business:
+        business = Business.objects.filter(public_id=public_id).first()
+        if business is None:
             return Response({"detail": "Not found."}, status=404)
-
-        if not can_manage_business(membership_for(request.user, business)):
-            return Response({"detail": "Forbidden."}, status=403)
+        require_permission(
+            request.user,
+            business,
+            BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+            write=True,
+        )
 
         serializer = BusinessUpdateSerializer(
             business,
@@ -91,12 +99,14 @@ class BusinessDetailView(APIView):
 
 class BusinessMembersView(APIView):
     def get(self, request, public_id):
-        business = accessible(request.user).filter(public_id=public_id).first()
-        if not business:
+        business = Business.objects.filter(public_id=public_id).first()
+        if business is None:
             return Response({"detail": "Not found."}, status=404)
-
-        if not can_view_members(membership_for(request.user, business)):
-            return Response({"detail": "Forbidden."}, status=403)
+        require_permission(
+            request.user,
+            business,
+            BusinessMemberPermission.Permission.VIEW_MEMBERS,
+        )
 
         serializer = BusinessMemberSerializer(
             business.members.all(),
@@ -108,8 +118,21 @@ class BusinessMembersView(APIView):
 
 class BusinessPaymentMethodsView(APIView):
     serializer_class = BusinessPaymentMethodSerializer
+
     def get_business(self, request, public_id):
         return accessible(request.user).filter(public_id=public_id).first()
+
+    def get_authorized_business(self, request, public_id):
+        business = Business.objects.filter(public_id=public_id).first()
+        if business is None:
+            return None
+        require_permission(
+            request.user,
+            business,
+            BusinessMemberPermission.Permission.MANAGE_PAYMENT_METHODS,
+            write=True,
+        )
+        return business
 
     def get(self, request, public_id):
         business = self.get_business(request, public_id)
@@ -121,11 +144,9 @@ class BusinessPaymentMethodsView(APIView):
         return Response(BusinessPaymentMethodSerializer(methods, many=True).data)
 
     def post(self, request, public_id):
-        business = self.get_business(request, public_id)
-        if not business:
+        business = self.get_authorized_business(request, public_id)
+        if business is None:
             return Response({"detail": "Not found."}, status=404)
-        if not can_manage_business(membership_for(request.user, business)):
-            return Response({"detail": "Forbidden."}, status=403)
         serializer = BusinessPaymentMethodSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         return Response(BusinessPaymentMethodSerializer(serializer.save(business=business)).data, status=201)
@@ -149,11 +170,14 @@ class BusinessPaymentMethodDetailView(BusinessPaymentMethodsView):
         return Response(BusinessPaymentMethodSerializer(method).data)
 
     def patch(self, request, public_id, method_public_id):
-        business, method = self.get_object(request, public_id, method_public_id)
+        business = self.get_authorized_business(request, public_id)
+        method = (
+            business.payment_methods.filter(public_id=method_public_id).first()
+            if business
+            else None
+        )
         if not method:
             return Response({"detail": "Not found."}, status=404)
-        if not can_manage_business(membership_for(request.user, business)):
-            return Response({"detail": "Forbidden."}, status=403)
         serializer = BusinessPaymentMethodSerializer(method, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         return Response(BusinessPaymentMethodSerializer(serializer.save()).data)
@@ -175,6 +199,12 @@ _business_id = OpenApiParameter(
     str,
     OpenApiParameter.PATH,
     description="Identifiant public Business, format SH + 10 caractères.",
+)
+_payment_method_id = OpenApiParameter(
+    "method_public_id",
+    str,
+    OpenApiParameter.PATH,
+    description="Identifiant public BusinessPaymentMethod, format PM + 10 caractères.",
 )
 
 BusinessesView.get = extend_schema(
@@ -207,6 +237,42 @@ BusinessMembersView.get = extend_schema(
     parameters=[_business_id],
     responses={200: BusinessMemberSerializer(many=True), 403: None, 404: None},
 )(BusinessMembersView.get)
+BusinessPaymentMethodsView.get = extend_schema(
+    tags=["Business Payment Methods"],
+    operation_id="business_payment_method_list",
+    parameters=[_business_id],
+    responses={200: BusinessPaymentMethodSerializer(many=True), 404: None},
+)(BusinessPaymentMethodsView.get)
+BusinessPaymentMethodsView.post = extend_schema(
+    tags=["Business Payment Methods"],
+    operation_id="business_payment_method_create",
+    parameters=[_business_id],
+    request=BusinessPaymentMethodSerializer,
+    responses={
+        201: BusinessPaymentMethodSerializer,
+        400: None,
+        403: None,
+        404: None,
+    },
+)(BusinessPaymentMethodsView.post)
+BusinessPaymentMethodDetailView.get = extend_schema(
+    tags=["Business Payment Methods"],
+    operation_id="business_payment_method_retrieve",
+    parameters=[_business_id, _payment_method_id],
+    responses={200: BusinessPaymentMethodSerializer, 404: None},
+)(BusinessPaymentMethodDetailView.get)
+BusinessPaymentMethodDetailView.patch = extend_schema(
+    tags=["Business Payment Methods"],
+    operation_id="business_payment_method_update",
+    parameters=[_business_id, _payment_method_id],
+    request=BusinessPaymentMethodSerializer,
+    responses={
+        200: BusinessPaymentMethodSerializer,
+        400: None,
+        403: None,
+        404: None,
+    },
+)(BusinessPaymentMethodDetailView.patch)
 BusinessCategoriesView.get = extend_schema(
     tags=["Business Categories"],
     operation_id="business_category_list",

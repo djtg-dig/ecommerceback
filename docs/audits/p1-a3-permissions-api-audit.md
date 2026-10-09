@@ -44,18 +44,18 @@ L'audit réutilise exclusivement les permissions existantes :
 | GET | `/businesses/` | `BusinessesView`; projection ORM | `accessible`: membership ACTIVE | appartenance active, lecture administrative | conforme |
 | POST | `/businesses/` | `BusinessesView`; `create_business` | JWT ; crée son OWNER | aucune permission préalable | conforme |
 | GET | `/businesses/{SH}/` | `BusinessDetailView`; projection ORM | `accessible`: membership ACTIVE | appartenance active, lecture administrative | conforme |
-| PATCH | `/businesses/{SH}/` | `BusinessDetailView`; serializer, `replace_categories` | `can_manage_business` | `UPDATE_BUSINESS` | à migrer |
-| GET | `/businesses/{SH}/members/` | `BusinessMembersView`; projection ORM | `can_view_members` après `accessible` | `VIEW_MEMBERS` | à migrer |
+| PATCH | `/businesses/{SH}/` | `BusinessDetailView`; serializer, `replace_categories` | `require_permission(..., UPDATE_BUSINESS, write=True)` | `UPDATE_BUSINESS` | conforme — P1-A3.6 |
+| GET | `/businesses/{SH}/members/` | `BusinessMembersView`; projection ORM | `require_permission(..., VIEW_MEMBERS)` | `VIEW_MEMBERS` | conforme — P1-A3.6 |
 | GET | `/businesses/{SH}/payment-methods/` | `BusinessPaymentMethodsView`; projection ORM | membre actif ; `can_manage_business` révèle aussi les inactifs | permission de lecture absente | à clarifier |
-| POST | `/businesses/{SH}/payment-methods/` | `BusinessPaymentMethodsView`; serializer | `can_manage_business` | `MANAGE_PAYMENT_METHODS` | à migrer |
+| POST | `/businesses/{SH}/payment-methods/` | `BusinessPaymentMethodsView`; serializer | `require_permission(..., MANAGE_PAYMENT_METHODS, write=True)` | `MANAGE_PAYMENT_METHODS` | conforme — P1-A3.6 |
 | GET | `/businesses/{SH}/payment-methods/{PM}/` | `BusinessPaymentMethodDetailView`; projection ORM | membre actif ; `can_manage_business` pour un moyen inactif | permission de lecture absente | à clarifier |
-| PATCH | `/businesses/{SH}/payment-methods/{PM}/` | `BusinessPaymentMethodDetailView`; serializer | `can_manage_business` | `MANAGE_PAYMENT_METHODS` | à migrer |
+| PATCH | `/businesses/{SH}/payment-methods/{PM}/` | `BusinessPaymentMethodDetailView`; serializer | `require_permission(..., MANAGE_PAYMENT_METHODS, write=True)` | `MANAGE_PAYMENT_METHODS` | conforme — P1-A3.6 |
 | GET | `/business-categories/` | `BusinessCategoriesView`; projection ORM | public `AllowAny` | aucune, taxonomie publique | conforme |
 
 Les lectures liste/détail Business sont les informations administratives
 minimales qu'un membre actif doit pouvoir consulter. Elles ne donnent aucun
-droit métier. La migration de `BusinessMembersView` reste nécessaire pour
-obtenir les erreurs canoniques de `require_permission`.
+droit métier. `BusinessMembersView` exige désormais `VIEW_MEMBERS` et applique
+les erreurs canoniques du moteur centralisé.
 
 ### Catalog — 12 opérations
 
@@ -134,10 +134,10 @@ donnerait au vendeur des droits de référentiel non explicitement décidés.
 
 | Méthode | Chemin | Vue ; service | Contrôle actuel | Permission cible | Statut |
 |---|---|---|---|---|---|
-| GET | `/businesses/{SH}/receivables/` | `ReceivableListView`; queryset | membership ACTIVE direct | `VIEW_RECEIVABLES` | à migrer |
-| GET | `/businesses/{SH}/receivables/{RE}/` | `ReceivableDetailView`; queryset | membership ACTIVE direct | `VIEW_RECEIVABLES` | à migrer |
+| GET | `/businesses/{SH}/receivables/` | `ReceivableListView`; queryset | `require_permission(..., VIEW_RECEIVABLES)` | `VIEW_RECEIVABLES` | conforme — P1-A3.6 |
+| GET | `/businesses/{SH}/receivables/{RE}/` | `ReceivableDetailView`; queryset | `require_permission(..., VIEW_RECEIVABLES)` | `VIEW_RECEIVABLES` | conforme — P1-A3.6 |
 | PATCH | `/businesses/{SH}/receivables/{RE}/` | `ReceivableDetailView`; modèle | `require_permission(..., MANAGE_RECEIVABLES, write=True)` | `MANAGE_RECEIVABLES` | conforme — P1-A3.2 |
-| GET | `/businesses/{SH}/receivables/{RE}/payments/` | `ReceivablePaymentsView`; queryset | membership ACTIVE direct | `VIEW_RECEIVABLES` | à migrer |
+| GET | `/businesses/{SH}/receivables/{RE}/payments/` | `ReceivablePaymentsView`; queryset | `require_permission(..., VIEW_RECEIVABLES)` | `VIEW_RECEIVABLES` | conforme — P1-A3.6 |
 | POST | `/businesses/{SH}/receivables/{RE}/payments/` | `ReceivablePaymentsView`; `add_payment` | `require_permission(..., MANAGE_RECEIVABLES, write=True)` | `MANAGE_RECEIVABLES` | conforme — P1-A3.2 |
 
 ### Expenses — 12 opérations
@@ -182,23 +182,59 @@ donnerait au vendeur des droits de référentiel non explicitement décidés.
 
 | Statut | Opérations |
 |---|---:|
-| Conforme | 72 |
-| À migrer | 7 |
+| Conforme | 79 |
+| À migrer | 0 |
 | À clarifier | 7 |
 | **Total** | **86** |
+
+## P1-A3.6 — classement des opérations restantes
+
+### Opérations migrées avec les permissions existantes
+
+| Méthode et endpoint | Permission | Autorisation avant P1-A3.6 | Risque corrigé et décision |
+|---|---|---|---|
+| `PATCH /businesses/{SH}/` | `UPDATE_BUSINESS` | `can_manage_business` | Un contrôle transitoire masquait la permission attendue. Migration vers `require_permission(..., write=True)`. |
+| `GET /businesses/{SH}/members/` | `VIEW_MEMBERS` | `can_view_members` | La lecture des membres dépend maintenant exclusivement de la permission individuelle dédiée. |
+| `POST /businesses/{SH}/payment-methods/` | `MANAGE_PAYMENT_METHODS` | `can_manage_business` | `UPDATE_BUSINESS` accordait indirectement une capacité financière distincte. Migration vers la permission dédiée avec `write=True`. |
+| `PATCH /businesses/{SH}/payment-methods/{PM}/` | `MANAGE_PAYMENT_METHODS` | `can_manage_business` | Même risque de privilège indirect ; la mutation utilise maintenant le moteur centralisé et `write=True`. |
+| `GET /businesses/{SH}/receivables/` | `VIEW_RECEIVABLES` | appartenance active directe | Tout membre actif pouvait lire les créances. La permission individuelle dédiée est désormais exigée. |
+| `GET /businesses/{SH}/receivables/{RE}/` | `VIEW_RECEIVABLES` | appartenance active directe | La lecture détaillée sensible est désormais protégée et conserve l'isolation par Business. |
+| `GET /businesses/{SH}/receivables/{RE}/payments/` | `VIEW_RECEIVABLES` | appartenance active directe | L'historique des encaissements n'est plus exposé aux membres sans droit explicite. |
+
+Pour ces sept opérations, l'OWNER actif conserve l'accès total, une permission
+explicite est nécessaire aux autres membres, un membre suspendu reçoit 403 et
+un utilisateur sans appartenance reçoit 404. Les écritures sont refusées sur
+un Business suspendu ou archivé ; les lectures administratives autorisées par
+la politique P1-A2 restent disponibles aux membres habilités.
+
+### Opérations analysées nécessitant un arbitrage
+
+| Méthode et endpoint | Permission attendue | Autorisation actuelle | Risque et décision |
+|---|---|---|---|
+| `GET /businesses/{SH}/payment-methods/` | droit de lecture des moyens de paiement, absent | membre actif ; `can_manage_business` pour inclure les inactifs | `UPDATE_BUSINESS` reste indirectement lié à la visibilité des références inactives. Ne pas migrer vers une permission sans rapport ; arbitrage requis. |
+| `GET /businesses/{SH}/payment-methods/{PM}/` | même droit de lecture, absent | membre actif ; `can_manage_business` pour un moyen inactif | Même risque et même arbitrage que la liste. |
+| `GET /businesses/{SH}/customers/` | droit de lecture des clients, absent | appartenance active directe | Tous les membres actifs lisent le référentiel client. Arbitrage requis avant restriction. |
+| `POST /businesses/{SH}/customers/` | droit de gestion des clients, absent | appartenance active directe | Tout membre actif peut modifier le référentiel par création. Risque critique ; arbitrage requis. |
+| `GET /businesses/{SH}/sales/` | droit de lecture globale des ventes, absent | appartenance active directe | Tout membre actif lit l'historique commercial. Arbitrage requis. |
+| `GET /businesses/{SH}/sales/{SA}/` | même droit de lecture, absent | appartenance active directe | Exposition du détail d'une vente à tout membre actif. Arbitrage requis. |
+| `GET /businesses/{SH}/sales/{SA}/lines/` | même droit de lecture, absent | appartenance active directe | Exposition des lignes et prix historiques à tout membre actif. Arbitrage requis. |
+
+Ces sept opérations sont **clarifiées techniquement mais non arbitrées**. Leur
+comportement actuel est conservé afin de ne pas remplacer une décision métier
+manquante par `UPDATE_BUSINESS`, `USE_POS` ou une autre permission trop large.
 
 ## Contrôles legacy et dupliqués
 
 Quatre familles de contrôles doivent disparaître progressivement des vues :
 
-1. `can_manage_business`, helper transitoire fondé sur `UPDATE_BUSINESS`, protège
-   encore 5 opérations de configuration Business avec une permission trop
-   générale ou une politique de lecture à clarifier ;
+1. `can_manage_business`, helper transitoire fondé sur `UPDATE_BUSINESS`, reste
+   utilisé par les 2 lectures de moyens de paiement à clarifier pour décider si
+   les moyens inactifs sont visibles ;
 2. les recherches directes `members__identity` + `members__status="ACTIVE"`
    sont répétées dans presque chaque mixin et contournent `membership_for` /
    `require_permission` ;
-3. `can_view_members` porte la bonne permission mais n'utilise pas encore le
-   chemin canonique `require_permission`, notamment pour 403/404 ;
+3. les 7 opérations ambiguës restent volontairement hors du moteur granulaire
+   tant que leurs 4 permissions métier ne sont pas arbitrées ;
 4. chaque domaine fabrique manuellement ses réponses `Forbidden`/`Not found`,
    parfois en renvoyant 404 pour une permission absente et parfois 403.
 
@@ -214,24 +250,53 @@ réévaluent généralement pas `BusinessMemberPermission`. L'autorisation repos
 donc sur la vue appelante. Ce choix impose que chaque vue migre avant qu'un
 service sensible ne soit exposé par un nouveau point d'entrée.
 
-## Permissions manquantes — décisions requises
+## Permissions manquantes — quatre décisions requises
 
-Quatre capacités ne peuvent pas être exprimées précisément avec le registre
-actuel :
+### 1. Lecture des moyens de paiement
 
-1. **lecture des moyens de paiement actifs** : décider si elle reste un droit de
-   référence implicite pour tout membre actif ou si une permission
-   `VIEW_PAYMENT_METHODS` est nécessaire ;
-2. **lecture des clients** : une permission du type `VIEW_CUSTOMERS` éviterait
-   d'accorder `MANAGE_SALES` ou `USE_POS` à une consultation globale ;
-3. **gestion des clients** : une permission du type `MANAGE_CUSTOMERS` séparerait
-   le référentiel client de l'utilisation du POS ;
-4. **lecture globale des ventes** : une permission du type `VIEW_SALES` éviterait
-   qu'un vendeur `USE_POS` lise tout l'historique ou qu'un lecteur doive recevoir
-   `MANAGE_SALES`.
+Le POS et les flux financiers ont besoin de références actives, tandis que la
+consultation des références inactives relève de l'administration. Les endpoints
+concernés sont les deux `GET /payment-methods/` ci-dessus.
 
-Ces noms sont descriptifs pour la décision métier ; cet audit ne les ajoute ni
-au modèle ni à une migration.
+Options : conserver la lecture des références actives à tout membre actif ;
+ajouter une permission dédiée `VIEW_PAYMENT_METHODS` et réserver les inactives
+à `MANAGE_PAYMENT_METHODS` ; ou coupler artificiellement la lecture à `USE_POS`
+ou à une permission financière. La recommandation est une permission de lecture
+dédiée, avec `MANAGE_PAYMENT_METHODS` pour les références inactives. Elle exige
+une décision de registre, une migration et l'attribution explicite du nouveau
+droit. La décision bloque la centralisation des deux opérations.
+
+### 2. Lecture des clients
+
+`GET /customers/` expose le référentiel client complet. Les options sont de
+maintenir cette lecture pour tout membre actif, de la rattacher à `USE_POS`, ou
+d'ajouter un droit de lecture dédié. La recommandation est `VIEW_CUSTOMERS`, car
+un lecteur de clientèle n'a pas nécessairement le droit d'encaisser et un
+caissier n'a pas nécessairement besoin d'une extraction globale. Ce choix exige
+une migration et des attributions explicites ; il bloque une opération.
+
+### 3. Gestion des clients
+
+`POST /customers/` est nécessaire à certains parcours de vente, mais modifie un
+référentiel partagé. Les options sont de décider explicitement que `USE_POS`
+inclut la création, d'utiliser `MANAGE_SALES`, ou de créer une capacité dédiée.
+La recommandation est `MANAGE_CUSTOMERS`, sauf décision produit explicite de
+faire de la création client une fonction POS. Cette décision modifie le registre
+et les profils à attribuer ; elle bloque une opération et constitue le risque
+résiduel le plus élevé.
+
+### 4. Lecture globale des ventes
+
+`GET /sales/`, `GET /sales/{SA}/` et `GET /sales/{SA}/lines/` lisent l'historique
+commercial. Les options sont `USE_POS`, `MANAGE_SALES`, ou un droit de lecture
+dédié. La recommandation est `VIEW_SALES` : `USE_POS` serait trop large en
+lecture historique et `MANAGE_SALES` accorderait des mutations inutiles. Le
+nouveau droit implique une migration et des attributions explicites ; la
+décision bloque trois opérations.
+
+Les noms recommandés décrivent les capacités à arbitrer. P1-A3.6 ne les ajoute
+ni au modèle ni à une migration et ne réutilise pas `UPDATE_BUSINESS` comme
+permission générique.
 
 ## Analyse de sécurité
 
@@ -256,20 +321,20 @@ au modèle ni à une migration.
 3. **Business inactif mutable — corrigé pour P1-A3.2** : les neuf opérations
    migrées utilisent `write=True` pour leurs mutations ; `SUSPENDED` et
    `ARCHIVED` sont refusés.
-4. **Lecture sensible trop large — partiellement corrigée P1-A3.5** : les
-   projections financières et tous les rapports exigent désormais leur
-   permission dédiée. Tout membre actif peut encore lire clients, ventes et
-   créances indépendamment de ses permissions individuelles.
+4. **Lecture sensible trop large — partiellement corrigée P1-A3.6** : les
+   créances exigent désormais `VIEW_RECEIVABLES`. Tout membre actif peut encore
+   lire clients et ventes, faute de permissions de lecture arbitrées.
 
 ### Cohérence 403/404
 
 Le moteur P1-A2 définit : absence de membership = 404 ; membership existant mais
 non autorisé ou suspendu = 403. Les vues Sales/Receivables migrées en P1-A3.2 et
 Purchases/Expenses migrées en P1-A3.3, Catalog/Inventory migrées en P1-A3.4 et
-les projections financières migrées en P1-A3.5 appliquent désormais cette
+les projections financières migrées en P1-A3.5 ainsi que l'administration et
+les lectures Receivables migrées en P1-A3.6 appliquent désormais cette
 distinction en résolvant d'abord le Business puis en appelant
-`require_permission`. Les autres scopes directs et usages de
-`can_manage_business` restent à harmoniser.
+`require_permission`. Les 7 opérations en attente d'arbitrage restent à
+harmoniser.
 
 ## Matrice fonctionnelle condensée
 
@@ -382,11 +447,13 @@ explicite, les titres sans effet, le membre suspendu, l'isolation tenant et les
 Business suspendus ou archivés. Les calculs et agrégations métier sont inchangés
 et les mesures existantes confirment l'absence de N+1.
 
-### P1-A3.6 — Administration Business
+### P1-A3.6 — Administration Business et lectures Receivables — partiel
 
-Migrer membres, modification Business et gestion des moyens de paiement.
-Trancher la lecture des moyens de paiement et préserver les lectures
-administratives strictement nécessaires au statut d'un Business inactif.
+Les sept opérations disposant déjà d'une permission exacte ont été migrées :
+modification Business, lecture des membres, création/modification des moyens de
+paiement et trois lectures Receivables. Les quatre arbitrages détaillés plus
+haut restent nécessaires pour les deux lectures des moyens de paiement, les
+deux opérations Customer et les trois lectures Sales.
 
 ### P1-A3.7 — Harmonisation finale
 
@@ -401,9 +468,11 @@ serializers, et peut être validé indépendamment avant le suivant.
 ## Conclusion
 
 L'isolation par Business est globalement présente et aucun rôle ou titre legacy
-ne confère de privilège. Après P1-A3.5, 7 opérations ont encore une permission
-existante mais n'utilisent pas le moteur avec cette permission, et 7 nécessitent
-une décision de granularité. Les opérations Sales/Returns/Receivables critiques,
-les périmètres Purchases/Expenses et Catalog/Inventory ainsi que toutes les
-projections financières sont désormais centralisés ; la création de client et
-les autres lectures sensibles trop larges restent les priorités documentées.
+ne confère de privilège. Après P1-A3.6, aucune opération ne reste à migrer avec
+une permission existante : 79 opérations sont conformes. Les 7 autres sont
+classées et analysées, mais leurs 4 décisions de granularité restent ouvertes.
+La création de client, les lectures Customer/Sales et les lectures des moyens de
+paiement constituent les risques résiduels documentés. P1-A3 ne peut pas être
+déclaré entièrement terminé tant que ces arbitrages ne sont pas rendus et que
+les derniers contrôles directs ou transitoires correspondants ne sont pas
+remplacés par le moteur centralisé.

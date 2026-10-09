@@ -14,19 +14,19 @@ from .services import IdempotencyConflict, add_payment
 
 
 class ReceivableBaseView(APIView):
-    def get_business(self, request, business_public_id):
-        return Business.objects.filter(
-            public_id=business_public_id,
-            members__identity=request.user,
-            members__status="ACTIVE",
-        ).first()
-
     @staticmethod
     def not_found():
         return Response({"detail": "Not found."}, status=404)
 
-    def get_authorized_business(self, request, business_public_id, permission):
-        """Resolve a tenant and require one explicit permission for a mutation."""
+    def get_authorized_business(
+        self,
+        request,
+        business_public_id,
+        permission,
+        *,
+        write=False,
+    ):
+        """Resolve a tenant and require one explicit server-defined permission."""
         business = Business.objects.filter(public_id=business_public_id).first()
         if business is None:
             return None
@@ -35,14 +35,18 @@ class ReceivableBaseView(APIView):
             request.user,
             business,
             permission,
-            write=True,
+            write=write,
         )
         return business
 
 
 class ReceivableListView(ReceivableBaseView):
     def get(self, request, business_public_id):
-        business = self.get_business(request, business_public_id)
+        business = self.get_authorized_business(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_RECEIVABLES,
+        )
         if not business:
             return self.not_found()
         queryset = Receivable.objects.filter(business=business)
@@ -61,7 +65,11 @@ class ReceivableDetailView(ReceivableListView):
         return Receivable.objects.filter(business=business, public_id=receivable_public_id).first()
 
     def get(self, request, business_public_id, receivable_public_id):
-        business = self.get_business(request, business_public_id)
+        business = self.get_authorized_business(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_RECEIVABLES,
+        )
         receivable = self.get_receivable(business, receivable_public_id) if business else None
         return Response(R(receivable).data) if receivable else self.not_found()
 
@@ -70,6 +78,7 @@ class ReceivableDetailView(ReceivableListView):
             request,
             business_public_id,
             BusinessMemberPermission.Permission.MANAGE_RECEIVABLES,
+            write=True,
         )
         receivable = self.get_receivable(business, receivable_public_id) if business else None
         if not receivable:
@@ -83,7 +92,11 @@ class ReceivableDetailView(ReceivableListView):
 
 class ReceivablePaymentsView(ReceivableDetailView):
     def get(self, request, business_public_id, receivable_public_id):
-        business = self.get_business(request, business_public_id)
+        business = self.get_authorized_business(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_RECEIVABLES,
+        )
         receivable = self.get_receivable(business, receivable_public_id) if business else None
         return Response(P(receivable.payments.all(), many=True).data) if receivable else self.not_found()
 
@@ -92,6 +105,7 @@ class ReceivablePaymentsView(ReceivableDetailView):
             request,
             business_public_id,
             BusinessMemberPermission.Permission.MANAGE_RECEIVABLES,
+            write=True,
         )
         receivable = self.get_receivable(business, receivable_public_id) if business else None
         if not receivable:
@@ -120,10 +134,14 @@ ReceivableDetailView.http_method_names = ["get", "patch", "head", "options"]
 ReceivablePaymentsView.http_method_names = ["get", "post", "head", "options"]
 
 ReceivableListView.get = extend_schema(
-    tags=["Receivables"], operation_id="receivable_list", responses={200: R(many=True)}
+    tags=["Receivables"],
+    operation_id="receivable_list",
+    responses={200: R(many=True), 403: None, 404: None},
 )(ReceivableListView.get)
 ReceivableDetailView.get = extend_schema(
-    tags=["Receivables"], operation_id="receivable_retrieve", responses={200: R}
+    tags=["Receivables"],
+    operation_id="receivable_retrieve",
+    responses={200: R, 403: None, 404: None},
 )(ReceivableDetailView.get)
 ReceivableDetailView.patch = extend_schema(
     tags=["Receivables"],
@@ -132,7 +150,9 @@ ReceivableDetailView.patch = extend_schema(
     responses={200: R, 403: None, 404: None},
 )(ReceivableDetailView.patch)
 ReceivablePaymentsView.get = extend_schema(
-    tags=["Receivables"], operation_id="receivable_payment_list", responses={200: P(many=True)}
+    tags=["Receivables"],
+    operation_id="receivable_payment_list",
+    responses={200: P(many=True), 403: None, 404: None},
 )(ReceivablePaymentsView.get)
 ReceivablePaymentsView.post = extend_schema(
     tags=["Receivables"],

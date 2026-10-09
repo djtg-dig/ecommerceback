@@ -41,7 +41,7 @@ def business_with_members():
     grant_permission(
         owner_member,
         manager_member,
-        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+        BusinessMemberPermission.Permission.MANAGE_PAYMENT_METHODS,
     )
     return business, owner, manager, employee
 
