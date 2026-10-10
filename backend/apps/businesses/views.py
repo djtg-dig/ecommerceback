@@ -99,6 +99,30 @@ class InvitationPermissionDenied(PermissionDenied):
         )
 
 
+class InvitationBusinessNotFound(NotFound):
+    """Stable not-found error for an inaccessible invitation Business."""
+
+    def __init__(self):
+        super().__init__(
+            {
+                "code": "business_not_found",
+                "detail": "Entreprise introuvable.",
+            }
+        )
+
+
+class InvitationNotFound(NotFound):
+    """Stable not-found error for an invitation outside the current Business."""
+
+    def __init__(self):
+        super().__init__(
+            {
+                "code": "invitation_not_found",
+                "detail": "Invitation introuvable.",
+            }
+        )
+
+
 def _invitation_error(code, detail, status_code, *, field=None):
     payload = {"code": code, "detail": detail}
     if field:
@@ -613,7 +637,7 @@ class BusinessInvitationAdminMixin:
     def get_context(self, request, public_id, *, write=False):
         business = Business.objects.filter(public_id=public_id).first()
         if business is None:
-            raise NotFound("Not found.")
+            raise InvitationBusinessNotFound
         try:
             actor = require_permission(
                 request.user,
@@ -641,7 +665,7 @@ class BusinessInvitationAdminMixin:
             public_id=invitation_public_id,
         ).first()
         if invitation is None:
-            raise NotFound("Invitation introuvable.")
+            raise InvitationNotFound
         return invitation
 
     def delivery_error(self):
@@ -1113,9 +1137,12 @@ BusinessInvitationsView.get = extend_schema(
         200: _paginated_business_invitations,
         403: OpenApiResponse(
             response=_invitation_error_schema,
-            description="Membre connu sans MANAGE_MEMBERS.",
+            description="Permission insuffisante : code invitation_permission_denied.",
         ),
-        404: OpenApiResponse(description="Business inaccessible ou inexistant."),
+        404: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="Business inconnu ou hors du périmètre de l'identité : code business_not_found.",
+        ),
     },
     examples=[
         OpenApiExample(
@@ -1162,8 +1189,14 @@ BusinessInvitationsView.post = extend_schema(
             response=_invitation_error_schema,
             description="Adresse ou payload invalide.",
         ),
-        403: OpenApiResponse(description="Permission MANAGE_MEMBERS absente."),
-        404: OpenApiResponse(description="Business inaccessible ou inexistant."),
+        403: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="Permission insuffisante : code invitation_permission_denied.",
+        ),
+        404: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="Business inconnu : code business_not_found.",
+        ),
         409: OpenApiResponse(
             response=_invitation_error_schema,
             description="Invitation en attente, membre existant ou Business inactif.",
@@ -1204,8 +1237,14 @@ BusinessInvitationResendView.post = extend_schema(
     request=None,
     responses={
         200: BusinessMemberInvitationSerializer,
-        403: OpenApiResponse(description="Permission MANAGE_MEMBERS absente."),
-        404: OpenApiResponse(description="Business ou invitation inaccessible."),
+        403: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="Permission insuffisante : code invitation_permission_denied.",
+        ),
+        404: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="Business inconnu (business_not_found) ou invitation inconnue du tenant (invitation_not_found).",
+        ),
         409: OpenApiResponse(
             response=_invitation_error_schema,
             description="État de l'invitation incompatible ou Business inactif.",
@@ -1215,6 +1254,33 @@ BusinessInvitationResendView.post = extend_schema(
             description="Envoi d'e-mail indisponible.",
         ),
     },
+    examples=[
+        OpenApiExample(
+            "Invitation renvoyée",
+            value={
+                "public_id": "MI23456789AB",
+                "email": "membre@example.com",
+                "title": "Caissier",
+                "status": "PENDING",
+                "expires_at": "2026-10-17T10:00:00+01:00",
+                "last_sent_at": "2026-10-10T10:00:01+01:00",
+                "resend_count": 1,
+                "created_at": "2026-10-10T10:00:00+01:00",
+                "updated_at": "2026-10-10T10:00:01+01:00",
+            },
+            response_only=True,
+            status_codes=["200"],
+        ),
+        OpenApiExample(
+            "Invitation déjà traitée",
+            value={
+                "code": "invitation_cannot_be_resent",
+                "detail": "Seule une invitation en attente ou expirée peut être renvoyée.",
+            },
+            response_only=True,
+            status_codes=["409"],
+        ),
+    ],
 )(BusinessInvitationResendView.post)
 BusinessInvitationRevokeView.post = extend_schema(
     tags=["Business Invitations"],
@@ -1229,13 +1295,46 @@ BusinessInvitationRevokeView.post = extend_schema(
     request=None,
     responses={
         200: BusinessMemberInvitationSerializer,
-        403: OpenApiResponse(description="Permission MANAGE_MEMBERS absente."),
-        404: OpenApiResponse(description="Business ou invitation inaccessible."),
+        403: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="Permission insuffisante : code invitation_permission_denied.",
+        ),
+        404: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="Business inconnu (business_not_found) ou invitation inconnue du tenant (invitation_not_found).",
+        ),
         409: OpenApiResponse(
             response=_invitation_error_schema,
             description="Invitation non révoquable ou Business inactif.",
         ),
     },
+    examples=[
+        OpenApiExample(
+            "Invitation révoquée",
+            value={
+                "public_id": "MI23456789AB",
+                "email": "membre@example.com",
+                "title": "Caissier",
+                "status": "REVOKED",
+                "expires_at": "2026-10-17T10:00:00+01:00",
+                "last_sent_at": "2026-10-10T10:00:01+01:00",
+                "resend_count": 0,
+                "created_at": "2026-10-10T10:00:00+01:00",
+                "updated_at": "2026-10-10T10:05:00+01:00",
+            },
+            response_only=True,
+            status_codes=["200"],
+        ),
+        OpenApiExample(
+            "Invitation déjà révoquée",
+            value={
+                "code": "invitation_revoked",
+                "detail": "Cette invitation a été révoquée.",
+            },
+            response_only=True,
+            status_codes=["409"],
+        ),
+    ],
 )(BusinessInvitationRevokeView.post)
 BusinessInvitationAcceptView.post = extend_schema(
     tags=["Business Invitations"],

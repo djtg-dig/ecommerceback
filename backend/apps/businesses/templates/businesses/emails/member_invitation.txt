@@ -4,7 +4,7 @@ Vous êtes invité à rejoindre l'entreprise « {{ business_name }} » sur E-com
 
 Pour consulter et accepter cette invitation, utilisez le lien sécurisé suivant :
 
-{{ invitation_url }}
+{% autoescape off %}{{ invitation_url }}{% endautoescape %}
 
 Cette invitation est associée à l'adresse {{ invited_email }} et expire le {{ expires_at }}. Vous devrez vous authentifier avec cette même adresse vérifiée par Carri Account.
 

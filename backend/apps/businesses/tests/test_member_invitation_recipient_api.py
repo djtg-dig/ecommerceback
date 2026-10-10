@@ -353,6 +353,29 @@ def test_concurrent_acceptance_creates_exactly_one_membership():
     ).count() == 1
 
 
+@pytest.mark.parametrize("action", ["accept", "decline"])
+def test_unknown_invitation_has_a_stable_not_found_error(action):
+    business, owner, recipient, invitation, token = invitation_context(
+        f"unknown-{action}"
+    )
+
+    response = client_for(recipient).post(
+        f"/api/v1/me/business-invitations/MI2222222222/{action}/",
+        {"token": token},
+        format="json",
+    )
+
+    assert response.status_code == 404
+    assert response.data == {
+        "code": "invitation_not_found",
+        "detail": "Invitation introuvable.",
+    }
+    assert not BusinessMember.objects.filter(
+        business=business,
+        identity=recipient,
+    ).exists()
+
+
 def test_openapi_documents_recipient_actions_and_errors():
     from drf_spectacular.generators import SchemaGenerator
 

@@ -18,7 +18,9 @@
 | POST `/api/v1/businesses/{SH}/invitations/{MI}/resend/` | OWNER ou `MANAGE_MEMBERS` | rotation du jeton et nouvel envoi |
 | POST `/api/v1/businesses/{SH}/invitations/{MI}/revoke/` | OWNER ou `MANAGE_MEMBERS` | révocation transactionnelle |
 
-Un Business étranger répond 404. Le contrat détaillé des invitations, exemples
+Un Business inconnu répond `404 business_not_found`, une invitation inconnue du
+tenant `404 invitation_not_found`. Le lien e-mail transmis au destinataire porte
+`?invitation={MI}&token={jeton}`. Le contrat détaillé des invitations, exemples
 et erreurs stables est décrit dans [Business member invitations](business-invitations.md).
 
 La propriété administrative (`is_owner`), le titre professionnel (`title`) et les permissions individuelles sont indépendants. Un titre tel que Gérant, Gestionnaire ou Caissier n'accorde jamais de droit. L'OWNER actif dispose implicitement de toutes les permissions; les autres membres commencent sans permission et un membre SUSPENDED n'accède plus au Business. Le champ `role` reste exposé temporairement pour compatibilité legacy mais n'est plus une source d'autorisation. Durant la transition des endpoints métier, la mention historique « MANAGER » dans les tableaux ci-dessous désigne un membre auquel l'OWNER a explicitement attribué la permission transitoire requise, actuellement `UPDATE_BUSINESS`; le seul titre ou l'ancien rôle MANAGER ne suffit plus.

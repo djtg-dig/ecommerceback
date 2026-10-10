@@ -35,10 +35,11 @@ def invitation_base_url():
     return value
 
 
-def build_invitation_url(token):
-    """Append the invitation token without corrupting existing query params."""
+def build_invitation_url(invitation, token):
+    """Append the invitation public id and token without corrupting params."""
     parts = urlsplit(invitation_base_url())
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query["invitation"] = invitation.public_id
     query["token"] = token
     return urlunsplit(
         (
@@ -78,7 +79,7 @@ def send_invitation_email(invitation_id, token):
         "invited_email": invitation.email,
         "title": invitation.title,
         "expires_at": _format_expiration(invitation.expires_at),
-        "invitation_url": build_invitation_url(token),
+        "invitation_url": build_invitation_url(invitation, token),
     }
     subject = (
         f"Invitation à rejoindre {invitation.business.name} sur E-commerce"

@@ -98,8 +98,19 @@ def test_owner_creates_and_lists_compact_paginated_invitations(mailoutbox):
     assert "token" not in created.data
     assert len(mailoutbox) == 1
     assert business.name in mailoutbox[0].subject
-    assert "https://app.example.com/business-invitations?token=" in (
-        mailoutbox[0].body
+    delivered_link = next(
+        line.strip()
+        for line in mailoutbox[0].body.splitlines()
+        if line.strip().startswith("https://")
+    )
+    delivered_query = parse_qs(urlsplit(delivered_link).query)
+    assert urlsplit(delivered_link).path == "/business-invitations"
+    assert delivered_query["invitation"][0] == created.data["public_id"]
+    invitation = BusinessMemberInvitation.objects.get(
+        public_id=created.data["public_id"],
+    )
+    assert invitation.token_hash == hash_invitation_token(
+        delivered_query["token"][0]
     )
     assert mailoutbox[0].alternatives[0].mimetype == "text/html"
 
@@ -263,9 +274,13 @@ def test_resend_rotates_token_and_renews_expiration(mailoutbox):
     assert invitation.resend_count == 1
     assert len(mailoutbox) == 2
     new_url = next(
-        line for line in mailoutbox[-1].body.splitlines() if "?token=" in line
+        line
+        for line in mailoutbox[-1].body.splitlines()
+        if line.strip().startswith("https://")
     )
-    new_token = parse_qs(urlsplit(new_url).query)["token"][0]
+    new_query = parse_qs(urlsplit(new_url).query)
+    assert new_query["invitation"][0] == invitation.public_id
+    new_token = new_query["token"][0]
     assert invitation.token_hash == hash_invitation_token(new_token)
     assert old_hash not in str(response.data)
     assert new_token not in str(response.data)

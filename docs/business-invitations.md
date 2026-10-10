@@ -3,8 +3,10 @@
 Les endpoints administratifs utilisent un JWT E-commerce et les identifiants
 publics `SH` (Business) et `MI` (invitation). Ils exigent un OWNER actif ou un
 membre actif disposant explicitement de `MANAGE_MEMBERS`. Un ancien rôle ou un
-titre professionnel n'accorde aucun accès. Un tenant étranger répond `404`, un
-membre connu sans permission répond `403`.
+titre professionnel n'accorde aucun accès. Un Business inconnu répond `404`
+`business_not_found` ; une invitation inconnue du tenant répond `404`
+`invitation_not_found` ; un membre connu sans permission répond `403`
+`invitation_permission_denied`.
 
 Les réponses ne contiennent jamais `token`, `token_hash`, UUID interne ou
 permission future. Une invitation ne crée aucun `BusinessMember` et n'attribue
@@ -61,7 +63,7 @@ La réponse `201` utilise la projection compacte montrée ci-dessus. Erreurs :
 
 - `400 invalid_email` : « Veuillez saisir une adresse e-mail valide. » ;
 - `403 invitation_permission_denied` : permission insuffisante ;
-- `404` : entreprise inaccessible ;
+- `404 business_not_found` : entreprise inaccessible ;
 - `409 invitation_already_pending` : invitation ouverte existante ;
 - `409 business_member_already_exists` : membre actif ou suspendu existant ;
 - `409 business_inactive` : entreprise suspendue ou archivée ;
@@ -84,23 +86,97 @@ Exemple de conflit :
 
 Aucun corps JSON. Une invitation `PENDING` ou expirée reçoit un nouveau jeton,
 une nouvelle expiration et `resend_count` est incrémenté. L'ancien jeton est
-immédiatement invalidé. Codes : `200`, `403`, `404`, `409`, `503`.
+immédiatement invalidé : les liens déjà envoyés cessent de fonctionner.
+
+Effets de bord : un nouvel e-mail est programmé après le commit et un échec de
+livraison laisse l'invitation `PENDING` avec `last_sent_at` inchangé, prête pour
+un nouveau renvoi.
+
+Erreurs :
+
+- `403 invitation_permission_denied` ;
+- `404 business_not_found` / `404 invitation_not_found` ;
+- `409 invitation_cannot_be_resent` : invitation déjà acceptée ou refusée ;
+- `409 invitation_revoked` : invitation révoquée ;
+- `409 business_inactive` : entreprise suspendue ou archivée ;
+- `503 invitation_delivery_unavailable` : configuration ou fournisseur
+  d'e-mail indisponible.
+
+Codes de succès : `200`.
 
 ## Révoquer
 
 `POST /api/v1/businesses/{SH}/invitations/{MI}/revoke/`
 
 Aucun corps JSON. Seule une invitation effectivement `PENDING` est révoquée,
-sous transaction et verrou de ligne. Son jeton n'est plus utilisable. Codes :
-`200`, `403`, `404`, `409`.
+sous transaction et verrou de ligne. Son jeton n'est plus utilisable et une
+acceptation concurrente déjà engagée peut légitimement gagner la course : la
+réponse `200` reflète alors l'état `REVOKED` de l'invitation.
+
+Effets de bord : aucun `BusinessMember` n'est créé, aucune permission n'est
+modifiée, `acted_at` est renseigné.
+
+Erreurs :
+
+- `403 invitation_permission_denied` ;
+- `404 business_not_found` / `404 invitation_not_found` ;
+- `409 invitation_expired` : invitation expirée, demander un nouveau lien ;
+- `409 invitation_revoked` : invitation déjà révoquée ;
+- `409 invitation_cannot_be_revoked` : invitation déjà acceptée ou refusée ;
+- `409 business_inactive` : entreprise suspendue ou archivée.
+
+Codes de succès : `200`.
 
 ## Livraison et reprise
 
 `BUSINESS_MEMBER_INVITATION_URL` doit être une URL HTTP(S) absolue et
-`DEFAULT_FROM_EMAIL` doit être configuré. Le lien ajoute le jeton en paramètre
-`token` sans supprimer les paramètres existants. Les e-mails texte et HTML
-indiquent l'entreprise, le titre éventuel, l'adresse destinataire et
-l'expiration.
+`DEFAULT_FROM_EMAIL` doit être configuré. Si l'une des deux manque, rien n'est
+persisté et l'API répond `503 invitation_delivery_unavailable`.
+
+### Contrat du lien
+
+Le backend construit le lien en ajoutant deux paramètres de requête à l'URL
+configurée, sans supprimer ni réécrire les paramètres déjà présents :
+
+```text
+{BUSINESS_MEMBER_INVITATION_URL}?invitation={MI}&token={jeton}
+```
+
+- `invitation` : identifiant public de l'invitation (`MI` + 10 caractères), celui
+  qui apparaît dans la liste administrative et dans les réponses ;
+- `token` : secret à usage unique de 43 caractères (`token_urlsafe(32)`), stocké
+  uniquement sous forme de hash SHA-256 et jamais renvoyé par l'API ;
+- l'ordre des paramètres n'est pas contractuel : `invitation` puis `token` sont
+  ajoutés après les paramètres existants de l'URL configurée.
+
+Exemple :
+
+```text
+https://app.example.com/business-invitations?invitation=MI23456789AB&token=J_jWDcgm6ZcX3eN-xQA3wjHCYlAXYu35A8oIp8wNwYY
+```
+
+Le jeton n'est écrit dans aucun journal et n'apparaît dans aucune réponse JSON.
+La rotation du jeton lors d'un renvoi invalide immédiatement l'ancien lien.
+
+### Parcours frontend attendu
+
+1. Le destinataire ouvre le lien ; le frontend lit `invitation` et `token` dans
+   la query string et les conserve en mémoire (ou en état de route), sans les
+   écrire dans un journal ni dans une URL partagée.
+2. S'il n'a pas de session E-commerce valide, il déclenche l'authentification
+   Carri Account (`GET /api/v1/auth/carri/login/` puis
+   `GET /api/v1/auth/carri/callback/` et `POST /api/v1/auth/carri/handoff/consume/`).
+   Le jeton d'invitation n'est jamais transmis dans les paramètres OAuth : le
+   backend génère son propre `state`/`nonce`.
+3. Après la redirection OAuth, le frontend reprend l'invitation qu'il a conservée
+   localement : le retour Carri ne transporte aucune donnée d'invitation.
+4. Il appelle `POST /api/v1/me/business-invitations/{invitation}/accept/` ou
+   `.../decline/` avec `{"token": "..."}` dans le corps, jamais dans l'URL.
+5. Une réponse `401 carri_reauthentication_required` impose de recommencer
+   l'étape 2 puis de rejouer l'étape 4 avec le même couple `invitation`/`token`.
+
+Les e-mails texte et HTML indiquent l'entreprise, le titre éventuel, l'adresse
+destinataire et l'expiration.
 
 L'envoi est enregistré avec `transaction.on_commit`. `last_sent_at` n'est mis
 à jour qu'après succès du backend e-mail. Si le fournisseur échoue après le
@@ -126,6 +202,10 @@ Flutter ou de production n'est codé en dur.
 
 `POST /api/v1/me/business-invitations/{MI}/accept/`
 
+Permission : aucune permission Business n'est requise ; seul le JWT E-commerce du
+destinataire authentifié est exigé. Aucun paramètre de requête, le jeton circule
+exclusivement dans le corps.
+
 ```json
 {
   "token": "secret-recu-dans-le-lien"
@@ -139,10 +219,18 @@ dater de moins de 10 minutes. L'adresse normalisée doit correspondre exactement
 à l'invitation ; aucune adresse envoyée par le client n'est acceptée comme
 preuve.
 
-Après validation du MI, du hash du jeton, de l'identité et du Business actif,
-le service crée dans la même transaction un `BusinessMember` actif avec le
-titre proposé. Il reste non propriétaire et ne reçoit aucune permission. Le
-jeton est consommé par le passage à `ACCEPTED` et ne peut plus être réutilisé.
+Règles métier et effets de bord, dans une seule transaction :
+
+- le Business, l'identité Carri, l'invitation et toute appartenance existante
+  sont verrouillés avant décision ;
+- un `BusinessMember` `ACTIVE`, `role=EMPLOYEE`, non propriétaire, portant le
+  titre proposé, est créé ; aucune permission ne lui est attribuée ;
+- l'invitation passe `ACCEPTED` avec `accepted_by` et `acted_at` renseignés, ce
+  qui consomme le jeton ;
+- une appartenance déjà présente, même `REMOVED`, est refusée par `409` sans
+  réactivation silencieuse de l'ancienne ligne.
+
+Réponse `200` :
 
 ```json
 {
@@ -160,7 +248,7 @@ jeton est consommé par le passage à `ACCEPTED` et ne peut plus être réutilis
 
 `POST /api/v1/me/business-invitations/{MI}/decline/`
 
-Le corps et les contrôles d'identité sont identiques à l'acceptation. Le service
+Permission, corps et contrôles d'identité identiques à l'acceptation. Le service
 place l'invitation en `DECLINED`, renseigne `declined_by` et `acted_at`, sans
 créer de membre ni modifier de permission. Une invitation refusée ne peut plus
 être acceptée.
@@ -184,10 +272,31 @@ une liste `token` :
   inutilisable.
 
 Les services verrouillent le Business, l'identité, l'invitation et toute
-appartenance existante avec `transaction.atomic`/`select_for_update`. Une
-acceptation concurrente ne crée donc qu'un membre. L'ancien jeton devient
-invalide dès un renvoi. Le statut `REMOVED` reste terminal conformément au
-cycle de vie actuel : une réinvitation ne réactive pas silencieusement cette
-ligne et ne restaure jamais ses anciennes permissions. E-commerce ne possède
-actuellement ni abonnement ni quota de sièges ; aucune limite artificielle
-n'est appliquée dans ce flux.
+appartenance existante avec `transaction.atomic`/`select_for_update`. Les
+scénarios concurrents suivants sont couverts et ne produisent jamais de membre
+dupliqué ni de permission implicite :
+
+- **Deux acceptations simultanées** : la première crée le membre, la seconde
+  reçoit `409 invitation_already_processed` ; une seule ligne `BusinessMember`
+  existe (contrainte d'unicité `business` + `identity` en secours) ;
+- **Acceptation pendant une révocation** : les deux opérations verrouillent la
+  même ligne d'invitation ; selon l'ordre, l'acceptation gagne (membre créé,
+  invitation `ACCEPTED`, la révocation échoue avec `409`) ou la révocation gagne
+  (`410 invitation_revoked`) ; aucun état intermédiaire n'est exposé ;
+- **Acceptation pendant un renvoi** : si le renvoi gagne, le jeton présenté
+  devient caduc (`400 invalid_invitation_token`) car son hash a été remplacé ;
+- **Acceptation pendant une expiration** : l'invitation passe `EXPIRED` dans la
+  transaction et la réponse est `410 invitation_expired` ;
+- **Acceptation pendant une suspension du Business** : `409 business_inactive`,
+  aucun membre n'est créé ;
+- **Double soumission du formulaire** : la seconde soumission est refusée par
+  l'état terminal de l'invitation (`409`) ou par l'appartenance existante
+  (`409 business_member_already_exists`) ;
+- **Renvoi après un échec d'e-mail** : l'invitation reste `PENDING`, non marquée
+  comme envoyée, et le renvoi remet un jeton neuf en circulation.
+
+L'ancien jeton devient invalide dès un renvoi. Le statut `REMOVED` reste
+terminal conformément au cycle de vie actuel : une réinvitation ne réactive pas
+silencieusement cette ligne et ne restaure jamais ses anciennes permissions.
+E-commerce ne possède actuellement ni abonnement ni quota de sièges ; aucune
+limite artificielle n'est appliquée dans ce flux.
