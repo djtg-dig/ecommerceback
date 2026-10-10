@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="referrer" content="no-referrer">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Connexion sécurisée</title>
+  </head>
+  <body>
+    <form id="handoff-delivery" action="{{ delivery_url }}" method="post">
+      <input type="hidden" name="handoff" value="{{ handoff }}">
+      <input type="hidden" name="delivery_binding" value="{{ delivery_binding }}">
+      <noscript><button type="submit">Continuer</button></noscript>
+    </form>
+    <script nonce="{{ csp_nonce }}">document.getElementById("handoff-delivery").submit();</script>
+  </body>
+</html>

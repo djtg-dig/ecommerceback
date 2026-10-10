@@ -4,8 +4,8 @@
 |---|---|---|
 | GET `/api/v1/health/` | public | liveness `{"status":"ok"}` |
 | POST `/api/v1/auth/carri/mobile/exchange/` | public | échange preuve Android `{id_token,access_token,nonce}` contre JWT ecommerce |
-| GET `/api/v1/auth/carri/login/` | public | redirection Web OIDC |
-| GET `/api/v1/auth/carri/callback/` | public | valide callback et retourne un handoff |
+| GET `/api/v1/auth/carri/login/` | public | redirection Web OIDC; `delivery=nextjs` active la livraison POST vers l'URL serveur allowlistée |
+| GET `/api/v1/auth/carri/callback/` | public | valide callback et retourne le handoff JSON historique, ou une page de livraison POST Next.js |
 | POST `/api/v1/auth/carri/handoff/consume/` | HMAC `ecommerce-web`, handoff | consomme le handoff une fois et retourne JWT ecommerce |
 | GET `/api/v1/auth/me/` | JWT ecommerce | `{id,carri_subject}` |
 | GET `/api/v1/product-categories/` | public | catégories globales actives, à plat (`parent_code`, `level`) |
@@ -35,6 +35,71 @@ Le destinataire authentifié traite une invitation via
 adresse Carri vérifiée et une preuve OIDC récente de 10 minutes. Le contrat
 détaillé, les réponses et les codes stables figurent dans
 [Invitations Business](business-invitations.md).
+
+## Livraison de handoff Next.js
+
+Le navigateur démarre le flux avec `delivery=nextjs` et un
+`delivery_binding` aléatoire généré par Next.js. Django n'accepte pas de
+`redirect_uri` ou d'URL de livraison depuis le navigateur :
+`CARRI_ACCOUNT_WEB_HANDOFF_DELIVERY_URL` est la seule destination possible.
+Après le callback OIDC, Django répond `200 text/html` avec les en-têtes
+`Cache-Control: no-store`, `Referrer-Policy: no-referrer`, `X-Frame-Options:
+DENY`, CSP restrictive et un formulaire qui effectue :
+
+```http
+POST <CARRI_ACCOUNT_WEB_HANDOFF_DELIVERY_URL>
+Content-Type: application/x-www-form-urlencoded
+
+handoff=<opaque>&delivery_binding=<opaque>
+```
+
+Le handoff est opaque, valide au plus
+`CARRI_ACCOUNT_HANDOFF_TTL_SECONDS` (120 secondes par défaut, plafonné à 300
+secondes pour Next.js) et utilisable une fois. Il est transmis en formulaire
+`application/x-www-form-urlencoded` avec
+les champs `handoff` et `delivery_binding`, jamais dans l'URL. La page est
+`no-store`, `no-referrer`, `noindex`, protégée par CSP et ne contient aucun
+JWT. Le cookie Django du callback est `SameSite=Lax` (retour OAuth GET); le
+cookie transactionnel Next doit être `HttpOnly; Secure; SameSite=None` pour
+accompagner le POST inter-origines. Next.js compare le binding au cookie avant
+de transmettre le handoff côté serveur à `POST
+/api/v1/auth/carri/handoff/consume/` avec les six en-têtes Ecommerce-HMAC v1.
+Les handoffs Next sont liés au client `ecommerce-web`; les handoffs JSON
+historiques non liés restent compatibles.
+
+Exemple de traitement dans le récepteur Next.js (adapter les appels cookies et
+redirect à la version Next installée) :
+
+```ts
+const form = await request.formData();
+const handoff = String(form.get("handoff") ?? "");
+const binding = String(form.get("delivery_binding") ?? "");
+const transaction = await readHttpOnlyTransactionCookie();
+
+if (!handoff || !transaction || !constantTimeEqual(binding, transaction)) {
+  return Response.json(
+    { code: "handoff_delivery_binding_invalid", detail: "La liaison de livraison du handoff est invalide." },
+    { status: 400 },
+  );
+}
+
+const tokens = await consumeHandoffWithEcommerceHmac(handoff);
+// Stocker les JWT en cookies HttpOnly; ne jamais les renvoyer au navigateur.
+return redirectWithHttpOnlySession(tokens, "/");
+```
+
+Codes stables : `oauth_login_csrf_detected`,
+`oauth_state_invalid_or_expired`,
+`oauth_configuration_unavailable`, `oauth_provider_unavailable`,
+`oauth_authorization_denied`, `oauth_proof_invalid`, `oauth_callback_invalid`,
+`handoff_delivery_destination_not_allowed`,
+`handoff_delivery_binding_invalid`, `handoff_missing`, `handoff_invalid`,
+`handoff_expired`, `handoff_already_consumed` et
+`handoff_client_not_authorized`. Si le POST ou l'appel HMAC échoue, le récepteur
+Next.js affiche `handoff_delivery_failed` (« La livraison sécurisée de la
+connexion a échoué. Veuillez recommencer. ») sans inclure le handoff dans la
+réponse ou les journaux. Django ne peut pas confirmer la navigation ultérieure
+du navigateur; cette réponse relève du récepteur Next.js.
 
 ## Products and variants
 

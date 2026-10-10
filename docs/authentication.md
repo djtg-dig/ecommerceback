@@ -27,8 +27,43 @@ jusqu'à `exp`.
 ## Web
 
 Le backend demande `openid email`, utilise Authorization Code + PKCE, garde
-state hashé, nonce et verifier dans `OAuthLoginAttempt`, puis renvoie un handoff
+state hashé, nonce et verifier dans `OAuthLoginAttempt`, puis crée un handoff
 opaque et à usage unique. Les JWT ecommerce ne passent jamais dans une URL.
+
+Le contrat JSON historique du callback est conservé. Pour le BFF Next.js,
+`GET /api/v1/auth/carri/login/?delivery=nextjs&delivery_binding=<opaque>`
+sélectionne uniquement `CARRI_ACCOUNT_WEB_HANDOFF_DELIVERY_URL`, une URL fixe
+validée côté serveur. Il n'accepte aucune URL de destination navigateur. Après
+la validation OIDC, Django retourne une page `no-store` et `no-referrer` qui
+POSTe `handoff` et `delivery_binding` vers cette URL; aucun handoff ne figure
+dans la query string et aucun JWT n'est produit dans le HTML.
+
+Le formulaire transmet `application/x-www-form-urlencoded` avec les champs
+`handoff` et `delivery_binding`. Django pose pour le callback un cookie
+`HttpOnly`, `Secure` hors DEBUG et `SameSite=Lax` : le callback Carri Account
+revient en navigation principale GET, pour laquelle Lax est adapté. Le BFF
+Next.js doit créer avant la redirection son propre cookie de transaction
+`HttpOnly; Secure; SameSite=None` (HTTPS requis) afin qu'il accompagne le POST
+inter-origines. Le BFF compare le binding reçu à ce cookie, puis consomme le
+handoff côté serveur avec HMAC. Le binding est stocké hashé dans la tentative
+OAuth et lié au `state`; il ne peut donc pas être remplacé indépendamment.
+`Origin` et `Sec-Fetch-Site` peuvent compléter le contrôle côté BFF, sans
+remplacer le cookie transactionnel.
+
+Le handoff Next est lié au client applicatif `ecommerce-web`; il échoue fermé
+sans signature HMAC vérifiée de ce client. Configurer le mode HMAC `ENFORCE` en
+production. Le mode `DISABLED` refuse ces handoffs. Les handoffs historiques
+non liés conservent le callback JSON et leur comportement de consommation.
+
+La page est `Cache-Control: no-store`, `Referrer-Policy: no-referrer`,
+`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `noindex` et CSP
+restrictive. Le handoff est temporaire (120 secondes par défaut, plafonné à
+300 secondes pour Next.js), à usage unique, hashé en base, absent des URLs et
+des journaux. Aucun JWT n'est émis par
+le callback ni inclus dans le HTML. Django ne peut pas confirmer que le
+navigateur a achevé le POST inter-origines; en cas d'échec du POST ou de
+consommation, le récepteur Next affiche `handoff_delivery_failed` sans révéler
+le handoff.
 
 Discovery est obtenu via `{issuer}/.well-known/openid-configuration`; les endpoints et JWKS ne sont pas codés en dur. Validation : RS256, kid, signature, iss, aud, exp, iat, sub, nonce, nbf/azp si présents et at_hash.
 

@@ -62,17 +62,42 @@ class OAuthLoginAttempt(models.Model):
     nonce = models.CharField(max_length=255)
     code_verifier = models.CharField(max_length=128)
     redirect_uri = models.URLField(max_length=500)
+    browser_binding_hash = models.CharField(max_length=64, blank=True, default="", editable=False)
+    handoff_delivery_url = models.URLField(max_length=500, blank=True, default="")
+    handoff_delivery_binding_hash = models.CharField(max_length=64, blank=True, default="", editable=False)
     expires_at = models.DateTimeField()
     consumed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     @classmethod
-    def create(cls, *, state, nonce, code_verifier, redirect_uri, lifetime_seconds=600):
+    def create(
+        cls,
+        *,
+        state,
+        nonce,
+        code_verifier,
+        redirect_uri,
+        browser_binding="",
+        handoff_delivery_url="",
+        handoff_delivery_binding="",
+        lifetime_seconds=600,
+    ):
         return cls.objects.create(
             state_hash=hashlib.sha256(state.encode()).hexdigest(),
             nonce=nonce,
             code_verifier=code_verifier,
             redirect_uri=redirect_uri,
+            browser_binding_hash=(
+                hashlib.sha256(browser_binding.encode()).hexdigest()
+                if browser_binding
+                else ""
+            ),
+            handoff_delivery_url=handoff_delivery_url,
+            handoff_delivery_binding_hash=(
+                hashlib.sha256(handoff_delivery_binding.encode()).hexdigest()
+                if handoff_delivery_binding
+                else ""
+            ),
             expires_at=timezone.now() + timedelta(seconds=lifetime_seconds),
         )
 
@@ -90,16 +115,18 @@ class IDTokenReplay(models.Model):
 class OAuthHandoff(models.Model):
     token_hash = models.CharField(max_length=64, unique=True, editable=False)
     identity = models.ForeignKey(CarriIdentity, on_delete=models.CASCADE, related_name="handoffs")
+    consumer_client_id = models.CharField(max_length=128, blank=True, default="")
     expires_at = models.DateTimeField()
     consumed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     @classmethod
-    def create_for(cls, identity, lifetime_seconds=120):
+    def create_for(cls, identity, lifetime_seconds=120, consumer_client_id=""):
         token = secrets.token_urlsafe(32)
         cls.objects.create(
             token_hash=hashlib.sha256(token.encode()).hexdigest(),
             identity=identity,
+            consumer_client_id=consumer_client_id,
             expires_at=timezone.now() + timedelta(seconds=lifetime_seconds),
         )
         return token

@@ -51,6 +51,31 @@ def test_the_jwt_scheme_is_still_published_alone(client):
     }
 
 
+def test_oauth_callback_documents_json_and_html_delivery_responses(client):
+    schema = yaml.safe_load(client.get(reverse("openapi-schema")).content)
+    callback = schema["paths"]["/api/v1/auth/carri/callback/"]["get"]
+    content = callback["responses"]["200"]["content"]
+    response_schema = content["application/json"]["schema"]
+    if "$ref" in response_schema:
+        name = response_schema["$ref"].rsplit("/", 1)[-1]
+        response_schema = schema["components"]["schemas"][name]
+
+    assert "application/json" in content
+    assert "text/html" in content
+    assert response_schema["properties"]["handoff"]["type"] == "string"
+
+
+def test_handoff_errors_document_stable_codes_and_client_binding(client):
+    schema = yaml.safe_load(client.get(reverse("openapi-schema")).content)
+    consume = schema["paths"]["/api/v1/auth/carri/handoff/consume/"]["post"]
+    errors = consume["responses"]["403"]["content"]["application/json"]["schema"]
+    if "$ref" in errors:
+        name = errors["$ref"].rsplit("/", 1)[-1]
+        errors = schema["components"]["schemas"][name]
+
+    assert {"code", "detail"} <= set(errors["properties"])
+
+
 def test_the_combined_requirement_shape_is_valid_openapi(client):
     """JWT and HMAC together must be one requirement object, never two.
 

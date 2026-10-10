@@ -21,11 +21,14 @@ from .testing import (
     TEST_SECRET,
     bff_headers,
     ensure_test_client,
+    signed_headers,
     wsgi_headers,
 )
 
 HANDOFF = "/api/v1/auth/carri/handoff/consume/"
 CLIENT_ID = PROVISIONED_CLIENT_ID
+OTHER_CLIENT_ID = "other-bff"
+OTHER_SECRET = "other-test-only-hmac-secret"
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -45,7 +48,8 @@ def bff_settings():
                 "current": TEST_SECRET,
                 "previous": TEST_PREVIOUS_SECRET,
                 "previous_expires_at": "9999999999",
-            }
+            },
+            OTHER_CLIENT_ID: {"current": OTHER_SECRET},
         },
         ECOMMERCE_HMAC_MAX_CLOCK_SKEW_SECONDS=120,
         ECOMMERCE_HMAC_NONCE_TTL_SECONDS=900,
@@ -81,6 +85,16 @@ def handoff():
         carri_subject="bff-test-subject", verified_email="bff@example.com"
     )
     return OAuthHandoff.create_for(identity)
+
+
+@pytest.fixture
+def web_handoff():
+    """A one-use handoff explicitly reserved for the confidential Web BFF."""
+
+    identity = CarriIdentity.objects.create(
+        carri_subject="web-bff-bound-subject", verified_email="web-bff@example.com"
+    )
+    return OAuthHandoff.create_for(identity, consumer_client_id=CLIENT_ID)
 
 
 class TestProvisioning:
@@ -146,7 +160,10 @@ class TestBffActivation:
 
         assert response.status_code == 200
 
-    def test_enforce_mode_rejects_the_unsigned_bff_route(self, client, handoff, bff_settings):
+    def test_enforce_mode_rejects_the_unsigned_bff_route(self, client, bff_settings):
+        identity = CarriIdentity.objects.create(carri_subject="unsigned-enforced-handoff")
+        handoff = OAuthHandoff.create_for(identity, consumer_client_id=CLIENT_ID)
+
         response = consume(client, body=handoff)
 
         assert response.status_code == 401
@@ -157,79 +174,96 @@ class TestBffActivation:
             ),
         }
 
-    def test_enforce_mode_accepts_a_signed_bff_request(self, client, handoff, bff_settings):
-        body = json.dumps({"handoff": handoff})
+    def test_enforce_mode_accepts_a_signed_bff_request(self, client, web_handoff, bff_settings):
+        body = json.dumps({"handoff": web_handoff})
         headers = bff_headers(method="POST", path=HANDOFF, body=body.encode())
 
-        response = consume(client, body=handoff, headers=headers)
+        response = consume(client, body=web_handoff, headers=headers)
 
         assert response.status_code == 200
         assert response.json()["access"]
         assert response.json()["refresh"]
 
+    def test_enforce_mode_preserves_unsigned_legacy_handoffs(self, client, handoff, bff_settings):
+        response = consume(client, body=handoff)
+
+        assert response.status_code == 200
+        assert response.json()["access"]
+
+    def test_disabled_mode_rejects_unsigned_next_delivery_handoffs(self, client):
+        identity = CarriIdentity.objects.create(carri_subject="disabled-bound-handoff")
+        handoff = OAuthHandoff.create_for(identity, consumer_client_id=CLIENT_ID)
+
+        with override_settings(ECOMMERCE_HMAC_MODE="DISABLED"):
+            response = consume(client, body=handoff)
+
+        assert response.status_code == 403
+        assert response.json()["code"] == "handoff_client_not_authorized"
+        assert OAuthHandoff.objects.get(identity=identity).consumed_at is None
+
 
 class TestBffSignature:
     """A signed BFF request must behave exactly like the contract states."""
 
-    def test_a_missing_signature_is_refused(self, client, handoff, bff_settings):
+    def test_a_missing_signature_is_refused(self, client, web_handoff, bff_settings):
         response = client.post(
-            HANDOFF, data=json.dumps({"handoff": handoff}), content_type="application/json"
+            HANDOFF, data=json.dumps({"handoff": web_handoff}), content_type="application/json"
         )
 
         assert response.json()["code"] == "client_signature_required"
 
-    def test_a_wrong_signature_is_refused(self, client, handoff, bff_settings):
-        body = json.dumps({"handoff": handoff})
+    def test_a_wrong_signature_is_refused(self, client, web_handoff, bff_settings):
+        body = json.dumps({"handoff": web_handoff})
         headers = bff_headers(
             method="POST", path=HANDOFF, body=body.encode(), signature="0" * 64
         )
 
-        response = consume(client, body=handoff, headers=headers)
+        response = consume(client, body=web_handoff, headers=headers)
 
         assert response.status_code == 401
         assert response.json()["code"] == "client_signature_invalid"
 
-    def test_a_wrong_secret_is_refused(self, client, handoff, bff_settings):
-        body = json.dumps({"handoff": handoff})
+    def test_a_wrong_secret_is_refused(self, client, web_handoff, bff_settings):
+        body = json.dumps({"handoff": web_handoff})
         headers = bff_headers(
             method="POST", path=HANDOFF, body=body.encode(), secret="un-autre-secret"
         )
 
-        response = consume(client, body=handoff, headers=headers)
+        response = consume(client, body=web_handoff, headers=headers)
 
         assert response.json()["code"] == "client_signature_invalid"
 
-    def test_a_disabled_client_is_refused(self, client, handoff, web_client):
+    def test_a_disabled_client_is_refused(self, client, web_handoff, web_client):
         web_client = ApiClient.objects.get(client_id=CLIENT_ID)
         web_client.is_active = False
         web_client.save(update_fields=["is_active"])
 
-        body = json.dumps({"handoff": handoff})
+        body = json.dumps({"handoff": web_handoff})
         response = consume(
             client,
-            body=handoff,
+            body=web_handoff,
             headers=bff_headers(method="POST", path=HANDOFF, body=body.encode()),
         )
 
         assert response.json()["code"] == "client_key_revoked"
 
-    def test_a_replayed_nonce_is_refused(self, client, handoff, bff_settings):
-        body = json.dumps({"handoff": handoff})
+    def test_a_replayed_nonce_is_refused(self, client, web_handoff, bff_settings):
+        body = json.dumps({"handoff": web_handoff})
         headers = bff_headers(
             method="POST", path=HANDOFF, body=body.encode(), nonce="nonce-bff"
         )
 
-        first = consume(client, body=handoff, headers=headers)
-        second = consume(client, body=handoff, headers=headers)
+        first = consume(client, body=web_handoff, headers=headers)
+        second = consume(client, body=web_handoff, headers=headers)
 
         assert first.status_code == 200
         assert second.status_code == 401
         assert second.json()["code"] == "client_request_replayed"
 
-    def test_an_expired_clock_is_refused(self, client, handoff, bff_settings):
+    def test_an_expired_clock_is_refused(self, client, web_handoff, bff_settings):
         import time
 
-        body = json.dumps({"handoff": handoff})
+        body = json.dumps({"handoff": web_handoff})
         headers = bff_headers(
             method="POST",
             path=HANDOFF,
@@ -237,14 +271,14 @@ class TestBffSignature:
             timestamp=str(int(time.time()) - 121),
         )
 
-        response = consume(client, body=handoff, headers=headers)
+        response = consume(client, body=web_handoff, headers=headers)
 
         assert response.json()["code"] == "client_signature_expired"
 
     def test_the_previous_secret_is_accepted_during_a_rotation(
-        self, client, handoff, bff_settings
+        self, client, web_handoff, bff_settings
     ):
-        body = json.dumps({"handoff": handoff})
+        body = json.dumps({"handoff": web_handoff})
         headers = bff_headers(
             method="POST",
             path=HANDOFF,
@@ -253,15 +287,15 @@ class TestBffSignature:
             nonce="nonce-rotation",
         )
 
-        response = consume(client, body=handoff, headers=headers)
+        response = consume(client, body=web_handoff, headers=headers)
 
         assert response.status_code == 200
 
-    def test_a_tampered_body_is_refused(self, client, handoff, bff_settings):
-        body = json.dumps({"handoff": handoff})
+    def test_a_tampered_body_is_refused(self, client, web_handoff, bff_settings):
+        body = json.dumps({"handoff": web_handoff})
         headers = bff_headers(method="POST", path=HANDOFF, body=b"{}")
 
-        tampered = json.dumps({"handoff": handoff, "extra": "field"})
+        tampered = json.dumps({"handoff": web_handoff, "extra": "field"})
         response = client.post(
             HANDOFF,
             data=tampered,
@@ -272,17 +306,77 @@ class TestBffSignature:
         assert response.status_code == 400
         assert response.json()["code"] == "client_body_hash_mismatch"
 
-    def test_the_signature_is_bound_to_the_route(self, client, handoff, bff_settings):
+    def test_the_signature_is_bound_to_the_route(self, client, web_handoff, bff_settings):
         """A signature over another path never authorises the BFF route."""
 
-        body = json.dumps({"handoff": handoff})
+        body = json.dumps({"handoff": web_handoff})
         headers = bff_headers(
             method="POST", path="/api/v1/auth/carri/handoff/other/", body=body.encode()
         )
 
-        response = consume(client, body=handoff, headers=headers)
+        response = consume(client, body=web_handoff, headers=headers)
 
         assert response.json()["code"] == "client_signature_invalid"
+
+    def test_a_next_delivery_handoff_is_bound_to_ecommerce_web(self, client, bff_settings):
+        ApiClient.objects.create(
+            name="Other BFF",
+            client_id=OTHER_CLIENT_ID,
+            client_type=ApiClient.ClientType.INTERNAL_SERVICE,
+            auth_method=ApiClient.AuthMethod.HMAC,
+        )
+        identity = CarriIdentity.objects.create(carri_subject="bound-handoff")
+        handoff = OAuthHandoff.create_for(
+            identity, consumer_client_id=CLIENT_ID
+        )
+        body = json.dumps({"handoff": handoff})
+        headers = signed_headers(
+            method="POST",
+            path=HANDOFF,
+            body=body.encode(),
+            client_id=OTHER_CLIENT_ID,
+            secret=OTHER_SECRET,
+        )
+
+        response = consume(client, body=handoff, headers=headers)
+
+        assert response.status_code == 403
+        assert response.json()["code"] == "handoff_client_not_authorized"
+        assert OAuthHandoff.objects.get(identity=identity).consumed_at is None
+
+    def test_a_bound_handoff_is_consumed_once_only_by_its_web_client(
+        self, client, bff_settings
+    ):
+        identity = CarriIdentity.objects.create(carri_subject="single-use-bound-handoff")
+        handoff = OAuthHandoff.create_for(identity, consumer_client_id=CLIENT_ID)
+        body = json.dumps({"handoff": handoff})
+        headers = bff_headers(method="POST", path=HANDOFF, body=body.encode())
+
+        first = consume(client, body=handoff, headers=headers)
+        replay_body = json.dumps({"handoff": handoff})
+        replay_headers = bff_headers(
+            method="POST", path=HANDOFF, body=replay_body.encode(), nonce="bound-replay"
+        )
+        replay = consume(client, body=handoff, headers=replay_headers)
+
+        assert first.status_code == 200
+        assert first.json()["access"] and first.json()["refresh"]
+        assert replay.status_code == 400
+        assert replay.json()["code"] == "handoff_already_consumed"
+
+    def test_an_expired_bound_handoff_cannot_be_consumed(self, client, bff_settings):
+        identity = CarriIdentity.objects.create(carri_subject="expired-bound-handoff")
+        handoff = OAuthHandoff.create_for(
+            identity, lifetime_seconds=-1, consumer_client_id=CLIENT_ID
+        )
+        body = json.dumps({"handoff": handoff})
+        headers = bff_headers(method="POST", path=HANDOFF, body=body.encode())
+
+        response = consume(client, body=handoff, headers=headers)
+
+        assert response.status_code == 400
+        assert response.json()["code"] == "handoff_expired"
+        assert OAuthHandoff.objects.get(identity=identity).consumed_at is None
 
 
 class TestAndroidRoutesStayOpen:
@@ -331,10 +425,12 @@ class TestAndroidRoutesStayOpen:
     def test_the_health_route_stays_public(self, client, bff_settings):
         assert client.get("/api/v1/health/").status_code == 200
 
-    def test_a_platform_header_never_replaces_a_signature(self, client, handoff, bff_settings):
+    def test_a_platform_header_never_replaces_a_signature(
+        self, client, web_handoff, bff_settings
+    ):
         response = client.post(
             HANDOFF,
-            data=json.dumps({"handoff": handoff}),
+            data=json.dumps({"handoff": web_handoff}),
             content_type="application/json",
             HTTP_USER_AGENT="EcommerceAndroid/1.0",
             HTTP_ORIGIN="https://app.example.com",
@@ -347,29 +443,29 @@ class TestAndroidRoutesStayOpen:
 class TestNoSecretExposure:
     """The secret never reaches a response body or a log line."""
 
-    def test_no_secret_in_a_successful_response(self, client, handoff, bff_settings):
-        body = json.dumps({"handoff": handoff})
+    def test_no_secret_in_a_successful_response(self, client, web_handoff, bff_settings):
+        body = json.dumps({"handoff": web_handoff})
         headers = bff_headers(method="POST", path=HANDOFF, body=body.encode())
 
-        response = consume(client, body=handoff, headers=headers)
+        response = consume(client, body=web_handoff, headers=headers)
 
         assert TEST_SECRET not in response.content.decode()
 
-    def test_no_secret_in_a_rejected_response(self, client, handoff, bff_settings):
-        body = json.dumps({"handoff": handoff})
+    def test_no_secret_in_a_rejected_response(self, client, web_handoff, bff_settings):
+        body = json.dumps({"handoff": web_handoff})
         headers = bff_headers(
             method="POST", path=HANDOFF, body=body.encode(), signature="0" * 64
         )
 
-        response = consume(client, body=handoff, headers=headers)
+        response = consume(client, body=web_handoff, headers=headers)
 
         assert TEST_SECRET not in response.content.decode()
 
-    def test_no_secret_in_the_logs(self, client, handoff, bff_settings, caplog):
-        body = json.dumps({"handoff": handoff})
+    def test_no_secret_in_the_logs(self, client, web_handoff, bff_settings, caplog):
+        body = json.dumps({"handoff": web_handoff})
         headers = bff_headers(method="POST", path=HANDOFF, body=body.encode())
 
-        consume(client, body=handoff, headers=headers)
+        consume(client, body=web_handoff, headers=headers)
 
         assert TEST_SECRET not in caplog.text
         assert TEST_PREVIOUS_SECRET not in caplog.text

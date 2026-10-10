@@ -5,12 +5,14 @@ the user. It never replaces ``EcommerceJWTAuthentication`` nor the business
 permission engine: a valid signature only proves that the request comes from an
 application holding the shared secret.
 
-Route policy is a pure function of the method and URL path. Client-declared
-hints such as ``User-Agent`` or ``X-Client-Type`` are never consulted, so a
-client cannot escape HMAC by claiming to be a mobile application. Mobile
-compatibility comes from *separate endpoints*, not from a bypass flag.
+Route policy starts from a server-side method/path allow-list. The handoff
+consumer additionally preserves legacy unbound handoffs while requiring HMAC
+for records bound to the Web client. Client-declared platform hints are never
+consulted. Mobile compatibility comes from separate endpoints, not bypass flags.
 """
 
+import hashlib
+import json
 import logging
 
 from django.conf import settings
@@ -94,8 +96,8 @@ class EcommerceClientHMACMiddleware:
     def requires_hmac(self, request):
         """Return whether this route requires an application signature.
 
-        The decision uses only the method and path. Relying on a
-        client-declared platform would let any caller opt out of HMAC.
+        The configured allow-list is server-owned. Handoff consumption makes a
+        further decision from the stored receiver binding, never a client hint.
         """
 
         if self.mode == Mode.DISABLED:
@@ -108,8 +110,42 @@ class EcommerceClientHMACMiddleware:
         path = request.path_info or request.path or "/"
 
         if self._matches(path, self.protected_prefixes):
+            if (
+                method == "POST"
+                and path == "/api/v1/auth/carri/handoff/consume/"
+                and not self._handoff_requires_hmac(request)
+            ):
+                return False
             return True
         return False
+
+    def _handoff_requires_hmac(self, request):
+        """Keep the legacy JSON handoff usable; bind new Web handoffs to HMAC."""
+
+        try:
+            content_length = int(request.META.get("CONTENT_LENGTH") or 0)
+        except (TypeError, ValueError):
+            return True
+        if content_length > self.max_body_bytes:
+            return True
+        try:
+            if request.content_type == "application/json":
+                payload = json.loads(request.body)
+            elif request.content_type == "application/x-www-form-urlencoded":
+                payload = request.POST
+            else:
+                return True
+            token = payload.get("handoff", "")
+            if not isinstance(token, str) or not token:
+                return True
+            from apps.accounts.models import OAuthHandoff
+
+            handoff = OAuthHandoff.objects.only("consumer_client_id").filter(
+                token_hash=hashlib.sha256(token.encode()).hexdigest()
+            ).first()
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError):
+            return True
+        return handoff is None or bool(handoff.consumer_client_id)
 
     def _matches(self, path, prefixes):
         return any(path.startswith(prefix) for prefix in prefixes)

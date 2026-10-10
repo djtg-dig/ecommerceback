@@ -190,9 +190,10 @@ le refuse, car un secret partage embarque dans une application est extractible.
 | `OBSERVATION` | verification et journalisation sans blocage. Ce mode n'est pas une protection : il doit etre presente comme une phase de mesure |
 | `ENFORCE` | les routes protegees exigent une signature complete et valide |
 
-La politique de routes depend **uniquement** de la methode et du chemin. Un
-en-tete declare par le client (`User-Agent`, `X-Client-Type`, ...) n'est jamais
-consulte : aucun appelant ne peut echapper a HMAC en se declarant mobile.
+La politique HMAC part d'une liste serveur de méthodes et chemins. Pour la
+consommation du handoff, le middleware lit aussi le destinataire stocké côté
+serveur : les handoffs liés à Next exigent toujours HMAC, sans se fier à un
+en-tête déclaré par le client (`User-Agent`, `X-Client-Type`, ...).
 
 ## Routes
 
@@ -204,7 +205,7 @@ une route Android ou une route partagee.
 
 | Operation | Politique | Motif |
 |---|---|---|
-| `POST /api/v1/auth/carri/handoff/consume/` | HMAC `ecommerce-web` obligatoire en `ENFORCE` | Le handoff Web est consomme par le BFF serveur a serveur. |
+| `POST /api/v1/auth/carri/handoff/consume/` | HMAC `ecommerce-web` obligatoire pour les handoffs Next | Les handoffs liés au BFF échouent fermés sans HMAC valide. Les handoffs historiques non liés restent compatibles, y compris en mode `ENFORCE`. |
 | `POST /api/v1/auth/token/refresh/` | exempt HMAC | Route de renouvellement partagee; aucune separation BFF n'existe encore. |
 | `POST /api/v1/auth/carri/mobile/exchange/` | exempt HMAC | Flutter Android est un client public sans secret partage. |
 | `GET /api/v1/auth/carri/login/`, `GET /api/v1/auth/carri/callback/` | exempt HMAC | Etapes du navigateur et du fournisseur OIDC. |
@@ -224,6 +225,22 @@ Un endpoint appele directement par une application mobile ne peut pas devenir
 HMAC obligatoire sans une separation explicite des endpoints; `User-Agent`,
 `Origin` et `X-Client-Type` ne constituent jamais une preuve de plateforme.
 
+Un handoff créé pour la livraison Next.js porte le client consommateur attendu
+`ecommerce-web`. Après une signature HMAC valide, un autre client HMAC reçoit
+`403 handoff_client_not_authorized`; le handoff ne devient pas consommé. Cette
+liaison complète le nonce HMAC et l'unicité du handoff sans modifier Android.
+
+Pour les handoffs créés par le callback de livraison Next.js, seule une
+requête dont la signature HMAC a été vérifiée et dont le client est actif peut
+consommer le handoff. Une signature absente/invalide est refusée; un autre
+client HMAC reçoit `403 handoff_client_not_authorized` sans consommer le
+handoff. `DISABLED` échoue fermé pour ces handoffs; `OBSERVATION` laisse passer
+uniquement une signature vérifiée. Configurer `ENFORCE` en production. Les
+handoffs JSON historiques non liés gardent leur comportement antérieur, même
+si la route est en `ENFORCE`. OpenAPI publie HMAC comme exigence stricte du
+contrat BFF; cette exception dépend de l'enregistrement serveur et ne peut pas
+être représentée par `security`.
+
 ## Erreurs
 
 Reponse `{code, detail}` avec un message francais. Aucune erreur ne contient de
@@ -238,6 +255,12 @@ secret, de signature, de nonce ni de cle.
 | `client_request_replayed` | 401 | Cette requête signée a déjà été traitée. |
 | `client_key_revoked` | 401 | La clé du client applicatif a été révoquée. |
 | `client_body_hash_mismatch` | 400 | L'empreinte du corps de la requête ne correspond pas aux données reçues. |
+| `handoff_client_not_authorized` | 403 | Ce client applicatif ne peut pas consommer ce handoff. |
+| `handoff_missing` | 400 | Le handoff est obligatoire. |
+| `handoff_invalid` | 400 | Le handoff est invalide. |
+| `handoff_expired` | 400 | Le handoff a expiré. |
+| `handoff_already_consumed` | 400 | Le handoff a déjà été consommé. |
+| `handoff_delivery_failed` | BFF | La livraison ou la consommation a échoué; le récepteur Next affiche ce code sans exposer le handoff. |
 
 Un `client_id` inconnu et un client sans secret configure reçoivent la **même**
 reponse `client_signature_invalid`, afin de ne pas permettre d'enumerer les
