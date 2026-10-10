@@ -14,6 +14,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from apps.api_clients.openapi import HMAC_ONLY, described
+
 from .models import CarriIdentity, IDTokenReplay, OAuthHandoff, OAuthLoginAttempt
 from .services.oidc import (
     InvalidOIDCToken,
@@ -257,7 +259,12 @@ CarriCallbackView.get = extend_schema(
 CarriHandoffConsumeView.post = extend_schema(
     tags=["Authentication"], operation_id="carri_handoff_consume",
     request=inline_serializer("OAuthHandoffConsumeRequest", {"handoff": serializers.CharField()}),
-    responses={200: _token_pair_schema, 400: _error_schema},
+    responses={200: _token_pair_schema, 400: _error_schema, 401: _error_schema},
+    auth=HMAC_ONLY,
+    description=(
+        "Consomme un handoff opaque a usage unique et emet les JWT ecommerce. "
+        + described(HMAC_ONLY)
+    ),
 )(CarriHandoffConsumeView.post)
 CurrentIdentityView.get = extend_schema(
     tags=["Authentication"], operation_id="current_ecommerce_identity",

@@ -31,14 +31,14 @@ class ClientSecret:
     def has_active_previous(self):
         """Return whether the previous secret is still inside its grace period.
 
-        Without an explicit expiry the previous secret stays valid, which keeps
-        a rotation working while the second client is redeployed.
+        A previous secret always needs an explicit expiry. This bounds the
+        rotation window if a deployment is delayed or abandoned.
         """
 
         if not self.previous:
             return False
         if self.previous_expires_at is None:
-            return True
+            return False
         if hasattr(self.previous_expires_at, "tzinfo"):
             from django.utils import timezone
 
@@ -174,6 +174,12 @@ def normalize_entry(client_id, entry):
     if current and previous and current == previous:
         raise ClientSecretError(
             f"Le secret HMAC courant et precedent de {client_id} doivent differer."
+        )
+
+    if previous and expires in (None, ""):
+        raise ClientSecretError(
+            f"Le secret HMAC precedent de {client_id} exige "
+            "previous_expires_at."
         )
 
     return ClientSecret(

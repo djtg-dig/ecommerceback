@@ -18,6 +18,7 @@ from apps.api_clients.services.hmac import (
 )
 
 TEST_CLIENT_ID = "ecommerce-web-test"
+PROVISIONED_CLIENT_ID = "ecommerce-web"
 TEST_SECRET = "test-only-hmac-secret"
 TEST_PREVIOUS_SECRET = "previous-test-only-hmac-secret"
 UNKNOWN_CLIENT_ID = "unknown-client-test"
@@ -26,6 +27,7 @@ TEST_SECRETS = {
     TEST_CLIENT_ID: {
         "current": TEST_SECRET,
         "previous": TEST_PREVIOUS_SECRET,
+        "previous_expires_at": "9999999999",
     }
 }
 
@@ -115,6 +117,32 @@ def signed_headers(
         EcommerceHMACHeaders.VERSION: version,
         EcommerceHMACHeaders.SIGNATURE: signature,
     }
+
+
+def bff_headers(
+    *,
+    method,
+    path,
+    body=b"",
+    query_string="",
+    secret=TEST_SECRET,
+    timestamp=None,
+    nonce=None,
+    signature=None,
+):
+    """Build an Ecommerce-HMAC v1 request as the future Next.js BFF does."""
+
+    return signed_headers(
+        method=method,
+        path=path,
+        body=body,
+        query_string=query_string,
+        client_id=PROVISIONED_CLIENT_ID,
+        secret=secret,
+        timestamp=timestamp,
+        nonce=nonce,
+        signature=signature,
+    )
 
 
 def sign_body(

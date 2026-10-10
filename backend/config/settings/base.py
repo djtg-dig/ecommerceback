@@ -106,7 +106,10 @@ CARRI_ACCOUNT_EMAIL_PROOF_MAX_AGE_SECONDS = int(
 # Application-level client authentication (Ecommerce-HMAC v1).
 # HMAC identifies the calling application; it never authenticates a user and
 # never grants a business permission. Secrets live only in the environment.
-ECOMMERCE_HMAC_MODE = os.getenv("ECOMMERCE_HMAC_MODE", "DISABLED").upper()
+DEFAULT_ECOMMERCE_HMAC_MODE = "DISABLED"
+ECOMMERCE_HMAC_MODE = os.getenv(
+    "ECOMMERCE_HMAC_MODE", DEFAULT_ECOMMERCE_HMAC_MODE
+).upper()
 if ECOMMERCE_HMAC_MODE not in {"DISABLED", "OBSERVATION", "ENFORCE"}:
     raise ValueError(
         "ECOMMERCE_HMAC_MODE must be DISABLED, OBSERVATION or ENFORCE."
@@ -128,11 +131,23 @@ ECOMMERCE_HMAC_LAST_SEEN_THROTTLE_SECONDS = int(
     os.getenv("ECOMMERCE_HMAC_LAST_SEEN_THROTTLE_SECONDS", "300")
 )
 # Route policy is decided from the method and path only. A client must never be
-# able to opt out of HMAC by declaring its platform in a header.
+# able to opt out of HMAC by declaring its platform in a header. This is a
+# server-side allow-list: adding a BFF operation requires a code review, not
+# merely an environment change that could accidentally capture a mobile route.
+ECOMMERCE_HMAC_BFF_ONLY_PREFIXES = (
+    "/api/v1/auth/carri/handoff/consume/",
+)
 ECOMMERCE_HMAC_PROTECTED_PREFIXES = env_list(
     "ECOMMERCE_HMAC_PROTECTED_PREFIXES",
-    [],
+    list(ECOMMERCE_HMAC_BFF_ONLY_PREFIXES),
 )
+invalid_hmac_prefixes = set(ECOMMERCE_HMAC_PROTECTED_PREFIXES).difference(
+    ECOMMERCE_HMAC_BFF_ONLY_PREFIXES
+)
+if invalid_hmac_prefixes:
+    raise ValueError(
+        "ECOMMERCE_HMAC_PROTECTED_PREFIXES may only contain BFF-only routes."
+    )
 ECOMMERCE_HMAC_EXEMPT_METHODS = tuple(
     method.upper()
     for method in env_list("ECOMMERCE_HMAC_EXEMPT_METHODS", ["OPTIONS"])
@@ -153,6 +168,11 @@ def _hmac_client_secrets():
         ) from exc
     if not isinstance(parsed, dict):
         raise ValueError("ECOMMERCE_HMAC_CLIENT_SECRETS must be a JSON object.")
+    # Fail closed during startup for an invalid rotation; do not wait until the
+    # first BFF request to discover that its previous key has no expiry.
+    from apps.api_clients.services.secrets import parse_client_secrets
+
+    parse_client_secrets(parsed)
     return parsed
 
 

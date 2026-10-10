@@ -58,7 +58,11 @@ Points structurants :
 - la politique de routes dépend de la méthode et du chemin, jamais d'un en-tête déclaré par le client ;
 - Flutter Android n'embarque aucun secret HMAC partagé et conserve JWT + PKCE S256 ;
 - Next.js conserve le secret côté serveur dans son BFF et ne signe jamais depuis le navigateur ;
-- le mode est `DISABLED`, `OBSERVATION` ou `ENFORCE`, et aucune route n'est encore imposée dans ce lot.
+- le mode est `DISABLED`, `OBSERVATION` ou `ENFORCE`; l'activation locale vise
+  uniquement `POST /api/v1/auth/carri/handoff/consume/`;
+- le renouvellement `POST /api/v1/auth/token/refresh/` reste sans HMAC car il
+  est partage avec les clients existants; sa protection requerra une separation
+  BFF explicite.
 
 ## Flux par plateforme
 

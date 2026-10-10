@@ -25,10 +25,10 @@ class TestParsing:
 
     def test_json_text_is_parsed(self):
         mapping = parse_client_secrets(
-            '{"ecommerce-web-test": {"current": "s", "previous": "p"}}'
+            '{"ecommerce-web-test": {"current": "s", "previous": "p", "previous_expires_at": "9999999999"}}'
         )
 
-        assert mapping == {"ecommerce-web-test": {"current": "s", "previous": "p"}}
+        assert mapping == {"ecommerce-web-test": {"current": "s", "previous": "p", "previous_expires_at": "9999999999"}}
 
     def test_invalid_json_raises_without_leaking_the_value(self):
         with pytest.raises(ClientSecretError) as exc:
@@ -74,6 +74,10 @@ class TestParsing:
                 }
             )
 
+    def test_previous_secret_requires_an_explicit_expiry(self):
+        with pytest.raises(ClientSecretError):
+            parse_client_secrets({CLIENT_ID: {"current": "c", "previous": "p"}})
+
     def test_validate_configuration_accepts_a_current_secret(self):
         with override_settings(
             ECOMMERCE_HMAC_CLIENT_SECRETS={CLIENT_ID: {"current": "c"}}
@@ -93,7 +97,7 @@ class TestResolvedSecrets:
 
     @override_settings(
         ECOMMERCE_HMAC_CLIENT_SECRETS={
-            CLIENT_ID: {"current": "c", "previous": "p"}
+            CLIENT_ID: {"current": "c", "previous": "p", "previous_expires_at": "9999999999"}
         }
     )
     def test_unknown_client_returns_none(self):
@@ -103,10 +107,14 @@ class TestResolvedSecrets:
 
     @override_settings(
         ECOMMERCE_HMAC_CLIENT_SECRETS={
-            CLIENT_ID: {"current": "c", "previous": "p"}
+            CLIENT_ID: {
+                "current": "c",
+                "previous": "p",
+                "previous_expires_at": "9999999999",
+            }
         }
     )
-    def test_previous_secret_is_accepted_without_expiry(self):
+    def test_previous_secret_is_accepted_before_its_expiry(self):
         secret = client_secret(CLIENT_ID)
 
         assert secret.candidate_secrets() == ["c", "p"]

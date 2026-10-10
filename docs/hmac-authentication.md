@@ -155,15 +155,16 @@ Canonicalisation de reference : `b=2&a=1&a=0&empty=` devient
 Les secrets vivent exclusivement dans l'environnement.
 
 ```text
-ECOMMERCE_HMAC_CLIENT_SECRETS={"ecommerce-web":{"current":"...","previous":"..."}}
+ECOMMERCE_HMAC_CLIENT_SECRETS={"ecommerce-web":{"current":"...","previous":"...","previous_expires_at":"2030-01-01T00:00:00Z"}}
 ```
 
 Chaque entree accepte :
 
 - `current` : secret courant, obligatoire ;
 - `previous` : secret precedent, facultatif, accepté pendant la rotation ;
-- `previous_expires_at` : date d'expiration de la periode de grace, horodatage
-  Unix ou date ISO 8601. Sans cette valeur, le secret precedent reste valable.
+- `previous_expires_at` : date d'expiration **obligatoire si `previous` est
+  present**, sous forme d'horodatage Unix ou de date ISO 8601. Un secret
+  precedent sans date limite invalide la configuration au demarrage.
 
 Procedure de rotation :
 
@@ -197,7 +198,21 @@ consulte : aucun appelant ne peut echapper a HMAC en se declarant mobile.
 
 `ECOMMERCE_HMAC_PROTECTED_PREFIXES` liste les prefixes exigeant HMAC,
 `ECOMMERCE_HMAC_EXEMPT_METHODS` les methodes exemptees (`OPTIONS` par defaut).
-Dans ce lot la liste des prefixes est vide : aucune route n'est encore imposee.
+La liste est une sous-liste validee des routes reservees au BFF codees cote
+serveur : une variable d'environnement ne peut donc pas proteger par erreur
+une route Android ou une route partagee.
+
+| Operation | Politique | Motif |
+|---|---|---|
+| `POST /api/v1/auth/carri/handoff/consume/` | HMAC `ecommerce-web` obligatoire en `ENFORCE` | Le handoff Web est consomme par le BFF serveur a serveur. |
+| `POST /api/v1/auth/token/refresh/` | exempt HMAC | Route de renouvellement partagee; aucune separation BFF n'existe encore. |
+| `POST /api/v1/auth/carri/mobile/exchange/` | exempt HMAC | Flutter Android est un client public sans secret partage. |
+| `GET /api/v1/auth/carri/login/`, `GET /api/v1/auth/carri/callback/` | exempt HMAC | Etapes du navigateur et du fournisseur OIDC. |
+| routes metier `/api/v1/businesses/…` | exempt HMAC | Routes aujourd'hui partagees avec Android; JWT et permissions metier restent requis. |
+
+Les futures routes internes exclusivement serveur a serveur doivent etre ajoutees
+a la liste serveur `ECOMMERCE_HMAC_BFF_ONLY_PREFIXES`, annotees dans OpenAPI et
+couvertes par des tests avant d'etre placees dans la configuration active.
 
 La compatibilite Android ne repose pas sur une exemption conditionnelle mais sur
 des endpoints distincts : `POST /api/v1/auth/carri/mobile/exchange/` reste
@@ -205,8 +220,9 @@ accessible en JWT + PKCE, car l'APK ne detient aucun secret. Les endpoints
 reserves au BFF, comme la consommation du handoff OAuth, sont des chemins
 separes, protegeables sans ambiguite.
 
-Tant qu'un prefixe protege recouvre un endpoint appele directement par une
-application mobile, ce prefixe doit etre retire avant d'activer `ENFORCE`.
+Un endpoint appele directement par une application mobile ne peut pas devenir
+HMAC obligatoire sans une separation explicite des endpoints; `User-Agent`,
+`Origin` et `X-Client-Type` ne constituent jamais une preuve de plateforme.
 
 ## Erreurs
 

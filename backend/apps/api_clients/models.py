@@ -194,9 +194,11 @@ class ClientNonce(models.Model):
         is required and the behaviour is identical across workers.
         """
 
+        from django.db import IntegrityError
+
         try:
             cls.objects.create(client=client, nonce=nonce)
-        except Exception:
+        except IntegrityError:
             return False
         return True
 

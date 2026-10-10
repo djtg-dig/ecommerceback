@@ -6,7 +6,7 @@
 | POST `/api/v1/auth/carri/mobile/exchange/` | public | échange preuve Android `{id_token,access_token,nonce}` contre JWT ecommerce |
 | GET `/api/v1/auth/carri/login/` | public | redirection Web OIDC |
 | GET `/api/v1/auth/carri/callback/` | public | valide callback et retourne un handoff |
-| POST `/api/v1/auth/carri/handoff/consume/` | public, handoff | consomme le handoff une fois et retourne JWT ecommerce |
+| POST `/api/v1/auth/carri/handoff/consume/` | HMAC `ecommerce-web`, handoff | consomme le handoff une fois et retourne JWT ecommerce |
 | GET `/api/v1/auth/me/` | JWT ecommerce | `{id,carri_subject}` |
 | GET `/api/v1/product-categories/` | public | catégories globales actives, à plat (`parent_code`, `level`) |
 | GET `/api/v1/product-categories/{code}/attributes/` | public | attributs actifs effectifs et leurs options actives |
@@ -201,12 +201,14 @@ Les endpoints OWNER/MANAGER `profitability-summary/`, `reports/sales/`, `reports
 | `ECOMMERCE_HMAC_NONCE_TTL_SECONDS` | `900` | durée de conservation d'un nonce rejoué |
 | `ECOMMERCE_HMAC_MAX_BODY_BYTES` | `1000000` | taille maximale du corps signé |
 | `ECOMMERCE_HMAC_REQUIRE_BODY_HASH` | `true` | impose `X-Ecommerce-Content-SHA256` |
-| `ECOMMERCE_HMAC_PROTECTED_PREFIXES` | vide | prefixes d'URL exigeant une signature |
+| `ECOMMERCE_HMAC_PROTECTED_PREFIXES` | `/api/v1/auth/carri/handoff/consume/` | sous-liste des seules routes BFF reservees cote serveur |
 | `ECOMMERCE_HMAC_EXEMPT_METHODS` | `OPTIONS` | méthodes exemptées |
 
-Dans ce lot, aucun prefixe n'est protégé et aucun secret n'est distribué : le
-middleware est installé mais désactivé, afin de ne pas casser les clients
-existants.
+La route BFF effectivement protegee en `ENFORCE` est
+`POST /api/v1/auth/carri/handoff/consume/`. Les routes Android, le refresh JWT
+et les routes metier partagees restent exemptes. Les en-tetes declares par le
+client ne modifient jamais cette politique. Un ancien secret de rotation exige
+toujours `previous_expires_at`.
 
 ## Registre des clients applicatifs
 
