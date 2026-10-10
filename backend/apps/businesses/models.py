@@ -365,6 +365,13 @@ class BusinessMemberInvitation(models.Model):
         on_delete=models.SET_NULL,
         related_name="business_member_invitations_accepted",
     )
+    declined_by = models.ForeignKey(
+        CarriIdentity,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="business_member_invitations_declined",
+    )
     member = models.ForeignKey(
         BusinessMember,
         null=True,

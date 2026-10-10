@@ -31,7 +31,9 @@ from .serializers import (
     BusinessCreateSerializer,
     BusinessMemberPermissionGrantSerializer,
     BusinessMemberInvitationCreateSerializer,
+    BusinessMemberInvitationActionSerializer,
     BusinessMemberInvitationSerializer,
+    BusinessMemberInvitationTokenSerializer,
     BusinessMemberPermissionSerializer,
     BusinessMemberSerializer,
     BusinessMemberTitleSerializer,
@@ -56,7 +58,10 @@ from .services.invitation_email import (
     InvitationDeliveryError,
 )
 from .services.invitations import (
+    InvitationActionError,
+    accept_member_invitation,
     create_and_send_invitation,
+    decline_member_invitation,
     resend_member_invitation,
     revoke_member_invitation,
 )
@@ -750,6 +755,71 @@ class BusinessInvitationRevokeView(BusinessInvitationAdminMixin, APIView):
         return Response(BusinessMemberInvitationSerializer(invitation).data)
 
 
+class BusinessInvitationRecipientActionView(APIView):
+    """Shared authenticated recipient flow for accepting or declining."""
+
+    action = None
+
+    def perform_action(self, identity, invitation_public_id, token):
+        if self.action == "accept":
+            invitation, _member = accept_member_invitation(
+                identity,
+                invitation_public_id,
+                token,
+            )
+            return invitation
+        return decline_member_invitation(
+            identity,
+            invitation_public_id,
+            token,
+        )
+
+    def post(self, request, invitation_public_id):
+        serializer = BusinessMemberInvitationTokenSerializer(data=request.data)
+        if not serializer.is_valid():
+            detail = serializer.errors.get(
+                "token",
+                ["Le jeton d'invitation est invalide."],
+            )[0]
+            return _invitation_error(
+                "invalid_invitation_token",
+                str(detail),
+                status.HTTP_400_BAD_REQUEST,
+                field="token",
+            )
+        try:
+            invitation = self.perform_action(
+                request.user,
+                invitation_public_id,
+                serializer.validated_data["token"],
+            )
+        except InvitationActionError as exc:
+            return _invitation_error(
+                exc.code,
+                exc.detail,
+                exc.status_code,
+            )
+        return Response(BusinessMemberInvitationActionSerializer(invitation).data)
+
+
+class BusinessInvitationAcceptView(BusinessInvitationRecipientActionView):
+    """Accept an invitation using the recipient's fresh Carri proof."""
+
+    action = "accept"
+
+    def post(self, request, invitation_public_id):
+        return super().post(request, invitation_public_id)
+
+
+class BusinessInvitationDeclineView(BusinessInvitationRecipientActionView):
+    """Decline an invitation without creating a Business membership."""
+
+    action = "decline"
+
+    def post(self, request, invitation_public_id):
+        return super().post(request, invitation_public_id)
+
+
 class BusinessPaymentMethodsView(APIView):
     serializer_class = BusinessPaymentMethodSerializer
 
@@ -897,6 +967,12 @@ _invitation_error_schema = inline_serializer(
             required=False,
         ),
     },
+)
+_recipient_invitation_id = OpenApiParameter(
+    "invitation_public_id",
+    str,
+    OpenApiParameter.PATH,
+    description="Identifiant public de l'invitation, format MI + 10 caractères.",
 )
 _payment_method_id = OpenApiParameter(
     "method_public_id",
@@ -1161,6 +1237,156 @@ BusinessInvitationRevokeView.post = extend_schema(
         ),
     },
 )(BusinessInvitationRevokeView.post)
+BusinessInvitationAcceptView.post = extend_schema(
+    tags=["Business Invitations"],
+    operation_id="business_invitation_accept",
+    summary="Accepter une invitation Business",
+    description=(
+        "Accepte l'invitation désignée par MI avec son jeton à usage unique. "
+        "L'appel exige un JWT ecommerce et une preuve Carri récente (10 minutes) "
+        "d'une adresse vérifiée identique à celle de l'invitation. Il crée "
+        "atomiquement un membre actif, non propriétaire et sans permission. "
+        "Le jeton n'est ni journalisé, ni persisté en clair, ni retourné."
+    ),
+    parameters=[_recipient_invitation_id],
+    request=BusinessMemberInvitationTokenSerializer,
+    responses={
+        200: BusinessMemberInvitationActionSerializer,
+        400: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="Jeton absent ou invalide.",
+        ),
+        401: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="Authentification ou preuve Carri trop ancienne.",
+        ),
+        403: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="E-mail non vérifié ou compte Carri différent.",
+        ),
+        404: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="Invitation introuvable.",
+        ),
+        409: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="Invitation déjà traitée, membre existant ou Business inactif.",
+        ),
+        410: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="Invitation expirée ou révoquée.",
+        ),
+    },
+    examples=[
+        OpenApiExample(
+            "Requête d'acceptation",
+            value={"token": "secret-recu-dans-le-lien"},
+            request_only=True,
+        ),
+        OpenApiExample(
+            "Invitation acceptée",
+            value={
+                "public_id": "MI23456789AB",
+                "status": "ACCEPTED",
+                "business_public_id": "SH23456789AB",
+                "business_name": "Commerce Exemple",
+                "member_public_id": "BM23456789AB",
+                "member_title": "Caissier",
+                "acted_at": "2026-10-10T10:05:00+01:00",
+            },
+            response_only=True,
+            status_codes=["200"],
+        ),
+        OpenApiExample(
+            "Réauthentification Carri nécessaire",
+            value={
+                "code": "carri_reauthentication_required",
+                "detail": "Une nouvelle authentification Carri est nécessaire pour traiter cette invitation.",
+            },
+            response_only=True,
+            status_codes=["401"],
+        ),
+        OpenApiExample(
+            "Invitation expirée",
+            value={
+                "code": "invitation_expired",
+                "detail": "Cette invitation a expiré. Veuillez demander un nouveau lien.",
+            },
+            response_only=True,
+            status_codes=["410"],
+        ),
+    ],
+)(BusinessInvitationAcceptView.post)
+BusinessInvitationDeclineView.post = extend_schema(
+    tags=["Business Invitations"],
+    operation_id="business_invitation_decline",
+    summary="Refuser une invitation Business",
+    description=(
+        "Refuse l'invitation désignée par MI après les mêmes contrôles de JWT, "
+        "de jeton et de preuve Carri récente que l'acceptation. L'opération "
+        "enregistre l'identité ayant refusé et la date, sans créer de membre "
+        "ni modifier de permission."
+    ),
+    parameters=[_recipient_invitation_id],
+    request=BusinessMemberInvitationTokenSerializer,
+    responses={
+        200: BusinessMemberInvitationActionSerializer,
+        400: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="Jeton absent ou invalide.",
+        ),
+        401: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="Authentification ou preuve Carri trop ancienne.",
+        ),
+        403: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="E-mail non vérifié ou compte Carri différent.",
+        ),
+        404: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="Invitation introuvable.",
+        ),
+        409: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="Invitation déjà traitée ou Business inactif.",
+        ),
+        410: OpenApiResponse(
+            response=_invitation_error_schema,
+            description="Invitation expirée ou révoquée.",
+        ),
+    },
+    examples=[
+        OpenApiExample(
+            "Requête de refus",
+            value={"token": "secret-recu-dans-le-lien"},
+            request_only=True,
+        ),
+        OpenApiExample(
+            "Invitation refusée",
+            value={
+                "public_id": "MI23456789AB",
+                "status": "DECLINED",
+                "business_public_id": "SH23456789AB",
+                "business_name": "Commerce Exemple",
+                "member_public_id": None,
+                "member_title": None,
+                "acted_at": "2026-10-10T10:05:00+01:00",
+            },
+            response_only=True,
+            status_codes=["200"],
+        ),
+        OpenApiExample(
+            "Compte Carri différent",
+            value={
+                "code": "invitation_recipient_mismatch",
+                "detail": "Cette invitation est destinée à un autre compte Carri.",
+            },
+            response_only=True,
+            status_codes=["403"],
+        ),
+    ],
+)(BusinessInvitationDeclineView.post)
 BusinessPaymentMethodsView.get = extend_schema(
     tags=["Business Payment Methods"],
     operation_id="business_payment_method_list",

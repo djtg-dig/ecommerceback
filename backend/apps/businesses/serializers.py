@@ -211,6 +211,58 @@ class BusinessMemberInvitationSerializer(serializers.ModelSerializer):
         return validate_invitation_state(invitation)
 
 
+class BusinessMemberInvitationTokenSerializer(serializers.Serializer):
+    """One-time invitation secret supplied by the authenticated recipient."""
+
+    token = serializers.CharField(
+        min_length=20,
+        max_length=255,
+        trim_whitespace=False,
+        write_only=True,
+        error_messages={
+            "required": "Le jeton d'invitation est obligatoire.",
+            "blank": "Le jeton d'invitation est obligatoire.",
+            "min_length": "Le jeton d'invitation est invalide.",
+        },
+    )
+
+
+class BusinessMemberInvitationActionSerializer(serializers.ModelSerializer):
+    """Compact terminal state returned without email or invitation secret."""
+
+    business_public_id = serializers.CharField(
+        source="business.public_id",
+        read_only=True,
+    )
+    business_name = serializers.CharField(
+        source="business.name",
+        read_only=True,
+    )
+    member_public_id = serializers.CharField(
+        source="member.public_id",
+        allow_null=True,
+        read_only=True,
+    )
+    member_title = serializers.CharField(
+        source="member.title",
+        allow_null=True,
+        read_only=True,
+    )
+
+    class Meta:
+        model = BusinessMemberInvitation
+        fields = (
+            "public_id",
+            "status",
+            "business_public_id",
+            "business_name",
+            "member_public_id",
+            "member_title",
+            "acted_at",
+        )
+        read_only_fields = fields
+
+
 class BusinessPermissionCatalogSerializer(serializers.Serializer):
     """Compact projection of the server-side permission registry."""
 

@@ -8,7 +8,7 @@ membre connu sans permission répond `403`.
 
 Les réponses ne contiennent jamais `token`, `token_hash`, UUID interne ou
 permission future. Une invitation ne crée aucun `BusinessMember` et n'attribue
-aucune permission avant une acceptation, qui reste hors de ce lot.
+aucune permission avant son acceptation explicite par le destinataire.
 
 ## Lister les invitations
 
@@ -122,3 +122,72 @@ BUSINESS_MEMBER_INVITATION_EXPIRY_HOURS=168
 L'URL publique réelle doit être fournie par chaque environnement. Aucun domaine
 Flutter ou de production n'est codé en dur.
 
+## Accepter une invitation
+
+`POST /api/v1/me/business-invitations/{MI}/accept/`
+
+```json
+{
+  "token": "secret-recu-dans-le-lien"
+}
+```
+
+L'appel exige un JWT E-commerce. L'identité correspondante doit disposer d'une
+adresse obtenue de `userinfo`, vérifiée par Carri et observée depuis moins de
+10 minutes. La dernière authentification OIDC (`auth_time`) doit également
+dater de moins de 10 minutes. L'adresse normalisée doit correspondre exactement
+à l'invitation ; aucune adresse envoyée par le client n'est acceptée comme
+preuve.
+
+Après validation du MI, du hash du jeton, de l'identité et du Business actif,
+le service crée dans la même transaction un `BusinessMember` actif avec le
+titre proposé. Il reste non propriétaire et ne reçoit aucune permission. Le
+jeton est consommé par le passage à `ACCEPTED` et ne peut plus être réutilisé.
+
+```json
+{
+  "public_id": "MI23456789AB",
+  "status": "ACCEPTED",
+  "business_public_id": "SH23456789AB",
+  "business_name": "Commerce Exemple",
+  "member_public_id": "BM23456789AB",
+  "member_title": "Caissier",
+  "acted_at": "2026-10-10T10:05:00+01:00"
+}
+```
+
+## Refuser une invitation
+
+`POST /api/v1/me/business-invitations/{MI}/decline/`
+
+Le corps et les contrôles d'identité sont identiques à l'acceptation. Le service
+place l'invitation en `DECLINED`, renseigne `declined_by` et `acted_at`, sans
+créer de membre ni modifier de permission. Une invitation refusée ne peut plus
+être acceptée.
+
+## Erreurs du parcours destinataire
+
+Les deux endpoints utilisent `{code, detail}` et, pour une erreur de payload,
+une liste `token` :
+
+- `400 invalid_invitation_token` : jeton absent, mal formé ou ne correspondant
+  pas au MI ;
+- `401 carri_reauthentication_required` : observation `userinfo` ou
+  `auth_time` trop ancienne ; le client doit relancer le parcours OIDC Carri ;
+- `403 verified_email_required` : adresse Carri absente ou non vérifiée ;
+- `403 invitation_recipient_mismatch` : autre compte Carri ;
+- `404 invitation_not_found` : MI inconnu ;
+- `409 invitation_already_processed` : invitation déjà acceptée ou refusée ;
+- `409 business_member_already_exists` : appartenance déjà présente ;
+- `409 business_inactive` : entreprise suspendue ou archivée ;
+- `410 invitation_expired` ou `410 invitation_revoked` : lien définitivement
+  inutilisable.
+
+Les services verrouillent le Business, l'identité, l'invitation et toute
+appartenance existante avec `transaction.atomic`/`select_for_update`. Une
+acceptation concurrente ne crée donc qu'un membre. L'ancien jeton devient
+invalide dès un renvoi. Le statut `REMOVED` reste terminal conformément au
+cycle de vie actuel : une réinvitation ne réactive pas silencieusement cette
+ligne et ne restaure jamais ses anciennes permissions. E-commerce ne possède
+actuellement ni abonnement ni quota de sièges ; aucune limite artificielle
+n'est appliquée dans ce flux.

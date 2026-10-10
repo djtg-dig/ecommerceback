@@ -25,6 +25,16 @@ from ..models import (
 )
 
 
+class InvitationActionError(Exception):
+    """Stable business error raised by recipient invitation actions."""
+
+    def __init__(self, code, detail, status_code):
+        self.code = code
+        self.detail = detail
+        self.status_code = status_code
+        super().__init__(detail)
+
+
 def normalize_email(email):
     """Return the canonical comparison value for an invitation address."""
     return (email or "").strip().lower()
@@ -269,3 +279,178 @@ def validate_invitation_state(invitation):
     if invitation.is_expired:
         return BusinessMemberInvitation.Status.EXPIRED
     return BusinessMemberInvitation.Status.PENDING
+
+
+def _validated_recipient(identity):
+    """Return a locked identity backed by a fresh verified Carri proof."""
+    locked_identity = type(identity).objects.select_for_update().get(pk=identity.pk)
+    if not locked_identity.verified_email or not locked_identity.email_verified:
+        raise InvitationActionError(
+            "verified_email_required",
+            "Votre adresse e-mail Carri doit être vérifiée pour traiter cette invitation.",
+            403,
+        )
+    if not locked_identity.has_fresh_verified_email():
+        raise InvitationActionError(
+            "carri_reauthentication_required",
+            "Une nouvelle authentification Carri est nécessaire pour traiter cette invitation.",
+            401,
+        )
+    return locked_identity
+
+
+def _locked_recipient_invitation(identity, invitation_public_id, token):
+    """Lock and validate one invitation without trusting recipient payload data."""
+    invitation_ref = BusinessMemberInvitation.objects.filter(
+        public_id=invitation_public_id,
+    ).values("business_id").first()
+    if invitation_ref is None:
+        raise InvitationActionError(
+            "invitation_not_found",
+            "Invitation introuvable.",
+            404,
+        )
+
+    business = Business.objects.select_for_update().get(
+        pk=invitation_ref["business_id"],
+    )
+    recipient = _validated_recipient(identity)
+    invitation = (
+        BusinessMemberInvitation.objects.select_for_update()
+        .select_related("business")
+        .get(public_id=invitation_public_id, business=business)
+    )
+
+    if not secrets.compare_digest(
+        invitation.token_hash,
+        hash_invitation_token(token),
+    ):
+        raise InvitationActionError(
+            "invalid_invitation_token",
+            "Le jeton d'invitation est invalide.",
+            400,
+        )
+    if normalize_email(recipient.verified_email) != invitation.normalized_email:
+        raise InvitationActionError(
+            "invitation_recipient_mismatch",
+            "Cette invitation est destinée à un autre compte Carri.",
+            403,
+        )
+    if business.status != Business.Status.ACTIVE:
+        raise InvitationActionError(
+            "business_inactive",
+            "Cette invitation ne peut pas être traitée car l'entreprise est inactive.",
+            409,
+        )
+    if invitation.status == BusinessMemberInvitation.Status.REVOKED:
+        raise InvitationActionError(
+            "invitation_revoked",
+            "Cette invitation a été révoquée.",
+            410,
+        )
+    if invitation.status == BusinessMemberInvitation.Status.EXPIRED:
+        raise InvitationActionError(
+            "invitation_expired",
+            "Cette invitation a expiré. Veuillez demander un nouveau lien.",
+            410,
+        )
+    if invitation.status != BusinessMemberInvitation.Status.PENDING:
+        raise InvitationActionError(
+            "invitation_already_processed",
+            "Cette invitation a déjà été traitée.",
+            409,
+        )
+    if invitation.is_expired:
+        invitation.status = BusinessMemberInvitation.Status.EXPIRED
+        invitation.acted_at = timezone.now()
+        invitation.save(update_fields=("status", "acted_at", "updated_at"))
+        return recipient, invitation, InvitationActionError(
+            "invitation_expired",
+            "Cette invitation a expiré. Veuillez demander un nouveau lien.",
+            410,
+        )
+    return recipient, invitation, None
+
+
+def accept_member_invitation(identity, invitation_public_id, token):
+    """Accept one invitation atomically and create a permissionless member."""
+    deferred_error = None
+    member = None
+    with transaction.atomic():
+        recipient, invitation, deferred_error = _locked_recipient_invitation(
+            identity,
+            invitation_public_id,
+            token,
+        )
+        if deferred_error is None:
+            existing = BusinessMember.objects.select_for_update().filter(
+                business=invitation.business,
+                identity=recipient,
+            ).first()
+            if existing is not None:
+                raise InvitationActionError(
+                    "business_member_already_exists",
+                    "Vous êtes déjà membre de cette entreprise.",
+                    409,
+                )
+
+            try:
+                member = BusinessMember.objects.create(
+                    business=invitation.business,
+                    identity=recipient,
+                    role=BusinessMember.Role.EMPLOYEE,
+                    is_owner=False,
+                    title=invitation.title,
+                    status=BusinessMember.Status.ACTIVE,
+                )
+            except IntegrityError as exc:
+                raise InvitationActionError(
+                    "business_member_already_exists",
+                    "Vous êtes déjà membre de cette entreprise.",
+                    409,
+                ) from exc
+
+            invitation.status = BusinessMemberInvitation.Status.ACCEPTED
+            invitation.accepted_by = recipient
+            invitation.member = member
+            invitation.acted_at = timezone.now()
+            invitation.save(
+                update_fields=(
+                    "status",
+                    "accepted_by",
+                    "member",
+                    "acted_at",
+                    "updated_at",
+                )
+            )
+
+    if deferred_error is not None:
+        raise deferred_error
+    return invitation, member
+
+
+def decline_member_invitation(identity, invitation_public_id, token):
+    """Decline one invitation atomically without creating a membership."""
+    deferred_error = None
+    with transaction.atomic():
+        recipient, invitation, deferred_error = _locked_recipient_invitation(
+            identity,
+            invitation_public_id,
+            token,
+        )
+        if deferred_error is None:
+            invitation.status = BusinessMemberInvitation.Status.DECLINED
+            invitation.declined_by = recipient
+            invitation.acted_at = timezone.now()
+            invitation.save(
+                update_fields=(
+                    "status",
+                    "declined_by",
+                    "acted_at",
+                    "updated_at",
+                )
+            )
+
+    if deferred_error is not None:
+        raise deferred_error
+    return invitation

@@ -135,6 +135,7 @@ SPECTACULAR_SETTINGS = {
     "COMPONENT_SPLIT_REQUEST": True,
     "ENUM_NAME_OVERRIDES": {
         "BusinessCurrencyEnum": "apps.businesses.models.Business.Currency",
+        "BusinessMemberInvitationStatusEnum": "apps.businesses.models.BusinessMemberInvitation.Status",
         "ProductStatusEnum": "apps.catalog.models.Product.Status",
     },
     "TAGS": [

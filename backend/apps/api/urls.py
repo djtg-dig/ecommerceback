@@ -4,7 +4,11 @@ from django.urls import include
 from django.urls import path
 
 from .views import HealthCheckView
-from apps.businesses.views import BusinessCategoriesView
+from apps.businesses.views import (
+    BusinessCategoriesView,
+    BusinessInvitationAcceptView,
+    BusinessInvitationDeclineView,
+)
 from apps.dashboard_views import DashboardView
 from apps.profitability_views import ProfitabilitySummaryView
 from apps.sales_report_views import ProductReportView, SalesReportView
@@ -12,6 +16,16 @@ from apps.expense_receivable_report_views import ExpensesReportView, Receivables
 from apps.purchase_report_views import PurchasesReportView, SupplierDebtsReportView
 
 urlpatterns = [
+    path(
+        "me/business-invitations/<str:invitation_public_id>/accept/",
+        BusinessInvitationAcceptView.as_view(),
+        name="business-invitation-accept",
+    ),
+    path(
+        "me/business-invitations/<str:invitation_public_id>/decline/",
+        BusinessInvitationDeclineView.as_view(),
+        name="business-invitation-decline",
+    ),
     path("businesses/<str:business_public_id>/dashboard/", DashboardView.as_view()),
     path("businesses/<str:business_public_id>/profitability-summary/", ProfitabilitySummaryView.as_view()),
     path("businesses/<str:business_public_id>/reports/sales/", SalesReportView.as_view()),

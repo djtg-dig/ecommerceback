@@ -27,6 +27,13 @@ Le moteur central refuse tout nom de permission inconnu. L'absence d'appartenanc
 
 Business routes use `public_id` (`SHXXXXXXXXXX`), never the internal UUID: `GET/PATCH /api/v1/businesses/{public_id}/` and `GET /api/v1/businesses/{public_id}/members/`. Create and PATCH accept `categories` (codes) and optional `primary_category`; OWNER and MANAGER may change them. `GET /api/v1/business-categories/` is public and returns active platform categories only.
 
+Le destinataire authentifié traite une invitation via
+`POST /api/v1/me/business-invitations/{MI}/accept/` ou `.../decline/`, avec
+`{"token": "..."}`. Ces routes n'exigent pas `MANAGE_MEMBERS` mais imposent une
+adresse Carri vérifiée et une preuve OIDC récente de 10 minutes. Le contrat
+détaillé, les réponses et les codes stables figurent dans
+[Invitations Business](business-invitations.md).
+
 ## Products and variants
 
 | Endpoint | Permission | Payload / behavior |

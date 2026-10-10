@@ -133,7 +133,11 @@ transactionnelles avec verrouillage. Elles n'attribuent aucune permission et
 ne créent aucun membre. Le renvoi tourne le jeton et renouvelle l'expiration ;
 la révocation rend l'invitation terminale. La livraison texte/HTML est
 programmée après commit et `last_sent_at` n'est renseigné qu'après succès.
-L'acceptation et le refus restent reportés. `CarriIdentity` conserve une projection
-d'adresse obtenue exclusivement par `userinfo` après validation de l'ID token,
-ainsi que les dates nécessaires au contrôle de fraîcheur de 10 minutes. Les
-endpoints d'acceptation et de refus restent hors du présent lot.
+`POST /api/v1/me/business-invitations/{MI}/accept/` et `.../decline/`
+exigent un JWT E-commerce, le jeton secret et une preuve Carri fraîche de
+10 minutes. `CarriIdentity` conserve l'adresse obtenue exclusivement par
+`userinfo` après validation de l'ID token, ainsi que les dates nécessaires au
+contrôle séparé de l'observation et de `auth_time`. L'acceptation crée un membre
+non propriétaire sans permission ; le refus renseigne `declined_by` sans créer
+de membre. Les deux transitions sont atomiques et verrouillées. Un membre
+`REMOVED` n'est pas réactivé par ce flux, conformément à son statut terminal.

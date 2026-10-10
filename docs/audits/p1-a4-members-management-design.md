@@ -475,7 +475,7 @@ le 9 octobre 2026 :
   `business`, `email`/`normalized_email`, `title`, `status`
   (`PENDING`, `ACCEPTED`, `DECLINED`, `REVOKED`, `EXPIRED`),
   `token_hash` SHA-256 unique, `expires_at`, `invited_by`,
-  `accepted_by`, `member`, `acted_at`, `last_sent_at`,
+  `accepted_by`, `declined_by`, `member`, `acted_at`, `last_sent_at`,
   `resend_count`, `created_at`, `updated_at`. Contraintes
   d'unicité conditionnelles : une seule invitation `PENDING`
   et une seule `EXPIRED` par `(business, normalized_email)` ;
@@ -506,8 +506,7 @@ le 9 octobre 2026 :
   correspondance exacte `public_id == sub`, un booléen
   `email_verified=true`, puis conserve l'adresse normalisée et
   les horodatages serveur. La preuve est fraîche pendant dix
-  minutes. Les endpoints d'acceptation/refus restent
-  volontairement non implémentés dans ce lot.
+  minutes.
 - Différences avec Kisinet : Kisinet lie l'invitation à un
   utilisateur local existant (`invited_user`) et envoie
   l'e-mail via `transaction.on_commit` ; E-commerce référence
@@ -532,8 +531,9 @@ le 9 octobre 2026 :
    création/envoi, révocation/renvoi, rotation du jeton et adaptateur texte/HTML
    après commit. Le détail dédié n'est pas nécessaire au MVP car la liste
    expose la même projection compacte.
-6. **P1-A4.7 — Parcours invité** : liste personnelle, acceptation/refus,
-   vérification Carri et tests de concurrence.
+6. **P1-A4.11 — Parcours invité, livré** : acceptation/refus, vérification
+   Carri fraîche, consommation du jeton, création sans permission et tests de
+   concurrence. La liste personnelle reste une extension séparée.
 7. **P1-A4.8 — Validation finale** : OpenAPI, performance, documentation Flutter,
    tests globaux et audit des événements sensibles.
 
@@ -545,14 +545,14 @@ livraison sécurisée soient disponibles.
 
 | Décision | Recommandation | Caractère bloquant |
 |---|---|---|
-| Claims Carri `email`/`email_verified`, unicité et changement d'adresse | Contrat confirmé via `userinfo`; `openid email`, preuve fraîche dix minutes et `sub` comme seule identité. Définir encore la politique de changement d'adresse. | Preuve disponible ; endpoints d'acceptation encore à implémenter. |
+| Claims Carri `email`/`email_verified`, unicité et changement d'adresse | Contrat confirmé via `userinfo`; `openid email`, preuve fraîche dix minutes et `sub` comme seule identité. Définir encore la politique de changement d'adresse. | Preuve et acceptation/refus disponibles. |
 | Fournisseur d'e-mail, URL/deep link et gestion des échecs | Adaptateur serveur + `transaction.on_commit`; aucun secret dans les logs. | **Bloque envoi/renvoi réel.** |
 | Durée de validité | 72 heures, configurable. | Non bloquant si cette valeur est validée. |
 | Limite de renvoi | Délai minimum de 60 secondes et plafond journalier par invitation/Business. | À valider avant exposition publique. |
 | Normalisation d'e-mail | `trim` puis canonicalisation documentée et identique aux claims Carri ; ne pas modifier les alias arbitrairement. | Bloque la contrainte d'unicité exacte. |
 | Portée de `MANAGE_MEMBERS` | Invitations et cycle de vie, mais jamais attribution de permissions. | Recommandation compatible avec P1-A2. |
 | Administration des permissions | OWNER-only pour le MVP. Une délégation future exigera un plafond de droits. | Non bloquant si la règle actuelle est confirmée. |
-| Retrait puis réinvitation | Conserver la ligne `REMOVED`, supprimer ses permissions, puis réactiver la même ligne sans restaurer les droits. | À valider avant le modèle final. |
+| Retrait puis réinvitation | La politique actuelle considère `REMOVED` comme terminal ; l'acceptation refuse l'appartenance existante et ne restaure aucun droit. Une réactivation spéciale nécessiterait une décision et une évolution distinctes. | Non bloquant pour P1-A4.11. |
 | Auto-actions | Interdire auto-suspension et auto-retrait ; autoriser éventuellement son propre titre via une route de profil future. | Non bloquant. |
 | Affichage du membre | `CarriIdentity` ne fournit ni nom ni avatar. Déterminer si Carri expose des claims de profil. | Ne bloque pas le contrôle d'accès, mais affecte l'UX. |
 
