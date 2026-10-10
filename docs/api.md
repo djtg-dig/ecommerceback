@@ -57,6 +57,8 @@ La documentation développeur est générée depuis les routes et serializers r�
 - ReDoc : `/api/redoc/`
 - Schéma OpenAPI : `/api/schema/`
 
+Le schéma de sécurité `EcommerceClientHMAC` décrit l'authentification applicative HMAC. Une opération exigeant à la fois le JWT utilisateur et le HMAC applicatif déclare une seule exigence combinée, jamais deux objets séparés qui exprimeraient une alternative.
+
 Les routes protégées affichent le bouton **Authorize**. Coller uniquement un JWT d’accès ecommerce dans le champ Bearer (`Authorization: Bearer <ecommerce_access_token>`). Swagger ne demande jamais de mot de passe Carri Account, de secret client, de code OAuth ou de vérificateur PKCE. `/api/v1/` n’est pas une API root et peut répondre `404`; `/api/docs/` est le point d’entrée développeur.
 
 ## Inventory / Stock
@@ -186,3 +188,32 @@ GET/POST `/api/v1/businesses/{SH}/purchases/{PU}/payments/` et POST `/payments/{
 ### Reporting économique
 
 Les endpoints OWNER/MANAGER `profitability-summary/`, `reports/sales/`, `reports/products/`, `reports/expenses/` et `reports/receivables/` agrègent côté serveur et restent isolés par Business. Les trois premiers exposent séparément les ventes brutes, retours et valeurs nettes. `reports/receivables/` est paginé et distingue montant initial, paiements, crédits retour et solde par client. Les crédits `RETURN_CREDIT` ne sont jamais présentés comme des encaissements.
+
+## Authentification HMAC des clients applicatifs
+
+`ApiClient` registre les applications autorisées, `ClientNonce` rend chaque requête signée à usage unique. Le contrat complet — en-têtes, chaîne canonique, vecteurs de signature, timestamp, nonce, rotation, révocation, codes d'erreur, routes protégées et exemptées — est décrit dans [Authentification HMAC des clients applicatifs](hmac-authentication.md).
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `ECOMMERCE_HMAC_MODE` | `DISABLED` | `DISABLED`, `OBSERVATION` ou `ENFORCE` |
+| `ECOMMERCE_HMAC_CLIENT_SECRETS` | vide | objet JSON `{client_id: {current, previous, previous_expires_at}}` |
+| `ECOMMERCE_HMAC_MAX_CLOCK_SKEW_SECONDS` | `120` | tolérance d'horloge en secondes |
+| `ECOMMERCE_HMAC_NONCE_TTL_SECONDS` | `900` | durée de conservation d'un nonce rejoué |
+| `ECOMMERCE_HMAC_MAX_BODY_BYTES` | `1000000` | taille maximale du corps signé |
+| `ECOMMERCE_HMAC_REQUIRE_BODY_HASH` | `true` | impose `X-Ecommerce-Content-SHA256` |
+| `ECOMMERCE_HMAC_PROTECTED_PREFIXES` | vide | prefixes d'URL exigeant une signature |
+| `ECOMMERCE_HMAC_EXEMPT_METHODS` | `OPTIONS` | méthodes exemptées |
+
+Dans ce lot, aucun prefixe n'est protégé et aucun secret n'est distribué : le
+middleware est installé mais désactivé, afin de ne pas casser les clients
+existants.
+
+## Registre des clients applicatifs
+
+| Usage | Modèle | Remarques |
+|---|---|---|
+| Recenser un client | `ApiClient` | `client_id` unique, `client_type`, `auth_method`, `is_active`, `last_seen_at` |
+| Purger les nonces expirés | `python backend/manage.py purge_client_nonces` | suppression par `seen_at`, rétention configurable |
+| Révoquer un client | `ApiClient.is_active = False` | effet immédiat, historique conservé |
+
+Un client mobile public ne peut pas être configuré en `HMAC` : la validation du modèle le refuse.

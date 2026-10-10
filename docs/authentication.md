@@ -46,3 +46,26 @@ projection, impose une nouvelle authentification Carri.
 Les JWT ecommerce portent `identity_id`; EcommerceJWTAuthentication résout CarriIdentity. Variables : `CARRI_ACCOUNT_ISSUER`, `CARRI_ACCOUNT_CLIENT_ID`, `CARRI_ACCOUNT_CLIENT_SECRET`, `CARRI_ACCOUNT_REDIRECT_URI`, `CARRI_ACCOUNT_SCOPES`, `CARRI_ACCOUNT_ANDROID_CLIENT_ID`, `CARRI_ACCOUNT_ANDROID_REDIRECT_URI`, `CARRI_ACCOUNT_DISCOVERY_CACHE_SECONDS`, `CARRI_ACCOUNT_JWKS_CACHE_SECONDS`, `CARRI_ACCOUNT_ID_TOKEN_CLOCK_SKEW_SECONDS`, `CARRI_ACCOUNT_EMAIL_PROOF_MAX_AGE_SECONDS`.
 
 Aucun token ou secret ne doit être loggé ou versionné. La blacklist SimpleJWT n'est pas utilisée car l'identité n'est pas AUTH_USER_MODEL; une révocation ecommerce dédiée reste nécessaire avant production.
+
+## Authentification applicative HMAC
+
+En complément du JWT utilisateur, `EcommerceClientHMACMiddleware` identifie l'application appelante. Le contrat complet, les en-têtes, la chaîne canonique, les vecteurs de signature, la rotation des clés, les codes d'erreur et la politique de routes sont décrits dans [Authentification HMAC des clients applicatifs](hmac-authentication.md).
+
+Points structurants :
+
+- HMAC n'est **jamais** un substitut au JWT utilisateur ni aux permissions métier ;
+- les secrets vivent uniquement dans l'environnement, jamais en base ni en dépôt ;
+- la politique de routes dépend de la méthode et du chemin, jamais d'un en-tête déclaré par le client ;
+- Flutter Android n'embarque aucun secret HMAC partagé et conserve JWT + PKCE S256 ;
+- Next.js conserve le secret côté serveur dans son BFF et ne signe jamais depuis le navigateur ;
+- le mode est `DISABLED`, `OBSERVATION` ou `ENFORCE`, et aucune route n'est encore imposée dans ce lot.
+
+## Flux par plateforme
+
+| Plateforme | Authentification applicative | Stockage des secrets |
+|---|---|---|
+| Flutter Android | aucune signature HMAC ; JWT ecommerce + PKCE S256 | aucun secret embarqué |
+| Next.js Web | HMAC côté serveur, signé par le BFF uniquement | variable d'environnement du serveur |
+| Flutter Desktop | client public, aucune signature HMAC | aucun secret embarqué |
+
+Toutes les variables HMAC sont listées dans [API](api.md#authentification-hmac-des-clients-applicatifs).

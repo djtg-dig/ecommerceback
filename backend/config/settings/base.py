@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "drf_spectacular",
     "apps.accounts.apps.AccountsConfig",
+    "apps.api_clients.apps.ApiClientsConfig",
     "apps.businesses.apps.BusinessesConfig",
     "apps.catalog.apps.CatalogConfig",
     "apps.inventory.apps.InventoryConfig",
@@ -51,6 +52,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.api_clients.middleware.EcommerceClientHMACMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -101,6 +103,61 @@ CARRI_ACCOUNT_EMAIL_PROOF_MAX_AGE_SECONDS = int(
     os.getenv("CARRI_ACCOUNT_EMAIL_PROOF_MAX_AGE_SECONDS", "600")
 )
 
+# Application-level client authentication (Ecommerce-HMAC v1).
+# HMAC identifies the calling application; it never authenticates a user and
+# never grants a business permission. Secrets live only in the environment.
+ECOMMERCE_HMAC_MODE = os.getenv("ECOMMERCE_HMAC_MODE", "DISABLED").upper()
+if ECOMMERCE_HMAC_MODE not in {"DISABLED", "OBSERVATION", "ENFORCE"}:
+    raise ValueError(
+        "ECOMMERCE_HMAC_MODE must be DISABLED, OBSERVATION or ENFORCE."
+    )
+ECOMMERCE_HMAC_SIGNATURE_VERSION = "v1"
+ECOMMERCE_HMAC_MAX_CLOCK_SKEW_SECONDS = int(
+    os.getenv("ECOMMERCE_HMAC_MAX_CLOCK_SKEW_SECONDS", "120")
+)
+ECOMMERCE_HMAC_NONCE_TTL_SECONDS = int(
+    os.getenv("ECOMMERCE_HMAC_NONCE_TTL_SECONDS", "900")
+)
+ECOMMERCE_HMAC_MAX_BODY_BYTES = int(
+    os.getenv("ECOMMERCE_HMAC_MAX_BODY_BYTES", "1000000")
+)
+ECOMMERCE_HMAC_REQUIRE_BODY_HASH = (
+    os.getenv("ECOMMERCE_HMAC_REQUIRE_BODY_HASH", "true").lower() == "true"
+)
+ECOMMERCE_HMAC_LAST_SEEN_THROTTLE_SECONDS = int(
+    os.getenv("ECOMMERCE_HMAC_LAST_SEEN_THROTTLE_SECONDS", "300")
+)
+# Route policy is decided from the method and path only. A client must never be
+# able to opt out of HMAC by declaring its platform in a header.
+ECOMMERCE_HMAC_PROTECTED_PREFIXES = env_list(
+    "ECOMMERCE_HMAC_PROTECTED_PREFIXES",
+    [],
+)
+ECOMMERCE_HMAC_EXEMPT_METHODS = tuple(
+    method.upper()
+    for method in env_list("ECOMMERCE_HMAC_EXEMPT_METHODS", ["OPTIONS"])
+)
+
+def _hmac_client_secrets():
+    """Parse the client secret mapping without ever logging its content."""
+    import json
+
+    raw = os.getenv("ECOMMERCE_HMAC_CLIENT_SECRETS", "")
+    if not raw.strip():
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "ECOMMERCE_HMAC_CLIENT_SECRETS must be a valid JSON object."
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("ECOMMERCE_HMAC_CLIENT_SECRETS must be a JSON object.")
+    return parsed
+
+
+ECOMMERCE_HMAC_CLIENT_SECRETS = _hmac_client_secrets()
+
 EMAIL_BACKEND = os.getenv(
     "EMAIL_BACKEND",
     "django.core.mail.backends.console.EmailBackend",
@@ -133,6 +190,22 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
+    "APPEND_COMPONENTS": {
+        "securitySchemes": {
+            "EcommerceClientHMAC": {
+                "type": "apiKey",
+                "in": "header",
+                "name": "X-Ecommerce-Signature",
+                "description": (
+                    "Signature HMAC-SHA256 du client applicatif, contrat Ecommerce-HMAC v1. "
+                    "En-têtes obligatoires : X-Ecommerce-Client-Id, X-Ecommerce-Timestamp, "
+                    "X-Ecommerce-Nonce, X-Ecommerce-Content-SHA256, X-Ecommerce-Signature-Version "
+                    "et X-Ecommerce-Signature. La signature identifie l'application appelante ; "
+                    "elle ne remplace jamais le JWT ecommerce ni les permissions métier."
+                ),
+            }
+        }
+    },
     "ENUM_NAME_OVERRIDES": {
         "BusinessCurrencyEnum": "apps.businesses.models.Business.Currency",
         "BusinessMemberInvitationStatusEnum": "apps.businesses.models.BusinessMemberInvitation.Status",
