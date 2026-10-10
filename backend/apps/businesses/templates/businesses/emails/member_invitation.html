@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="fr">
+<body style="margin:0;background:#f4f7fb;font-family:Arial,sans-serif;color:#1f2937">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+        <tr>
+            <td align="center" style="padding:32px 12px">
+                <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="max-width:600px;background:#fff;border-radius:10px">
+                    <tr>
+                        <td style="padding:32px">
+                            <h1 style="margin:0 0 20px;font-size:24px">Invitation à rejoindre une entreprise</h1>
+                            <p>Vous êtes invité à rejoindre <strong>« {{ business_name }} »</strong> sur E-commerce.</p>
+                            {% if title %}<p>Titre proposé : <strong>{{ title }}</strong></p>{% endif %}
+                            <p style="margin:28px 0"><a href="{{ invitation_url }}" style="background:#0b5cab;color:#fff;padding:14px 22px;text-decoration:none;border-radius:6px;font-weight:bold">Consulter l'invitation</a></p>
+                            <p>L'invitation expire le <strong>{{ expires_at }}</strong>.</p>
+                            <p style="font-size:14px;color:#4b5563">Elle est associée à <strong>{{ invited_email }}</strong>. Authentifiez-vous avec cette même adresse vérifiée par Carri Account. Aucun accès ne sera créé sans votre acceptation.</p>
+                            <p style="font-size:14px;color:#4b5563">Si vous ne reconnaissez pas cette entreprise, ignorez cet e-mail. E-commerce ne vous demandera jamais votre mot de passe par e-mail.</p>
+                            <p style="font-size:13px;word-break:break-all">Lien de secours : <a href="{{ invitation_url }}">{{ invitation_url }}</a></p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

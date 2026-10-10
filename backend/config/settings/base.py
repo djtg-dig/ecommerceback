@@ -101,6 +101,19 @@ CARRI_ACCOUNT_EMAIL_PROOF_MAX_AGE_SECONDS = int(
     os.getenv("CARRI_ACCOUNT_EMAIL_PROOF_MAX_AGE_SECONDS", "600")
 )
 
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend",
+)
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "")
+BUSINESS_MEMBER_INVITATION_URL = os.getenv(
+    "BUSINESS_MEMBER_INVITATION_URL",
+    "",
+)
+BUSINESS_MEMBER_INVITATION_EXPIRY_HOURS = int(
+    os.getenv("BUSINESS_MEMBER_INVITATION_EXPIRY_HOURS", "168")
+)
+
 REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"] = ["apps.accounts.authentication.EcommerceJWTAuthentication"]
 ECOMMERCE_IDENTITY_CLAIM = "identity_id"
 

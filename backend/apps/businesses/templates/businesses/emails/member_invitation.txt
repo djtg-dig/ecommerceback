@@ -1,0 +1,14 @@
+Bonjour,
+
+Vous êtes invité à rejoindre l'entreprise « {{ business_name }} » sur E-commerce{% if title %} avec le titre « {{ title }} »{% endif %}.
+
+Pour consulter et accepter cette invitation, utilisez le lien sécurisé suivant :
+
+{{ invitation_url }}
+
+Cette invitation est associée à l'adresse {{ invited_email }} et expire le {{ expires_at }}. Vous devrez vous authentifier avec cette même adresse vérifiée par Carri Account.
+
+Si vous ne connaissez pas cette entreprise, ignorez cet e-mail. Aucun accès ne sera créé sans votre acceptation.
+
+E-commerce ne vous demandera jamais votre mot de passe par e-mail.
+

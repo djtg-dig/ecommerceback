@@ -528,8 +528,10 @@ le 9 octobre 2026 :
    retrait logique avec protections OWNER, services transactionnels verrouillés.
 4. **P1-A4.5 — Administration des permissions** : consultation, attribution et
    révocation OWNER-only autour des services existants, registre exposé.
-5. **P1-A4.6 — Administration des invitations** : créer/lister/détailler,
-   révoquer/renvoyer, idempotence et adaptateur d'envoi après commit.
+5. **P1-A4.10 — Administration des invitations, livré** : liste paginée,
+   création/envoi, révocation/renvoi, rotation du jeton et adaptateur texte/HTML
+   après commit. Le détail dédié n'est pas nécessaire au MVP car la liste
+   expose la même projection compacte.
 6. **P1-A4.7 — Parcours invité** : liste personnelle, acceptation/refus,
    vérification Carri et tests de concurrence.
 7. **P1-A4.8 — Validation finale** : OpenAPI, performance, documentation Flutter,

@@ -1,7 +1,15 @@
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from .models import Business, BusinessCategory, BusinessMember, BusinessMemberPermission, BusinessPaymentMethod
+from .models import (
+    Business,
+    BusinessCategory,
+    BusinessMember,
+    BusinessMemberInvitation,
+    BusinessMemberPermission,
+    BusinessPaymentMethod,
+)
+from .services.invitations import validate_invitation_state
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -152,6 +160,55 @@ class BusinessMemberPermissionGrantSerializer(serializers.Serializer):
     permission = serializers.ChoiceField(
         choices=BusinessMemberPermission.Permission.choices,
     )
+
+
+class BusinessMemberInvitationCreateSerializer(serializers.Serializer):
+    """Validated administrative request for one email invitation."""
+
+    email = serializers.EmailField(
+        max_length=254,
+        error_messages={
+            "invalid": "Veuillez saisir une adresse e-mail valide.",
+            "required": "L'adresse e-mail est obligatoire.",
+            "blank": "L'adresse e-mail est obligatoire.",
+        },
+    )
+    title = serializers.CharField(
+        max_length=120,
+        required=False,
+        allow_blank=True,
+        trim_whitespace=True,
+        default="",
+    )
+
+
+class BusinessMemberInvitationSerializer(serializers.ModelSerializer):
+    """Compact administrative projection that never exposes invitation secrets."""
+
+    status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BusinessMemberInvitation
+        fields = (
+            "public_id",
+            "email",
+            "title",
+            "status",
+            "expires_at",
+            "last_sent_at",
+            "resend_count",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+    @extend_schema_field(
+        serializers.ChoiceField(
+            choices=BusinessMemberInvitation.Status.choices,
+        )
+    )
+    def get_status(self, invitation):
+        return validate_invitation_state(invitation)
 
 
 class BusinessPermissionCatalogSerializer(serializers.Serializer):

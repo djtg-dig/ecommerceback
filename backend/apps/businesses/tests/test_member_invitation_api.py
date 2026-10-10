@@ -27,7 +27,11 @@ Permission = BusinessMemberPermission.Permission
 
 def create_business_with_owner(suffix):
     business = Business.objects.create(name=f"Invitations {suffix}")
-    identity = CarriIdentity.objects.create(carri_subject=f"owner-{suffix}")
+    identity = CarriIdentity.objects.create(
+        carri_subject=f"owner-{suffix}",
+        verified_email=f"owner-{suffix}@example.com",
+        email_verified=True,
+    )
     owner = BusinessMember.objects.create(
         business=business,
         identity=identity,
@@ -37,7 +41,11 @@ def create_business_with_owner(suffix):
 
 
 def create_member(business, suffix, *, role=BusinessMember.Role.EMPLOYEE):
-    identity = CarriIdentity.objects.create(carri_subject=f"member-{suffix}")
+    identity = CarriIdentity.objects.create(
+        carri_subject=f"member-{suffix}",
+        verified_email=f"member-{suffix}@example.com",
+        email_verified=True,
+    )
     member = BusinessMember.objects.create(
         business=business,
         identity=identity,
@@ -72,7 +80,7 @@ def test_owner_creates_invitation_with_normalized_email_and_hashed_token():
     assert invitation.member is None
     assert invitation.accepted_by is None
     assert invitation.acted_at is None
-    assert invitation.last_sent_at is not None
+    assert invitation.last_sent_at is None
     assert invitation.resend_count == 0
     assert invitation.public_id.startswith("MI")
     assert re.fullmatch(r"MI[23456789A-HJ-NP-Z]{10}", invitation.public_id)
@@ -232,9 +240,9 @@ def test_existing_membership_blocks_invitation():
     suspended.save()
 
     with pytest.raises(ValidationError, match="already has a Business membership"):
-        invite_member(owner, business, active.identity.carri_subject)
+        invite_member(owner, business, active.identity.verified_email)
     with pytest.raises(ValidationError, match="already has a Business membership"):
-        invite_member(owner, business, suspended.identity.carri_subject)
+        invite_member(owner, business, suspended.identity.verified_email)
 
     assert not BusinessMemberInvitation.objects.filter(
         business=business,
@@ -326,4 +334,4 @@ def test_invitation_title_defaults_to_empty_and_owner_cannot_be_invited():
     assert invitation.title == ""
 
     with pytest.raises(ValidationError, match="already has a Business membership"):
-        invite_member(owner, business, owner.identity.carri_subject)
+        invite_member(owner, business, owner.identity.verified_email)

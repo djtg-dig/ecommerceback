@@ -118,18 +118,22 @@ Les mutations sont refusées sur un Business `SUSPENDED` ou `ARCHIVED`.
 Aucun membre ne peut s'attribuer de permission ; les droits implicites du
 propriétaire ne sont jamais modifiés.
 
-## Invitations de membres (fondations)
+## Administration des invitations de membres
 
 `BusinessMemberInvitation` stocke une invitation par e-mail avant toute
 appartenance : `public_id` opaque `MI`, adresse normalisée, titre descriptif,
 statut `PENDING`/`ACCEPTED`/`DECLINED`/`REVOKED`/`EXPIRED`, hash SHA-256
 du jeton (le secret brut n'est jamais stocké), expiration, auteur et
 traçabilité. Une seule invitation `PENDING` (puis `EXPIRED`) existe par
-`(business, normalized_email)`. La création `invite_member` est
-transactionnelle et verrouillée ; elle exige l'OWNER actif ou
-`MANAGE_MEMBERS` explicite, un Business actif, et n'attribue aucune
-permission ni ne crée de membre. L'acceptation, le refus, le renvoi et la
-révocation sont reportés. `CarriIdentity` conserve désormais une projection
+`(business, normalized_email)`. `GET/POST .../invitations/`,
+`POST .../invitations/{MI}/resend/` et
+`POST .../invitations/{MI}/revoke/` exigent l'OWNER actif ou
+`MANAGE_MEMBERS` explicite. Les mutations exigent un Business actif et sont
+transactionnelles avec verrouillage. Elles n'attribuent aucune permission et
+ne créent aucun membre. Le renvoi tourne le jeton et renouvelle l'expiration ;
+la révocation rend l'invitation terminale. La livraison texte/HTML est
+programmée après commit et `last_sent_at` n'est renseigné qu'après succès.
+L'acceptation et le refus restent reportés. `CarriIdentity` conserve une projection
 d'adresse obtenue exclusivement par `userinfo` après validation de l'ID token,
 ainsi que les dates nécessaires au contrôle de fraîcheur de 10 minutes. Les
 endpoints d'acceptation et de refus restent hors du présent lot.
