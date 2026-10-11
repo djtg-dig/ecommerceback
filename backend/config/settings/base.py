@@ -57,6 +57,20 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {
+        "redact_carri_oauth_query": {
+            "()": "apps.accounts.logging.OAuthQueryStringRedactionFilter",
+        },
+    },
+    "loggers": {
+        "django.request": {"filters": ["redact_carri_oauth_query"]},
+        "django.server": {"filters": ["redact_carri_oauth_query"]},
+    },
+}
+
 ROOT_URLCONF = "config.urls"
 TEMPLATES = [{"BACKEND": "django.template.backends.django.DjangoTemplates", "DIRS": [], "APP_DIRS": True, "OPTIONS": {"context_processors": ["django.template.context_processors.request", "django.contrib.auth.context_processors.auth", "django.contrib.messages.context_processors.messages"]}}]
 WSGI_APPLICATION = "config.wsgi.application"

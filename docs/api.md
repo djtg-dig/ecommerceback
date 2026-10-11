@@ -67,6 +67,13 @@ de transmettre le handoff côté serveur à `POST
 Les handoffs Next sont liés au client `ecommerce-web`; les handoffs JSON
 historiques non liés restent compatibles.
 
+Si Carri Account retourne `error=access_denied`, le callback valide d'abord le
+state, la tentative et les deux liaisons navigateur, consomme la tentative,
+puis POSTe uniquement `error=access_denied` et `delivery_binding` vers cette
+même destination fixe. Il ne crée ni identité, ni handoff, ni session. Un
+`userinfo.email_verified` strictement égal à `false` reste rejeté et utilise le
+code non sensible `oauth_email_not_verified` pour le frontend Next.js.
+
 Exemple de traitement dans le récepteur Next.js (adapter les appels cookies et
 redirect à la version Next installée) :
 

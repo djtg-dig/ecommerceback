@@ -63,6 +63,17 @@ def test_verified_userinfo_requires_strict_true_boolean(claim):
         )
 
 
+def test_verified_userinfo_classifies_explicit_false_for_safe_frontend_message():
+    with patch(
+        "apps.accounts.services.oidc.fetch_userinfo",
+        return_value=userinfo_response(email_verified=False),
+    ), pytest.raises(oidc.UnverifiedOIDCEmail, match="not verified"):
+        oidc.verified_userinfo(
+            access_token="opaque-access-token",
+            subject="US1234567890",
+        )
+
+
 @pytest.mark.parametrize("email", [None, "", "not-an-email", "user@"])
 def test_verified_userinfo_rejects_missing_or_invalid_email(email):
     with patch(

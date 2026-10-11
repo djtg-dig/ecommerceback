@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
@@ -12,8 +13,28 @@ from django.test import override_settings
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from apps.accounts.logging import OAuthQueryStringRedactionFilter
 from apps.accounts.models import CarriIdentity, OAuthHandoff, OAuthLoginAttempt
 from apps.accounts.services import oidc
+
+
+def test_django_logs_redact_carri_oauth_query_strings():
+    request_line = '"GET /api/v1/auth/carri/callback/?state=private-state&code=private-code HTTP/1.1"'
+    record = logging.LogRecord(
+        "django.server",
+        logging.INFO,
+        __file__,
+        1,
+        '"%s" %s %s',
+        (request_line, 303, 0),
+        None,
+    )
+
+    assert OAuthQueryStringRedactionFilter().filter(record)
+    message = record.getMessage()
+    assert "private-state" not in message
+    assert "private-code" not in message
+    assert "/api/v1/auth/carri/callback/ HTTP/1.1" in message
 
 
 @pytest.mark.django_db
@@ -94,6 +115,231 @@ def test_web_callback_consumes_state_once_and_returns_handoff():
     assert "handoff" in response.json()
     assert reused.status_code == 400
     assert CarriIdentity.objects.get(carri_subject="web-sub").verified_email == "web@example.com"
+
+
+@pytest.mark.django_db
+@override_settings(
+    CARRI_ACCOUNT_CLIENT_ID="web-client",
+    CARRI_ACCOUNT_ISSUER="https://issuer.example",
+    CARRI_ACCOUNT_REDIRECT_URI="https://api.example/api/v1/auth/carri/callback/",
+    CARRI_ACCOUNT_WEB_HANDOFF_DELIVERY_URL="https://web.example/api/auth/carri/handoff",
+)
+def test_nextjs_access_denied_posts_only_safe_error_and_binding_then_rejects_replay(caplog):
+    delivery_binding = "N" * 43
+    client = APIClient()
+    metadata = {
+        "authorization_endpoint": "https://identity.example/oauth/authorize/",
+        "scopes_supported": ["openid", "email"],
+    }
+    with patch("apps.accounts.views.discovery", return_value=metadata):
+        login = client.get(
+            "/api/v1/auth/carri/login/",
+            {"delivery": "nextjs", "delivery_binding": delivery_binding},
+        )
+
+    state = parse_qs(urlsplit(login["Location"]).query)["state"][0]
+    attempt = OAuthLoginAttempt.objects.get(
+        state_hash=hashlib.sha256(state.encode()).hexdigest()
+    )
+    callback = client.get(
+        "/api/v1/auth/carri/callback/",
+        {"state": state, "error": "access_denied"},
+    )
+    body = callback.content.decode()
+    names = re.findall(r'<input type="hidden" name="([^"]+)"', body)
+
+    assert callback.status_code == 200
+    assert callback["Content-Type"].startswith("text/html")
+    assert callback["Cache-Control"] == "no-store, max-age=0"
+    assert callback["Referrer-Policy"] == "no-referrer"
+    assert callback["X-Frame-Options"] == "DENY"
+    assert names == ["error", "delivery_binding"]
+    assert 'action="https://web.example/api/auth/carri/handoff" method="post"' in body
+    assert 'name="error" value="access_denied"' in body
+    assert f'name="delivery_binding" value="{delivery_binding}"' in body
+    assert 'name="handoff"' not in body
+    assert not CarriIdentity.objects.exists()
+    assert not OAuthHandoff.objects.exists()
+    assert "sessionid" not in callback.cookies
+    assert callback.cookies["ecommerce_oauth_attempt"]["max-age"] == 0
+    attempt.refresh_from_db()
+    assert attempt.consumed_at is not None
+    assert state not in caplog.text
+    assert delivery_binding not in caplog.text
+
+    replay = client.get(
+        "/api/v1/auth/carri/callback/",
+        {"state": state, "error": "access_denied"},
+    )
+    assert replay.status_code == 400
+    assert replay.json()["code"] == "oauth_state_invalid_or_expired"
+    assert b"handoff-delivery" not in replay.content
+    assert not OAuthHandoff.objects.exists()
+
+
+@pytest.mark.django_db
+@override_settings(
+    CARRI_ACCOUNT_CLIENT_ID="web-client",
+    CARRI_ACCOUNT_ISSUER="https://issuer.example",
+    CARRI_ACCOUNT_REDIRECT_URI="https://api.example/api/v1/auth/carri/callback/",
+    CARRI_ACCOUNT_WEB_HANDOFF_DELIVERY_URL="https://web.example/api/auth/carri/handoff",
+)
+def test_nextjs_access_denied_rejects_invalid_state_without_delivery():
+    delivery_binding = "S" * 43
+    client = APIClient()
+    metadata = {
+        "authorization_endpoint": "https://identity.example/oauth/authorize/",
+        "scopes_supported": ["openid", "email"],
+    }
+    with patch("apps.accounts.views.discovery", return_value=metadata):
+        login = client.get(
+            "/api/v1/auth/carri/login/",
+            {"delivery": "nextjs", "delivery_binding": delivery_binding},
+        )
+
+    state = parse_qs(urlsplit(login["Location"]).query)["state"][0]
+    invalid_state = f"{state}x"
+    callback = client.get(
+        "/api/v1/auth/carri/callback/",
+        {"state": invalid_state, "error": "access_denied"},
+    )
+
+    assert callback.status_code == 400
+    assert callback.json()["code"] == "oauth_state_invalid_or_expired"
+    assert b"handoff-delivery" not in callback.content
+    assert not CarriIdentity.objects.exists()
+    assert not OAuthHandoff.objects.exists()
+
+
+@pytest.mark.django_db
+@override_settings(
+    CARRI_ACCOUNT_CLIENT_ID="web-client",
+    CARRI_ACCOUNT_ISSUER="https://issuer.example",
+    CARRI_ACCOUNT_REDIRECT_URI="https://api.example/api/v1/auth/carri/callback/",
+    CARRI_ACCOUNT_WEB_HANDOFF_DELIVERY_URL="https://web.example/api/auth/carri/handoff",
+)
+def test_nextjs_access_denied_invalidates_expired_attempt_without_delivery():
+    delivery_binding = "E" * 43
+    client = APIClient()
+    metadata = {
+        "authorization_endpoint": "https://identity.example/oauth/authorize/",
+        "scopes_supported": ["openid", "email"],
+    }
+    with patch("apps.accounts.views.discovery", return_value=metadata):
+        login = client.get(
+            "/api/v1/auth/carri/login/",
+            {"delivery": "nextjs", "delivery_binding": delivery_binding},
+        )
+
+    state = parse_qs(urlsplit(login["Location"]).query)["state"][0]
+    attempt = OAuthLoginAttempt.objects.get(
+        state_hash=hashlib.sha256(state.encode()).hexdigest()
+    )
+    attempt.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    attempt.save(update_fields=["expires_at"])
+
+    callback = client.get(
+        "/api/v1/auth/carri/callback/",
+        {"state": state, "error": "access_denied"},
+    )
+
+    assert callback.status_code == 400
+    assert callback.json()["code"] == "oauth_state_invalid_or_expired"
+    assert b"handoff-delivery" not in callback.content
+    attempt.refresh_from_db()
+    assert attempt.consumed_at is not None
+    assert not CarriIdentity.objects.exists()
+    assert not OAuthHandoff.objects.exists()
+
+
+@pytest.mark.django_db
+@override_settings(CARRI_ACCOUNT_CLIENT_ID="web-client", CARRI_ACCOUNT_ISSUER="https://issuer.example")
+def test_web_callback_rejects_unverified_userinfo_email_without_creating_identity_or_handoff():
+    state = "unverified-email-state"
+    attempt = OAuthLoginAttempt.create(
+        state=state,
+        nonce="nonce",
+        code_verifier="verifier",
+        redirect_uri="https://app.example/callback",
+    )
+    client = APIClient()
+    token_payload = {"id_token": "id", "access_token": "access"}
+    id_payload = {
+        "sub": "unverified-email-sub",
+        "auth_time": int(datetime.now(timezone.utc).timestamp()),
+    }
+    with patch("apps.accounts.views.exchange_web_code", return_value=token_payload), patch(
+        "apps.accounts.views.validate_id_token", return_value=id_payload
+    ), patch(
+        "apps.accounts.views.verified_userinfo",
+        side_effect=oidc.InvalidOIDCUserInfo("Carri userinfo response is invalid."),
+    ):
+        response = client.get(
+            "/api/v1/auth/carri/callback/", {"state": state, "code": "code"}
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "code": "oauth_proof_invalid",
+        "detail": "La preuve d'authentification est invalide.",
+    }
+    assert not CarriIdentity.objects.exists()
+    assert not OAuthHandoff.objects.exists()
+    attempt.refresh_from_db()
+    assert attempt.consumed_at is None
+
+
+@pytest.mark.django_db
+@override_settings(
+    CARRI_ACCOUNT_CLIENT_ID="web-client",
+    CARRI_ACCOUNT_ISSUER="https://issuer.example",
+    CARRI_ACCOUNT_REDIRECT_URI="https://api.example/api/v1/auth/carri/callback/",
+    CARRI_ACCOUNT_WEB_HANDOFF_DELIVERY_URL="https://web.example/api/auth/carri/handoff",
+)
+def test_nextjs_callback_delivers_specific_unverified_email_error_without_identity():
+    delivery_binding = "U" * 43
+    client = APIClient()
+    metadata = {
+        "authorization_endpoint": "https://identity.example/oauth/authorize/",
+        "scopes_supported": ["openid", "email"],
+    }
+    with patch("apps.accounts.views.discovery", return_value=metadata):
+        login = client.get(
+            "/api/v1/auth/carri/login/",
+            {"delivery": "nextjs", "delivery_binding": delivery_binding},
+        )
+
+    state = parse_qs(urlsplit(login["Location"]).query)["state"][0]
+    attempt = OAuthLoginAttempt.objects.get(
+        state_hash=hashlib.sha256(state.encode()).hexdigest()
+    )
+    token_payload = {"id_token": "id", "access_token": "access"}
+    id_payload = {
+        "sub": "unverified-nextjs-sub",
+        "auth_time": int(datetime.now(timezone.utc).timestamp()),
+    }
+    with patch("apps.accounts.views.exchange_web_code", return_value=token_payload), patch(
+        "apps.accounts.views.validate_id_token", return_value=id_payload
+    ), patch(
+        "apps.accounts.views.verified_userinfo",
+        side_effect=oidc.UnverifiedOIDCEmail("not verified"),
+    ):
+        callback = client.get(
+            "/api/v1/auth/carri/callback/",
+            {"state": state, "code": "code"},
+        )
+
+    body = callback.content.decode()
+    names = re.findall(r'<input type="hidden" name="([^"]+)"', body)
+    assert callback.status_code == 200
+    assert names == ["error", "delivery_binding"]
+    assert 'name="error" value="oauth_email_not_verified"' in body
+    assert f'name="delivery_binding" value="{delivery_binding}"' in body
+    assert not CarriIdentity.objects.exists()
+    assert not OAuthHandoff.objects.exists()
+    assert "sessionid" not in callback.cookies
+    attempt.refresh_from_db()
+    assert attempt.consumed_at is not None
 
 
 @pytest.mark.django_db
@@ -187,7 +433,10 @@ def test_callback_rejects_login_csrf_without_the_browser_binding_cookie():
 
     state = parse_qs(urlsplit(login["Location"]).query)["state"][0]
     attacker = APIClient()
-    callback = attacker.get("/api/v1/auth/carri/callback/", {"state": state, "code": "code"})
+    callback = attacker.get(
+        "/api/v1/auth/carri/callback/",
+        {"state": state, "error": "access_denied"},
+    )
 
     assert callback.status_code == 400
     assert callback.json() == {
@@ -222,7 +471,7 @@ def test_callback_rejects_substituted_delivery_binding_in_oauth_state():
     substituted_state = f"{state_prefix}.{'E' * len(delivery_binding)}"
     callback = client.get(
         "/api/v1/auth/carri/callback/",
-        {"state": substituted_state, "code": "code"},
+        {"state": substituted_state, "error": "access_denied"},
     )
 
     assert callback.status_code == 400

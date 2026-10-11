@@ -8,7 +8,11 @@
   </head>
   <body>
     <form id="handoff-delivery" action="{{ delivery_url }}" method="post">
+      {% if error %}
+      <input type="hidden" name="error" value="{{ error }}">
+      {% else %}
       <input type="hidden" name="handoff" value="{{ handoff }}">
+      {% endif %}
       <input type="hidden" name="delivery_binding" value="{{ delivery_binding }}">
       <noscript><button type="submit">Continuer</button></noscript>
     </form>

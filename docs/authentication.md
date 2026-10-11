@@ -50,6 +50,21 @@ OAuth et lié au `state`; il ne peut donc pas être remplacé indépendamment.
 `Origin` et `Sec-Fetch-Site` peuvent compléter le contrôle côté BFF, sans
 remplacer le cookie transactionnel.
 
+Pour `error=access_denied`, après validation du state, de l'expiration, du
+cookie navigateur et du binding livré par Next.js, Django consomme la tentative
+et POSTe vers la même URL configurée un formulaire contenant uniquement
+`error=access_denied` et `delivery_binding`. Le callback ne crée alors ni
+`CarriIdentity`, ni `OAuthHandoff`, ni session; le cookie navigateur OAuth est
+supprimé et le POST est protégé par les mêmes en-têtes no-store, no-referrer et
+CSP que la livraison du handoff. Un state invalide, une tentative expirée ou
+une liaison navigateur incorrecte ne sont jamais transmis.
+
+Si `userinfo.email_verified` est strictement `false`, l'authentification reste
+refusée et aucune identité ni handoff n'est créé. Le flux Next.js reçoit
+`oauth_email_not_verified` avec le binding validé afin d'afficher un message
+spécifique sans divulguer l'adresse ni la réponse Carri. Les valeurs brutes du
+callback OAuth ne sont jamais journalisées.
+
 Le handoff Next est lié au client applicatif `ecommerce-web`; il échoue fermé
 sans signature HMAC vérifiée de ce client. Configurer le mode HMAC `ENFORCE` en
 production. Le mode `DISABLED` refuse ces handoffs. Les handoffs historiques

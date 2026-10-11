@@ -34,6 +34,10 @@ class InvalidOIDCUserInfo(OIDCError):
     pass
 
 
+class UnverifiedOIDCEmail(InvalidOIDCUserInfo):
+    pass
+
+
 def _issuer():
     issuer = settings.CARRI_ACCOUNT_ISSUER.rstrip("/")
     if not issuer:
@@ -171,7 +175,9 @@ def verified_userinfo(*, access_token, subject):
     data = fetch_userinfo(access_token)
     if data.get("public_id") != subject:
         raise InvalidOIDCUserInfo("Carri userinfo subject does not match the ID token.")
-    if type(data.get("email_verified")) is not bool or not data["email_verified"]:
+    if data.get("email_verified") is False:
+        raise UnverifiedOIDCEmail("Carri userinfo email is not verified.")
+    if type(data.get("email_verified")) is not bool:
         raise InvalidOIDCUserInfo("Carri userinfo email is not verified.")
     email = data.get("email")
     if not isinstance(email, str):

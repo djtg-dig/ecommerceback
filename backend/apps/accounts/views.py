@@ -22,6 +22,7 @@ from .services.oidc import (
     InvalidOIDCToken,
     OIDCError,
     OIDCUnavailable,
+    UnverifiedOIDCEmail,
     discovery,
     exchange_web_code,
     validate_id_token,
@@ -109,8 +110,10 @@ def _web_handoff_delivery_url():
     return raw_url
 
 
-def _delivery_form_response(*, request, handoff, delivery_url, delivery_binding):
-    """POST a handoff without placing it in a URL, referer, or cache."""
+def _delivery_form_response(
+    *, request, delivery_url, delivery_binding, handoff=None, error=None
+):
+    """POST one allowlisted handoff or error without a URL or cache leak."""
 
     parsed = urlsplit(delivery_url)
     form_action_origin = f"{parsed.scheme}://{parsed.netloc}"
@@ -120,6 +123,7 @@ def _delivery_form_response(*, request, handoff, delivery_url, delivery_binding)
         "accounts/handoff_delivery.html",
         {
             "handoff": handoff,
+            "error": error,
             "delivery_binding": delivery_binding,
             "delivery_url": delivery_url,
             "csp_nonce": csp_nonce,
@@ -299,6 +303,9 @@ class CarriCallbackView(APIView):
             with transaction.atomic():
                 attempt = OAuthLoginAttempt.objects.select_for_update().get(state_hash=state_hash)
                 if not attempt.is_usable:
+                    if attempt.consumed_at is None:
+                        attempt.consumed_at = timezone.now()
+                        attempt.save(update_fields=["consumed_at"])
                     return _authentication_error(
                         "oauth_state_invalid_or_expired",
                         "L'état OAuth est invalide ou expiré.",
@@ -328,6 +335,17 @@ class CarriCallbackView(APIView):
                 if request.query_params.get("error"):
                     attempt.consumed_at = timezone.now()
                     attempt.save(update_fields=["consumed_at"])
+                    if (
+                        request.query_params.get("error") == "access_denied"
+                        and attempt.handoff_delivery_url
+                    ):
+                        response = _delivery_form_response(
+                            request=request,
+                            error="access_denied",
+                            delivery_url=attempt.handoff_delivery_url,
+                            delivery_binding=delivery_binding,
+                        )
+                        return _clear_browser_binding_cookie(response)
                     return _clear_browser_binding_cookie(_authentication_error(
                         "oauth_authorization_denied",
                         "L'autorisation Carri Account a été refusée.",
@@ -344,10 +362,26 @@ class CarriCallbackView(APIView):
                     nonce=attempt.nonce, access_token=tokens.get("access_token"), require_nonce=True,
                     require_at_hash=bool(tokens.get("access_token")),
                 )
-                email = verified_userinfo(
-                    access_token=tokens.get("access_token", ""),
-                    subject=payload["sub"],
-                )
+                try:
+                    email = verified_userinfo(
+                        access_token=tokens.get("access_token", ""),
+                        subject=payload["sub"],
+                    )
+                except UnverifiedOIDCEmail:
+                    attempt.consumed_at = timezone.now()
+                    attempt.save(update_fields=["consumed_at"])
+                    if attempt.handoff_delivery_url:
+                        response = _delivery_form_response(
+                            request=request,
+                            error="oauth_email_not_verified",
+                            delivery_url=attempt.handoff_delivery_url,
+                            delivery_binding=delivery_binding,
+                        )
+                        return _clear_browser_binding_cookie(response)
+                    return _clear_browser_binding_cookie(_authentication_error(
+                        "oauth_proof_invalid",
+                        "La preuve d'authentification est invalide.",
+                    ))
                 identity = _identity(
                     payload["sub"],
                     verified_email=email,
@@ -498,7 +532,8 @@ CarriCallbackView.get = extend_schema(
     description=(
         "Traite le callback OIDC. Sans livraison demandée, retourne le handoff "
         "JSON historique. Avec `delivery=nextjs`, répond par une page sans cache "
-        "qui POSTe le handoff opaque vers la destination Next.js configurée."
+        "qui POSTe le handoff opaque ou un code de refus allowlisté, avec le "
+        "binding validé, vers la destination Next.js configurée."
     ),
 )(CarriCallbackView.get)
 CarriHandoffConsumeView.post = extend_schema(
