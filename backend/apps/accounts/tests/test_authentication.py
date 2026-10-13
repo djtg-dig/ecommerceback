@@ -2,6 +2,7 @@ import base64
 import hashlib
 import logging
 import re
+import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
@@ -16,6 +17,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from apps.accounts.logging import OAuthQueryStringRedactionFilter
 from apps.accounts.models import CarriIdentity, OAuthHandoff, OAuthLoginAttempt
 from apps.accounts.services import oidc
+from apps.accounts.views import _pair
 
 
 def test_django_logs_redact_carri_oauth_query_strings():
@@ -89,6 +91,42 @@ def test_me_requires_ecommerce_jwt_and_returns_identity():
     response = client.get("/api/v1/auth/me/", HTTP_AUTHORIZATION=f"Bearer {access}")
     assert response.status_code == 200
     assert response.json() == {"id": str(identity.id), "carri_subject": "sub-1"}
+
+
+@pytest.mark.django_db
+def test_ecommerce_token_pair_refreshes_and_authenticates_businesses():
+    identity = CarriIdentity.objects.create(carri_subject="refreshable-subject")
+    client = APIClient()
+
+    issued = _pair(identity)
+    refreshed = client.post(
+        "/api/v1/auth/token/refresh/", {"refresh": issued["refresh"]}, format="json"
+    )
+
+    assert set(issued) == {"access", "refresh"}
+    assert refreshed.status_code == 200
+    assert set(refreshed.json()) == {"access", "refresh"}
+    assert refreshed.json()["refresh"] != issued["refresh"]
+    assert client.get(
+        "/api/v1/businesses/",
+        HTTP_AUTHORIZATION=f"Bearer {refreshed.json()['access']}",
+    ).status_code == 200
+
+
+@pytest.mark.django_db
+def test_ecommerce_token_refresh_rejects_invalid_expired_and_unknown_identities():
+    client = APIClient()
+    expired = RefreshToken()
+    expired["identity_id"] = str(uuid.uuid4())
+    expired.set_exp(lifetime=timedelta(seconds=-1))
+    invalid_identity = RefreshToken()
+    invalid_identity["identity_id"] = "not-a-uuid"
+    unknown_identity = RefreshToken()
+    unknown_identity["identity_id"] = str(uuid.uuid4())
+
+    for refresh in ("not-a-token", str(expired), str(invalid_identity), str(unknown_identity)):
+        response = client.post("/api/v1/auth/token/refresh/", {"refresh": refresh}, format="json")
+        assert response.status_code == 401
 
 
 @pytest.mark.django_db

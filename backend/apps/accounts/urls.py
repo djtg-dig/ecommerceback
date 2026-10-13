@@ -2,15 +2,17 @@ from django.urls import path
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework_simplejwt.views import TokenRefreshView
 from rest_framework import serializers
-from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+from .serializers import EcommerceTokenRefreshSerializer
 
 
 class EcommerceTokenRefreshView(TokenRefreshView):
     """Refresh an ecommerce token pair without documenting any provider secret."""
 
+    serializer_class = EcommerceTokenRefreshSerializer
+
     post = extend_schema(
         tags=["Authentication"], operation_id="ecommerce_token_refresh",
-        request=TokenRefreshSerializer, responses={200: inline_serializer("EcommerceTokenRefreshResponse", {"access": serializers.CharField(read_only=True), "refresh": serializers.CharField(read_only=True)}), 401: None},
+        request=EcommerceTokenRefreshSerializer, responses={200: inline_serializer("EcommerceTokenRefreshResponse", {"access": serializers.CharField(read_only=True), "refresh": serializers.CharField(read_only=True)}), 401: None},
     )(TokenRefreshView.post)
 
 
