@@ -22,8 +22,8 @@ from .views import (
 
 urlpatterns = [
     path("", BusinessesView.as_view()),
-    path("<str:public_id>/", BusinessDetailView.as_view()),
     path("<str:public_id>/my-permissions/", BusinessMyPermissionsView.as_view()),
+    path("<str:public_id>/", BusinessDetailView.as_view()),
     path("<str:public_id>/members/", BusinessMembersView.as_view()),
     path("<str:public_id>/invitations/", BusinessInvitationsView.as_view()),
     path(

@@ -237,6 +237,26 @@ class BusinessDetailView(APIView):
 
         return Response(BusinessSerializer(business).data)
 
+    def patch(self, request, public_id):
+        business = Business.objects.filter(public_id=public_id).first()
+        if business is None:
+            return Response({"detail": "Not found."}, status=404)
+        require_permission(request.user, business, BusinessMemberPermission.Permission.UPDATE_BUSINESS, write=True)
+        serializer = BusinessUpdateSerializer(business, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        categories = data.pop("categories", None)
+        primary_category = data.pop("primary_category", None)
+        serializer = BusinessUpdateSerializer(business, data=data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        if categories is not None:
+            try:
+                replace_categories(business, categories, primary_category)
+            except ValueError as error:
+                return Response({"detail": str(error)}, status=400)
+        return Response(BusinessSerializer(business).data)
+
 
 class BusinessMyPermissionsView(APIView):
     """Expose read capabilities for the current member; writes remain endpoint-scoped."""
@@ -255,45 +275,6 @@ class BusinessMyPermissionsView(APIView):
             if has_permission(member, permission, write=False)
         ]
         return Response({"member_status": member.status, "permissions": permissions})
-
-    def patch(self, request, public_id):
-        business = Business.objects.filter(public_id=public_id).first()
-        if business is None:
-            return Response({"detail": "Not found."}, status=404)
-        require_permission(
-            request.user,
-            business,
-            BusinessMemberPermission.Permission.UPDATE_BUSINESS,
-            write=True,
-        )
-
-        serializer = BusinessUpdateSerializer(
-            business,
-            data=request.data,
-            partial=True,
-        )
-        serializer.is_valid(raise_exception=True)
-
-        data = dict(serializer.validated_data)
-        categories = data.pop("categories", None)
-        primary_category = data.pop("primary_category", None)
-
-        serializer = BusinessUpdateSerializer(
-            business,
-            data=data,
-            partial=True,
-        )
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-
-        if categories is not None:
-            try:
-                replace_categories(business, categories, primary_category)
-            except ValueError as error:
-                return Response({"detail": str(error)}, status=400)
-
-        return Response(BusinessSerializer(business).data)
-
 
 class BusinessMembersView(APIView):
     def get(self, request, public_id):
