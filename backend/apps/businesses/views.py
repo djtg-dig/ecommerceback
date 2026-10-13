@@ -23,6 +23,7 @@ from .models import (
 )
 from .permissions import (
     has_permission,
+    membership_for,
     require_any_permission,
     require_permission,
     validate_permission,
@@ -235,6 +236,25 @@ class BusinessDetailView(APIView):
             return Response({"detail": "Not found."}, status=404)
 
         return Response(BusinessSerializer(business).data)
+
+
+class BusinessMyPermissionsView(APIView):
+    """Expose read capabilities for the current member; writes remain endpoint-scoped."""
+
+    def get(self, request, public_id):
+        business = Business.objects.filter(public_id=public_id).first()
+        if not business:
+            raise NotFound("Not found.")
+        member = membership_for(request.user, business, include_suspended=True)
+        if member is None or member.status == BusinessMember.Status.REMOVED:
+            raise NotFound("Not found.")
+        if member.status != BusinessMember.Status.ACTIVE:
+            raise PermissionDenied("Forbidden.")
+        permissions = [
+            permission for permission in BusinessMemberPermission.Permission.values
+            if has_permission(member, permission, write=False)
+        ]
+        return Response({"member_status": member.status, "permissions": permissions})
 
     def patch(self, request, public_id):
         business = Business.objects.filter(public_id=public_id).first()
