@@ -26,18 +26,54 @@ L’API manuelle n’accepte que :
 
 Toutes les mutations passent par `apply_stock_movement`. Une transaction `atomic` verrouille d’abord la ligne InventoryItem avec `select_for_update(of=("self",))`, calcule les valeurs avant/après, met à jour le solde et crée le mouvement dans la même transaction. Deux sorties concurrentes ne peuvent donc pas dépenser le même stock. Si l’une des deux écritures échoue, la transaction entière est annulée.
 
-Les opérations manuelles ne reçoivent pas de clé d’idempotence. Les mouvements automatiques de retour sont protégés par l’idempotence du `SaleReturn` qui les crée.
+Chaque mouvement manuel exige désormais un en-tête `Idempotency-Key`. La clé est
+unique par entreprise et liée à une empreinte du stock ciblé, du type, de la
+quantité cible ou du delta et du motif. Un rejeu identique retourne le mouvement
+déjà écrit sans modifier le solde; la même clé avec une autre intention répond
+`409`. Les mouvements automatiques restent protégés par le verrouillage de leur
+document métier; les retours utilisent en plus l’idempotence du `SaleReturn`.
 
 ## Permissions
 
-Les membres actifs OWNER, MANAGER et EMPLOYEE peuvent consulter les balances et l’historique. Seuls OWNER et MANAGER peuvent créer un InventoryItem ou appliquer un mouvement manuel. Les produits ou variantes archivés ne peuvent recevoir aucune nouvelle opération normale; leur historique reste lisible.
+La consultation des soldes, indicateurs et historiques exige
+`VIEW_INVENTORY`. La création d’un `InventoryItem` et les mouvements manuels
+exigent `MANAGE_INVENTORY`. Les titres et anciens rôles ne participent jamais à
+l’autorisation; les permissions effectives Django sont l’unique autorité. Les
+produits ou variantes archivés ne peuvent recevoir aucune nouvelle opération
+normale; leur historique reste lisible.
 
 ## Purchase integration
 
-La réception Purchase crée des mouvements IN système référencés PURCHASE et peut créer le premier InventoryItem à zéro.
+Un brouillon ou un achat simplement confirmé ne modifie pas le stock. La
+transition atomique `CONFIRMED → RECEIVED` crée une seule fois des mouvements
+`IN` système avec `reference_type="PURCHASE"` et la ligne d’achat comme
+référence. Elle peut créer le premier `InventoryItem` à zéro. Un achat reçu ne
+peut plus être annulé par le workflow actuel, ce qui évite une restauration
+physique implicite.
 
 ## Sales integration
-La finalisation Sale génère des mouvements SALE système via le service Inventory.
+La création d’un brouillon ne réserve ni ne retire de stock. La transition
+atomique `DRAFT → COMPLETED` génère les mouvements `SALE`, refuse toute sortie
+supérieure au disponible et annule également les effets financiers en cas
+d’échec. Seuls les brouillons peuvent être annulés; une annulation financière
+d’une vente terminée ne restaure donc jamais silencieusement les marchandises.
+
+## Endpoints de consultation
+
+- `GET /api/v1/businesses/{SH}/inventory/` accepte `q`, `status` (`AVAILABLE`,
+  `LOW_STOCK`, `OUT_OF_STOCK`) et `ordering` (`quantity`, `-quantity`).
+- `GET /api/v1/businesses/{SH}/inventory/summary/` retourne les produits suivis,
+  en stock, en rupture, sous seuil, la quantité totale disponible et les dix
+  derniers mouvements.
+- `GET /api/v1/businesses/{SH}/inventory/movements/` retourne l’historique
+  paginé et accepte `product`, `type`, `origin`, `date_from` et `date_to`.
+- `POST /api/v1/businesses/{SH}/inventory/{IV}/movements/` exige
+  `Idempotency-Key` et n’accepte que `IN`, `OUT` et `ADJUSTMENT`.
+
+Les libellés et références exposés proviennent du catalogue du même tenant.
+Aucune unité n’est affichée car le modèle Catalogue ne définit actuellement
+aucun champ d’unité. La valorisation financière n’est pas calculée : les coûts
+peuvent être absents et le prix de vente ne constitue pas un coût de stock.
 
 ## Sale Returns integration
 

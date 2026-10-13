@@ -180,6 +180,17 @@ class BusinessMemberInvitationCreateSerializer(serializers.Serializer):
         trim_whitespace=True,
         default="",
     )
+    permissions = serializers.ListField(
+        child=serializers.ChoiceField(
+            choices=BusinessMemberPermission.Permission.choices,
+        ),
+        required=False,
+        allow_empty=True,
+        default=list,
+    )
+
+    def validate_permissions(self, permissions):
+        return list(dict.fromkeys(permissions))
 
 
 class BusinessMemberInvitationSerializer(serializers.ModelSerializer):
@@ -193,6 +204,7 @@ class BusinessMemberInvitationSerializer(serializers.ModelSerializer):
             "public_id",
             "email",
             "title",
+            "permissions",
             "status",
             "expires_at",
             "last_sent_at",
@@ -258,7 +270,35 @@ class BusinessMemberInvitationActionSerializer(serializers.ModelSerializer):
             "business_name",
             "member_public_id",
             "member_title",
+            "permissions",
             "acted_at",
+        )
+        read_only_fields = fields
+
+
+class BusinessMemberInvitationRecipientSerializer(serializers.ModelSerializer):
+    """Invitation visible only to its authenticated Carri recipient."""
+
+    business_public_id = serializers.CharField(
+        source="business.public_id",
+        read_only=True,
+    )
+    business_name = serializers.CharField(
+        source="business.name",
+        read_only=True,
+    )
+
+    class Meta:
+        model = BusinessMemberInvitation
+        fields = (
+            "public_id",
+            "business_public_id",
+            "business_name",
+            "title",
+            "permissions",
+            "status",
+            "expires_at",
+            "created_at",
         )
         read_only_fields = fields
 

@@ -2,9 +2,10 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from unittest.mock import patch
 
 import pytest
-from django.db import close_old_connections
+from django.db import IntegrityError, close_old_connections
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -13,6 +14,7 @@ from apps.businesses.models import (
     Business,
     BusinessMember,
     BusinessMemberInvitation,
+    BusinessMemberPermission,
 )
 from apps.businesses.services.invitations import (
     InvitationActionError,
@@ -37,7 +39,12 @@ def identity(suffix, email=None, *, fresh=True, verified=True):
     )
 
 
-def invitation_context(suffix="recipient", *, title="Caissier"):
+def invitation_context(
+    suffix="recipient",
+    *,
+    title="Caissier",
+    permissions=None,
+):
     business = Business.objects.create(name=f"Commerce {suffix}")
     owner_identity = identity(f"owner-{suffix}")
     owner = BusinessMember.objects.create(
@@ -51,6 +58,7 @@ def invitation_context(suffix="recipient", *, title="Caissier"):
         business,
         recipient.verified_email,
         title=title,
+        permissions=permissions,
     )
     return business, owner, recipient, invitation, token
 
@@ -94,6 +102,117 @@ def test_recipient_accepts_and_gets_permissionless_non_owner_membership():
     assert invitation.accepted_by == recipient
     assert invitation.member == member
     assert invitation.acted_at is not None
+
+
+def test_recipient_acceptance_applies_initial_permissions_atomically():
+    permission_values = [
+        BusinessMemberPermission.Permission.VIEW_CATALOG,
+        BusinessMemberPermission.Permission.VIEW_INVENTORY,
+    ]
+    business, owner, recipient, invitation, token = invitation_context(
+        "initial-permissions",
+        permissions=permission_values,
+    )
+
+    response = client_for(recipient).post(
+        action_url(invitation, "accept"),
+        {"token": token},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    member = BusinessMember.objects.get(business=business, identity=recipient)
+    assert list(
+        member.permissions.order_by("permission").values_list(
+            "permission",
+            flat=True,
+        )
+    ) == sorted(permission_values)
+    assert response.data["permissions"] == permission_values
+
+
+def test_permission_failure_rolls_back_member_and_invitation_acceptance():
+    business, owner, recipient, invitation, token = invitation_context(
+        "atomic-permissions",
+        permissions=[BusinessMemberPermission.Permission.VIEW_CATALOG],
+    )
+
+    with patch.object(
+        BusinessMemberPermission.objects,
+        "bulk_create",
+        side_effect=IntegrityError("permission write failed"),
+    ):
+        with pytest.raises(IntegrityError):
+            accept_member_invitation(recipient, invitation.public_id, token)
+
+    invitation.refresh_from_db()
+    assert invitation.status == BusinessMemberInvitation.Status.PENDING
+    assert invitation.member is None
+    assert not BusinessMember.objects.filter(
+        business=business,
+        identity=recipient,
+    ).exists()
+
+
+def test_recipient_inbox_lists_only_matching_pending_invitations():
+    business, owner, recipient, invitation, token = invitation_context(
+        "inbox",
+        permissions=[BusinessMemberPermission.Permission.VIEW_CATALOG],
+    )
+    other = identity("other-inbox")
+
+    response = client_for(recipient).get(
+        "/api/v1/me/business-invitations/"
+    )
+    isolated = client_for(other).get("/api/v1/me/business-invitations/")
+
+    assert response.status_code == 200
+    assert len(response.data) == 1
+    assert response.data[0]["public_id"] == invitation.public_id
+    assert response.data[0]["business_public_id"] == business.public_id
+    assert response.data[0]["business_name"] == business.name
+    assert response.data[0]["title"] == "Caissier"
+    assert response.data[0]["permissions"] == [
+        BusinessMemberPermission.Permission.VIEW_CATALOG
+    ]
+    assert response.data[0]["status"] == BusinessMemberInvitation.Status.PENDING
+    assert response.data[0]["expires_at"]
+    assert isolated.status_code == 200
+    assert isolated.data == []
+
+
+def test_recipient_can_accept_or_decline_from_authenticated_inbox():
+    business, owner, recipient, invitation, token = invitation_context(
+        "account-accept",
+        permissions=[BusinessMemberPermission.Permission.VIEW_SALES],
+    )
+    accepted = client_for(recipient).post(
+        f"/api/v1/me/business-invitations/{invitation.public_id}/accept-authenticated/",
+        {},
+        format="json",
+    )
+
+    assert accepted.status_code == 200
+    member = BusinessMember.objects.get(business=business, identity=recipient)
+    assert member.permissions.filter(
+        permission=BusinessMemberPermission.Permission.VIEW_SALES
+    ).exists()
+
+    business2, owner2, recipient2, invitation2, token2 = invitation_context(
+        "account-decline"
+    )
+    declined = client_for(recipient2).post(
+        f"/api/v1/me/business-invitations/{invitation2.public_id}/decline-authenticated/",
+        {},
+        format="json",
+    )
+
+    assert declined.status_code == 200
+    assert declined.data["status"] == BusinessMemberInvitation.Status.DECLINED
+    assert not BusinessMember.objects.filter(
+        business=business2,
+        identity=recipient2,
+    ).exists()
 
 
 def test_recipient_declines_without_membership_or_permission():

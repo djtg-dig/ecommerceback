@@ -1,5 +1,8 @@
 """Transactional stock mutations and sellable-target invariants."""
 
+import hashlib
+import json
+
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
@@ -8,6 +11,28 @@ from django.db import IntegrityError, transaction
 from .models import InventoryItem, StockMovement
 
 MANUAL_MOVEMENT_TYPES = {StockMovement.Type.IN, StockMovement.Type.OUT, StockMovement.Type.ADJUSTMENT}
+
+
+class StockMovementIdempotencyConflict(ValidationError):
+    """Raised when one retry key is reused for a different stock intent."""
+
+
+def movement_fingerprint(*, inventory_item, movement_type, quantity, target_quantity, reason):
+    def canonical(value):
+        if value is None:
+            return None
+        return format(Decimal(str(value)).normalize(), "f")
+
+    payload = {
+        "inventory_item": inventory_item.public_id,
+        "movement_type": movement_type,
+        "quantity": canonical(quantity),
+        "target_quantity": canonical(target_quantity),
+        "reason": reason or "",
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def validate_inventory_target(*, business, product=None, variant=None, allow_archived_target=False) -> None:
@@ -58,7 +83,7 @@ def create_inventory_item(*, business, product=None, variant=None, low_stock_thr
     raise RuntimeError("Impossible de générer un identifiant inventaire unique.")
 
 
-def apply_stock_movement(*, inventory_item, movement_type, performed_by, quantity=None, target_quantity=None, reason="", reference_type=None, reference_id=None, allow_archived_target=False):
+def apply_stock_movement(*, inventory_item, movement_type, performed_by, quantity=None, target_quantity=None, reason="", reference_type=None, reference_id=None, allow_archived_target=False, idempotency_key=""):
     """Atomically update one balance and append its immutable movement event.
 
     The row lock is acquired before reading the balance. ``IN`` and ``OUT``
@@ -70,6 +95,25 @@ def apply_stock_movement(*, inventory_item, movement_type, performed_by, quantit
         raise ValidationError({"type": "Seuls IN, OUT et ADJUSTMENT sont autorisés manuellement."})
     with transaction.atomic():
         item = InventoryItem.objects.select_for_update(of=("self",)).select_related("product", "variant__product").get(pk=inventory_item.pk)
+        fingerprint = movement_fingerprint(
+            inventory_item=item,
+            movement_type=movement_type,
+            quantity=quantity,
+            target_quantity=target_quantity,
+            reason=reason,
+        ) if idempotency_key else ""
+        if idempotency_key:
+            existing = StockMovement.objects.filter(
+                business=item.business,
+                idempotency_key=idempotency_key,
+            ).first()
+            if existing:
+                if existing.idempotency_fingerprint != fingerprint:
+                    raise StockMovementIdempotencyConflict(
+                        "La clé d’idempotence correspond à un autre mouvement."
+                    )
+                existing._idempotent_replay = True
+                return existing
         target = item.variant or item.product
         validate_inventory_target(business=item.business, product=item.product, variant=item.variant, allow_archived_target=allow_archived_target)
         before = item.quantity
@@ -95,8 +139,17 @@ def apply_stock_movement(*, inventory_item, movement_type, performed_by, quantit
             InventoryItem.objects.filter(pk=item.pk).update(quantity=after)
         else:
             item.save(update_fields=("quantity", "updated_at"))
-        return StockMovement.objects.create(
-            business=item.business, inventory_item=item, movement_type=movement_type,
-            quantity=delta, quantity_before=before, quantity_after=after,
-            reason=reason or "", performed_by=performed_by, reference_type=reference_type, reference_id=reference_id,
-        )
+        try:
+            return StockMovement.objects.create(
+                business=item.business, inventory_item=item, movement_type=movement_type,
+                quantity=delta, quantity_before=before, quantity_after=after,
+                reason=reason or "", performed_by=performed_by, reference_type=reference_type, reference_id=reference_id,
+                idempotency_key=idempotency_key,
+                idempotency_fingerprint=fingerprint,
+            )
+        except IntegrityError as exc:
+            if idempotency_key:
+                raise StockMovementIdempotencyConflict(
+                    "La clé d’idempotence est déjà utilisée."
+                ) from exc
+            raise

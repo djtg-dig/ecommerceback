@@ -1,16 +1,18 @@
 # Invitations de membres Business
 
 Les endpoints administratifs utilisent un JWT E-commerce et les identifiants
-publics `SH` (Business) et `MI` (invitation). Ils exigent un OWNER actif ou un
-membre actif disposant explicitement de `MANAGE_MEMBERS`. Un ancien rôle ou un
-titre professionnel n'accorde aucun accès. Un Business inconnu répond `404`
+publics `SH` (Business) et `MI` (invitation). La lecture exige `VIEW_MEMBERS` ;
+la création, le renvoi et la révocation exigent `MANAGE_MEMBERS`. Le propriétaire
+actif conserve ses droits implicites. Un ancien rôle ou un titre professionnel
+n'accorde aucun accès. Un Business inconnu répond `404`
 `business_not_found` ; une invitation inconnue du tenant répond `404`
 `invitation_not_found` ; un membre connu sans permission répond `403`
 `invitation_permission_denied`.
 
-Les réponses ne contiennent jamais `token`, `token_hash`, UUID interne ou
-permission future. Une invitation ne crée aucun `BusinessMember` et n'attribue
-aucune permission avant son acceptation explicite par le destinataire.
+Les réponses ne contiennent jamais `token`, `token_hash` ou UUID interne. Une
+invitation conserve les permissions proposées, mais ne crée aucun
+`BusinessMember` et n'attribue aucune permission avant son acceptation
+explicite par le destinataire.
 
 ## Lister les invitations
 
@@ -30,6 +32,7 @@ ordre stable du plus récent au plus ancien. `page_size` vaut 20 par défaut et
       "public_id": "MI23456789AB",
       "email": "membre@example.com",
       "title": "Caissier",
+      "permissions": ["VIEW_CATALOG", "VIEW_INVENTORY"],
       "status": "PENDING",
       "expires_at": "2026-10-17T10:00:00+01:00",
       "last_sent_at": "2026-10-10T10:00:01+01:00",
@@ -50,18 +53,23 @@ Codes : `200`, `403`, `404`.
 ```json
 {
   "email": "membre@example.com",
-  "title": "Caissier"
+  "title": "Caissier",
+  "permissions": ["VIEW_CATALOG", "VIEW_INVENTORY"]
 }
 ```
 
 `email` est obligatoire et normalisé par `trim` puis minuscules. `title` est
-facultatif, descriptif, limité à 120 caractères et ne confère aucun droit.
+facultatif, descriptif, limité à 120 caractères et ne confère aucun droit par
+lui-même. `permissions` est une liste facultative, vide par défaut, validée
+contre les choix `BusinessMemberPermission.Permission`; une valeur inconnue
+est refusée et les doublons sont supprimés en conservant l'ordre.
 Une adresse correspondant à un membre actif ou suspendu est refusée. Une seule
 invitation `PENDING` est autorisée par entreprise et adresse.
 
 La réponse `201` utilise la projection compacte montrée ci-dessus. Erreurs :
 
 - `400 invalid_email` : « Veuillez saisir une adresse e-mail valide. » ;
+- `400 permissions` : au moins une permission proposée est inconnue ;
 - `403 invitation_permission_denied` : permission insuffisante ;
 - `404 business_not_found` : entreprise inaccessible ;
 - `409 invitation_already_pending` : invitation ouverte existante ;
@@ -224,7 +232,8 @@ Règles métier et effets de bord, dans une seule transaction :
 - le Business, l'identité Carri, l'invitation et toute appartenance existante
   sont verrouillés avant décision ;
 - un `BusinessMember` `ACTIVE`, `role=EMPLOYEE`, non propriétaire, portant le
-  titre proposé, est créé ; aucune permission ne lui est attribuée ;
+  titre proposé, est créé ; les permissions proposées et validées sont créées
+  dans la même transaction ;
 - l'invitation passe `ACCEPTED` avec `accepted_by` et `acted_at` renseignés, ce
   qui consomme le jeton ;
 - une appartenance déjà présente, même `REMOVED`, est refusée par `409` sans
@@ -240,6 +249,7 @@ Réponse `200` :
   "business_name": "Commerce Exemple",
   "member_public_id": "BM23456789AB",
   "member_title": "Caissier",
+  "permissions": ["VIEW_CATALOG", "VIEW_INVENTORY"],
   "acted_at": "2026-10-10T10:05:00+01:00"
 }
 ```
@@ -252,6 +262,23 @@ Permission, corps et contrôles d'identité identiques à l'acceptation. Le serv
 place l'invitation en `DECLINED`, renseigne `declined_by` et `acted_at`, sans
 créer de membre ni modifier de permission. Une invitation refusée ne peut plus
 être acceptée.
+
+## Boîte de réception authentifiée
+
+`GET /api/v1/me/business-invitations/` retourne uniquement les invitations en
+attente, non expirées, d'une entreprise active, dont l'adresse normalisée
+correspond à l'adresse Carri vérifiée de la session. La projection contient le
+nom et l'identifiant public de l'entreprise, le titre, les permissions proposées
+et l'expiration, sans adresse d'un tiers ni secret.
+
+Les actions suivantes permettent de traiter une invitation depuis cette boîte
+de réception, sans renvoyer le secret au navigateur :
+
+- `POST /api/v1/me/business-invitations/{MI}/accept-authenticated/` ;
+- `POST /api/v1/me/business-invitations/{MI}/decline-authenticated/`.
+
+Elles exigent la même adresse vérifiée et la même preuve Carri récente que le
+parcours par lien. Les endpoints historiques avec jeton restent inchangés.
 
 ## Erreurs du parcours destinataire
 

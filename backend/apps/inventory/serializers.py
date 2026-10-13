@@ -15,10 +15,28 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     variant = serializers.CharField(source="variant.public_id", read_only=True, allow_null=True)
     available_quantity = serializers.DecimalField(max_digits=14, decimal_places=3, read_only=True)
     is_low_stock = serializers.BooleanField(read_only=True)
+    item_name = serializers.SerializerMethodField()
+    internal_reference = serializers.SerializerMethodField()
+    stock_status = serializers.SerializerMethodField()
+    last_movement_at = serializers.DateTimeField(read_only=True, allow_null=True)
 
     class Meta:
         model = InventoryItem
-        fields = ("public_id", "product", "variant", "quantity", "reserved_quantity", "available_quantity", "low_stock_threshold", "is_low_stock", "created_at", "updated_at")
+        fields = ("public_id", "product", "variant", "item_name", "internal_reference", "quantity", "reserved_quantity", "available_quantity", "low_stock_threshold", "is_low_stock", "stock_status", "last_movement_at", "created_at", "updated_at")
+
+    def get_item_name(self, item):
+        return item.product.name if item.product_id else item.variant.product.name
+
+    def get_internal_reference(self, item):
+        target = item.product if item.product_id else item.variant
+        return target.internal_reference
+
+    def get_stock_status(self, item):
+        if item.available_quantity == 0:
+            return "OUT_OF_STOCK"
+        if item.is_low_stock:
+            return "LOW_STOCK"
+        return "AVAILABLE"
 
 
 class InventoryItemCreateSerializer(serializers.Serializer):
@@ -38,10 +56,26 @@ class StockMovementSerializer(serializers.ModelSerializer):
     """Expose immutable event data without internal relationships."""
 
     performed_by = serializers.UUIDField(source="performed_by_id", read_only=True)
+    inventory_item = serializers.CharField(source="inventory_item.public_id", read_only=True)
+    item_name = serializers.SerializerMethodField()
+    product = serializers.SerializerMethodField()
+    variant = serializers.SerializerMethodField()
 
     class Meta:
         model = StockMovement
-        fields = ("public_id", "movement_type", "quantity", "quantity_before", "quantity_after", "reason", "performed_by", "created_at")
+        fields = ("public_id", "inventory_item", "item_name", "product", "variant", "movement_type", "quantity", "quantity_before", "quantity_after", "reason", "reference_type", "reference_id", "performed_by", "created_at")
+
+    def get_item_name(self, movement):
+        item = movement.inventory_item
+        return item.product.name if item.product_id else item.variant.product.name
+
+    def get_product(self, movement):
+        item = movement.inventory_item
+        return item.product.public_id if item.product_id else item.variant.product.public_id
+
+    def get_variant(self, movement):
+        item = movement.inventory_item
+        return item.variant.public_id if item.variant_id else None
 
 
 class StockMovementCreateSerializer(serializers.Serializer):

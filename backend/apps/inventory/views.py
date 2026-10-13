@@ -1,8 +1,15 @@
 """Tenant-scoped inventory reads and controlled manual stock operations."""
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from datetime import datetime, time
+from decimal import Decimal
+
 from django.db import IntegrityError
+from django.db.models import Max, Q
+from django.utils import timezone
+from django.utils.dateparse import parse_date
 from rest_framework import status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -10,7 +17,7 @@ from apps.businesses.models import Business, BusinessMemberPermission
 from apps.businesses.permissions import require_permission
 from .models import InventoryItem, StockMovement
 from .serializers import InventoryItemCreateSerializer, InventoryItemSerializer, StockMovementCreateSerializer, StockMovementSerializer
-from .services import apply_stock_movement, create_inventory_item
+from .services import StockMovementIdempotencyConflict, apply_stock_movement, create_inventory_item
 
 
 class BusinessInventoryMixin:
@@ -59,14 +66,36 @@ class InventoryListCreateView(BusinessInventoryMixin, APIView):
         )
         if not business:
             return self.not_found()
-        items = InventoryItem.objects.filter(business=business).select_related("product", "variant__product")
+        items = InventoryItem.objects.filter(business=business).select_related("product", "variant__product").annotate(last_movement_at=Max("movements__created_at"))
         if product := request.query_params.get("product"):
             items = items.filter(product__public_id=product)
         if variant := request.query_params.get("variant"):
             items = items.filter(variant__public_id=variant)
+        if query := request.query_params.get("q", "").strip():
+            items = items.filter(
+                Q(product__name__icontains=query)
+                | Q(product__internal_reference__icontains=query)
+                | Q(variant__product__name__icontains=query)
+                | Q(variant__internal_reference__icontains=query)
+            )
+        values = list(items)
         if request.query_params.get("low_stock", "").lower() == "true":
-            items = [item for item in items if item.is_low_stock]
-        return Response(InventoryItemSerializer(items, many=True).data)
+            values = [item for item in values if item.is_low_stock]
+        stock_status = request.query_params.get("status")
+        if stock_status:
+            valid_statuses = {"AVAILABLE", "LOW_STOCK", "OUT_OF_STOCK"}
+            if stock_status not in valid_statuses:
+                return Response({"status": ["État de stock invalide."]}, status=400)
+            values = [
+                item for item in values
+                if InventoryItemSerializer().get_stock_status(item) == stock_status
+            ]
+        ordering = request.query_params.get("ordering", "")
+        if ordering:
+            if ordering not in {"quantity", "-quantity"}:
+                return Response({"ordering": ["Tri d’inventaire invalide."]}, status=400)
+            values.sort(key=lambda item: item.available_quantity, reverse=ordering.startswith("-"))
+        return Response(InventoryItemSerializer(values, many=True).data)
 
     def post(self, request, business_public_id):
         business = self.get_business(
@@ -127,15 +156,104 @@ class StockMovementListCreateView(BusinessInventoryMixin, APIView):
             return self.not_found()
         serializer = StockMovementCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        idempotency_key = request.headers.get("Idempotency-Key", "").strip()
+        if not idempotency_key:
+            return Response(
+                {"idempotency_key": ["Cet en-tête est obligatoire."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
             movement = apply_stock_movement(
                 inventory_item=item, movement_type=serializer.validated_data["type"], performed_by=request.user,
                 quantity=serializer.validated_data.get("quantity"), target_quantity=serializer.validated_data.get("target_quantity"),
                 reason=serializer.validated_data.get("reason", ""),
+                idempotency_key=idempotency_key,
             )
+        except StockMovementIdempotencyConflict as exc:
+            return Response({"detail": exc.messages[0]}, status=status.HTTP_409_CONFLICT)
         except DjangoValidationError as exc:
             return Response(exc.message_dict if hasattr(exc, "message_dict") else {"detail": exc.messages}, status=400)
-        return Response(StockMovementSerializer(movement).data, status=status.HTTP_201_CREATED)
+        response_status = status.HTTP_200_OK if getattr(movement, "_idempotent_replay", False) else status.HTTP_201_CREATED
+        return Response(StockMovementSerializer(movement).data, status=response_status)
+
+
+class InventorySummaryView(BusinessInventoryMixin, APIView):
+    """Return tenant-scoped stock indicators and recent immutable events."""
+
+    def get(self, request, business_public_id):
+        business = self.get_business(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_INVENTORY,
+        )
+        if not business:
+            return self.not_found()
+        items = list(
+            InventoryItem.objects.filter(business=business)
+            .select_related("product", "variant__product")
+        )
+        recent = (
+            StockMovement.objects.filter(business=business)
+            .select_related("inventory_item__product", "inventory_item__variant__product")[:10]
+        )
+        return Response({
+            "tracked_products": len(items),
+            "in_stock": sum(item.available_quantity > 0 for item in items),
+            "out_of_stock": sum(item.available_quantity == 0 for item in items),
+            "low_stock": sum(item.available_quantity > 0 and item.is_low_stock for item in items),
+            "total_available_quantity": str(sum((item.available_quantity for item in items), Decimal("0.000"))),
+            "recent_movements": StockMovementSerializer(recent, many=True).data,
+        })
+
+
+class MovementPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+class BusinessStockMovementHistoryView(BusinessInventoryMixin, APIView):
+    """Return paginated movement history across one Business inventory."""
+
+    def get(self, request, business_public_id):
+        business = self.get_business(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_INVENTORY,
+        )
+        if not business:
+            return self.not_found()
+        movements = StockMovement.objects.filter(business=business).select_related(
+            "inventory_item__product",
+            "inventory_item__variant__product",
+        )
+        if product := request.query_params.get("product"):
+            movements = movements.filter(
+                Q(inventory_item__product__public_id=product)
+                | Q(inventory_item__variant__product__public_id=product)
+            )
+        if movement_type := request.query_params.get("type"):
+            if movement_type not in StockMovement.Type.values:
+                return Response({"type": ["Type de mouvement invalide."]}, status=400)
+            movements = movements.filter(movement_type=movement_type)
+        if origin := request.query_params.get("origin"):
+            movements = movements.filter(reference_type=origin)
+        for parameter, lookup, boundary in (
+            ("date_from", "created_at__gte", time.min),
+            ("date_to", "created_at__lte", time.max),
+        ):
+            raw = request.query_params.get(parameter)
+            if raw:
+                value = parse_date(raw)
+                if value is None:
+                    return Response({parameter: ["Date invalide."]}, status=400)
+                moment = timezone.make_aware(datetime.combine(value, boundary))
+                movements = movements.filter(**{lookup: moment})
+        paginator = MovementPagination()
+        page = paginator.paginate_queryset(movements, request)
+        return paginator.get_paginated_response(
+            StockMovementSerializer(page, many=True).data
+        )
 
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 

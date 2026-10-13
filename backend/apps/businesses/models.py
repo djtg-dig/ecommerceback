@@ -345,6 +345,7 @@ class BusinessMemberInvitation(models.Model):
     email = models.EmailField()
     normalized_email = models.EmailField(db_index=True)
     title = models.CharField(max_length=120, blank=True)
+    permissions = models.JSONField(default=list, blank=True)
     status = models.CharField(
         max_length=10,
         choices=Status.choices,

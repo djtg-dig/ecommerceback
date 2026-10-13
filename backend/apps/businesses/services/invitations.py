@@ -60,6 +60,21 @@ def invitation_expiry():
     return timezone.now() + timedelta(hours=hours)
 
 
+def _validated_permissions(permissions):
+    """Return unique registered permission values in caller order."""
+    permissions = list(permissions or [])
+    invalid = [
+        permission
+        for permission in permissions
+        if permission not in BusinessMemberPermission.Permission.values
+    ]
+    if invalid:
+        raise ValidationError(
+            {"permissions": f"Permission inconnue : {invalid[0]}."}
+        )
+    return list(dict.fromkeys(permissions))
+
+
 def _validate_actor(actor_member, business):
     """Enforce the invitation permission from locked server-side data."""
     if not actor_member or actor_member.status != BusinessMember.Status.ACTIVE:
@@ -91,7 +106,7 @@ def _expire_stale_pending_invitations(business, normalized_email):
             )
 
 
-def invite_member(actor_member, business, email, title=""):
+def invite_member(actor_member, business, email, title="", permissions=None):
     """Create one pending invitation for a Business email address.
 
     The actor must be an active member with ``MANAGE_MEMBERS`` on an
@@ -103,6 +118,7 @@ def invite_member(actor_member, business, email, title=""):
     deliver it exactly once; only its hash is persisted.
     """
     _validate_actor(actor_member, business)
+    permissions = _validated_permissions(permissions)
 
     normalized_email = normalize_email(email)
     try:
@@ -138,6 +154,7 @@ def invite_member(actor_member, business, email, title=""):
                 business=locked_business,
                 email=normalized_email,
                 title=title,
+                permissions=permissions,
                 token_hash=hash_invitation_token(token),
                 expires_at=invitation_expiry(),
                 invited_by=locked_actor.identity,
@@ -159,7 +176,13 @@ def _schedule_delivery(invitation, token):
     )
 
 
-def create_and_send_invitation(actor_member, business, email, title=""):
+def create_and_send_invitation(
+    actor_member,
+    business,
+    email,
+    title="",
+    permissions=None,
+):
     """Create an invitation and deliver its one-time secret after commit."""
     from .invitation_email import invitation_base_url
 
@@ -170,6 +193,7 @@ def create_and_send_invitation(actor_member, business, email, title=""):
             business,
             email,
             title=title,
+            permissions=permissions,
         )
         _schedule_delivery(invitation, token)
     invitation.refresh_from_db()
@@ -299,7 +323,13 @@ def _validated_recipient(identity):
     return locked_identity
 
 
-def _locked_recipient_invitation(identity, invitation_public_id, token):
+def _locked_recipient_invitation(
+    identity,
+    invitation_public_id,
+    token=None,
+    *,
+    require_token=True,
+):
     """Lock and validate one invitation without trusting recipient payload data."""
     invitation_ref = BusinessMemberInvitation.objects.filter(
         public_id=invitation_public_id,
@@ -321,9 +351,12 @@ def _locked_recipient_invitation(identity, invitation_public_id, token):
         .get(public_id=invitation_public_id, business=business)
     )
 
-    if not secrets.compare_digest(
-        invitation.token_hash,
-        hash_invitation_token(token),
+    if require_token and (
+        not token
+        or not secrets.compare_digest(
+            invitation.token_hash,
+            hash_invitation_token(token),
+        )
     ):
         raise InvitationActionError(
             "invalid_invitation_token",
@@ -373,7 +406,31 @@ def _locked_recipient_invitation(identity, invitation_public_id, token):
 
 
 def accept_member_invitation(identity, invitation_public_id, token):
-    """Accept one invitation atomically and create a permissionless member."""
+    """Accept one invitation atomically and grant its planned permissions."""
+    return _accept_member_invitation(
+        identity,
+        invitation_public_id,
+        token=token,
+        require_token=True,
+    )
+
+
+def accept_member_invitation_from_account(identity, invitation_public_id):
+    """Accept from the authenticated recipient inbox without exposing a secret."""
+    return _accept_member_invitation(
+        identity,
+        invitation_public_id,
+        require_token=False,
+    )
+
+
+def _accept_member_invitation(
+    identity,
+    invitation_public_id,
+    *,
+    token=None,
+    require_token,
+):
     deferred_error = None
     member = None
     with transaction.atomic():
@@ -381,6 +438,7 @@ def accept_member_invitation(identity, invitation_public_id, token):
             identity,
             invitation_public_id,
             token,
+            require_token=require_token,
         )
         if deferred_error is None:
             existing = BusinessMember.objects.select_for_update().filter(
@@ -410,6 +468,18 @@ def accept_member_invitation(identity, invitation_public_id, token):
                     409,
                 ) from exc
 
+            BusinessMemberPermission.objects.bulk_create(
+                [
+                    BusinessMemberPermission(
+                        member=member,
+                        permission=permission,
+                    )
+                    for permission in _validated_permissions(
+                        invitation.permissions
+                    )
+                ]
+            )
+
             invitation.status = BusinessMemberInvitation.Status.ACCEPTED
             invitation.accepted_by = recipient
             invitation.member = member
@@ -431,12 +501,37 @@ def accept_member_invitation(identity, invitation_public_id, token):
 
 def decline_member_invitation(identity, invitation_public_id, token):
     """Decline one invitation atomically without creating a membership."""
+    return _decline_member_invitation(
+        identity,
+        invitation_public_id,
+        token=token,
+        require_token=True,
+    )
+
+
+def decline_member_invitation_from_account(identity, invitation_public_id):
+    """Decline from the authenticated recipient inbox without exposing a secret."""
+    return _decline_member_invitation(
+        identity,
+        invitation_public_id,
+        require_token=False,
+    )
+
+
+def _decline_member_invitation(
+    identity,
+    invitation_public_id,
+    *,
+    token=None,
+    require_token,
+):
     deferred_error = None
     with transaction.atomic():
         recipient, invitation, deferred_error = _locked_recipient_invitation(
             identity,
             invitation_public_id,
             token,
+            require_token=require_token,
         )
         if deferred_error is None:
             invitation.status = BusinessMemberInvitation.Status.DECLINED

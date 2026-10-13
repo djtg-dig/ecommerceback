@@ -101,6 +101,8 @@ class StockMovement(models.Model):
     reason = models.CharField(max_length=500, blank=True)
     reference_type = models.CharField(max_length=40, null=True, blank=True, editable=False)
     reference_id = models.CharField(max_length=128, null=True, blank=True, editable=False)
+    idempotency_key = models.CharField(max_length=255, blank=True, editable=False)
+    idempotency_fingerprint = models.CharField(max_length=64, blank=True, editable=False)
     performed_by = models.ForeignKey("accounts.CarriIdentity", on_delete=models.PROTECT, related_name="stock_movements")
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -109,6 +111,11 @@ class StockMovement(models.Model):
         constraints = [
             models.CheckConstraint(condition=Q(quantity_before__gte=0), name="stock_movement_before_nonnegative"),
             models.CheckConstraint(condition=Q(quantity_after__gte=0), name="stock_movement_after_nonnegative"),
+            models.UniqueConstraint(
+                fields=("business", "idempotency_key"),
+                condition=~Q(idempotency_key=""),
+                name="stock_movement_business_idempotency_key",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -129,3 +136,6 @@ class StockMovement(models.Model):
             self.public_id = generate_stock_movement_public_id()
         self.full_clean()
         return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Un mouvement de stock est immuable.")

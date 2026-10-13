@@ -7,7 +7,10 @@ from .views import HealthCheckView
 from apps.businesses.views import (
     BusinessCategoriesView,
     BusinessInvitationAcceptView,
+    BusinessInvitationAccountAcceptView,
+    BusinessInvitationAccountDeclineView,
     BusinessInvitationDeclineView,
+    BusinessInvitationRecipientListView,
 )
 from apps.dashboard_views import DashboardView
 from apps.profitability_views import ProfitabilitySummaryView
@@ -16,6 +19,21 @@ from apps.expense_receivable_report_views import ExpensesReportView, Receivables
 from apps.purchase_report_views import PurchasesReportView, SupplierDebtsReportView
 
 urlpatterns = [
+    path(
+        "me/business-invitations/",
+        BusinessInvitationRecipientListView.as_view(),
+        name="business-invitation-recipient-list",
+    ),
+    path(
+        "me/business-invitations/<str:invitation_public_id>/accept-authenticated/",
+        BusinessInvitationAccountAcceptView.as_view(),
+        name="business-invitation-account-accept",
+    ),
+    path(
+        "me/business-invitations/<str:invitation_public_id>/decline-authenticated/",
+        BusinessInvitationAccountDeclineView.as_view(),
+        name="business-invitation-account-decline",
+    ),
     path(
         "me/business-invitations/<str:invitation_public_id>/accept/",
         BusinessInvitationAcceptView.as_view(),

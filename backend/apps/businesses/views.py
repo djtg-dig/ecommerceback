@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Prefetch
+from django.utils import timezone
 from drf_spectacular.utils import (
     OpenApiExample,
     OpenApiParameter,
@@ -33,6 +34,7 @@ from .serializers import (
     BusinessMemberPermissionGrantSerializer,
     BusinessMemberInvitationCreateSerializer,
     BusinessMemberInvitationActionSerializer,
+    BusinessMemberInvitationRecipientSerializer,
     BusinessMemberInvitationSerializer,
     BusinessMemberInvitationTokenSerializer,
     BusinessMemberPermissionSerializer,
@@ -61,8 +63,11 @@ from .services.invitation_email import (
 from .services.invitations import (
     InvitationActionError,
     accept_member_invitation,
+    accept_member_invitation_from_account,
     create_and_send_invitation,
     decline_member_invitation,
+    decline_member_invitation_from_account,
+    normalize_email,
     resend_member_invitation,
     revoke_member_invitation,
 )
@@ -635,7 +640,14 @@ class BusinessMemberPermissionDetailView(APIView):
 class BusinessInvitationAdminMixin:
     """Resolve one tenant and its explicit invitation administrator."""
 
-    def get_context(self, request, public_id, *, write=False):
+    def get_context(
+        self,
+        request,
+        public_id,
+        *,
+        write=False,
+        permission=BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+    ):
         business = Business.objects.filter(public_id=public_id).first()
         if business is None:
             raise InvitationBusinessNotFound
@@ -643,7 +655,7 @@ class BusinessInvitationAdminMixin:
             actor = require_permission(
                 request.user,
                 business,
-                BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+                permission,
             )
         except PermissionDenied as exc:
             raise InvitationPermissionDenied from exc
@@ -684,6 +696,7 @@ class BusinessInvitationsView(BusinessInvitationAdminMixin, APIView):
         business, actor, error = self.get_context(
             request,
             public_id,
+            permission=BusinessMemberPermission.Permission.VIEW_MEMBERS,
         )
         invitations = BusinessMemberInvitation.objects.filter(
             business=business,
@@ -722,6 +735,7 @@ class BusinessInvitationsView(BusinessInvitationAdminMixin, APIView):
                 business,
                 serializer.validated_data["email"],
                 title=serializer.validated_data["title"],
+                permissions=serializer.validated_data["permissions"],
             )
         except (
             InvitationDeliveryConfigurationError,
@@ -825,6 +839,65 @@ class BusinessInvitationRecipientActionView(APIView):
                 exc.status_code,
             )
         return Response(BusinessMemberInvitationActionSerializer(invitation).data)
+
+
+class BusinessInvitationRecipientListView(APIView):
+    """List actionable invitations for the authenticated verified email."""
+
+    def get(self, request):
+        identity = request.user
+        if not identity.verified_email or not identity.email_verified:
+            return _invitation_error(
+                "verified_email_required",
+                "Votre adresse e-mail Carri doit être vérifiée pour consulter vos invitations.",
+                status.HTTP_403_FORBIDDEN,
+            )
+        invitations = (
+            BusinessMemberInvitation.objects.select_related("business")
+            .filter(
+                normalized_email=normalize_email(identity.verified_email),
+                status=BusinessMemberInvitation.Status.PENDING,
+                expires_at__gt=timezone.now(),
+                business__status=Business.Status.ACTIVE,
+            )
+            .order_by("-created_at", "-id")
+        )
+        return Response(
+            BusinessMemberInvitationRecipientSerializer(
+                invitations,
+                many=True,
+            ).data
+        )
+
+
+class BusinessInvitationAccountActionView(APIView):
+    """Process an inbox invitation from a fresh authenticated Carri account."""
+
+    action = None
+
+    def post(self, request, invitation_public_id):
+        try:
+            if self.action == "accept":
+                invitation, _member = accept_member_invitation_from_account(
+                    request.user,
+                    invitation_public_id,
+                )
+            else:
+                invitation = decline_member_invitation_from_account(
+                    request.user,
+                    invitation_public_id,
+                )
+        except InvitationActionError as exc:
+            return _invitation_error(exc.code, exc.detail, exc.status_code)
+        return Response(BusinessMemberInvitationActionSerializer(invitation).data)
+
+
+class BusinessInvitationAccountAcceptView(BusinessInvitationAccountActionView):
+    action = "accept"
+
+
+class BusinessInvitationAccountDeclineView(BusinessInvitationAccountActionView):
+    action = "decline"
 
 
 class BusinessInvitationAcceptView(BusinessInvitationRecipientActionView):

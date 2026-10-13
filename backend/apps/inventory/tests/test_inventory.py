@@ -93,13 +93,13 @@ def test_manual_movements_and_history_are_atomic(setup):
     business, _, owner, manager, employee, _, product, _ = setup
     item_data = create_item(owner, business, product=product.public_id)
     endpoint = f"/api/v1/businesses/{business.public_id}/inventory/{item_data['public_id']}/movements/"
-    received = client(owner).post(endpoint, {"type": "IN", "quantity": "10.000", "reason": "Initial"}, format="json")
+    received = client(owner).post(endpoint, {"type": "IN", "quantity": "10.000", "reason": "Initial"}, format="json", HTTP_IDEMPOTENCY_KEY="inventory-initial")
     assert received.status_code == 201 and received.data["quantity_before"] == "0.000" and received.data["quantity_after"] == "10.000"
-    out = client(manager).post(endpoint, {"type": "OUT", "quantity": "3.000"}, format="json")
+    out = client(manager).post(endpoint, {"type": "OUT", "quantity": "3.000"}, format="json", HTTP_IDEMPOTENCY_KEY="inventory-out")
     assert out.status_code == 201 and out.data["quantity"] == "-3.000" and out.data["quantity_after"] == "7.000"
-    adjusted = client(owner).post(endpoint, {"type": "ADJUSTMENT", "target_quantity": "12.000"}, format="json")
+    adjusted = client(owner).post(endpoint, {"type": "ADJUSTMENT", "target_quantity": "12.000"}, format="json", HTTP_IDEMPOTENCY_KEY="inventory-adjust")
     assert adjusted.status_code == 201 and adjusted.data["quantity"] == "5.000" and adjusted.data["quantity_after"] == "12.000"
-    assert client(owner).post(endpoint, {"type": "OUT", "quantity": "13.000"}, format="json").status_code == 400
+    assert client(owner).post(endpoint, {"type": "OUT", "quantity": "13.000"}, format="json", HTTP_IDEMPOTENCY_KEY="inventory-too-much").status_code == 400
     assert client(owner).post(endpoint, {"type": "SALE", "quantity": "1.000"}, format="json").status_code == 400
     assert client(employee).post(endpoint, {"type": "IN", "quantity": "1.000"}, format="json").status_code == 403
     assert client(employee).get(endpoint).status_code == 200
@@ -107,6 +107,8 @@ def test_manual_movements_and_history_are_atomic(setup):
     assert movement.performed_by == owner
     with pytest.raises(ValidationError, match="immuable"):
         movement.reason = "rewrite"; movement.save()
+    with pytest.raises(ValidationError, match="immuable"):
+        movement.delete()
 
 
 def test_service_rejects_invalid_quantities_without_changing_balance(setup):
@@ -133,4 +135,4 @@ def test_archived_product_rejects_new_movements(setup):
     item = create_item(owner, business, product=product.public_id)
     product.status = "ARCHIVED"; product.save()
     endpoint = f"/api/v1/businesses/{business.public_id}/inventory/{item['public_id']}/movements/"
-    assert client(owner).post(endpoint, {"type": "IN", "quantity": "1.000"}, format="json").status_code == 400
+    assert client(owner).post(endpoint, {"type": "IN", "quantity": "1.000"}, format="json", HTTP_IDEMPOTENCY_KEY="inventory-archived").status_code == 400

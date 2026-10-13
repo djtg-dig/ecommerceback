@@ -84,13 +84,21 @@ def test_owner_creates_and_lists_compact_paginated_invitations(mailoutbox):
 
     created = client.post(
         collection_url(business),
-        {"email": " Invitee@Example.COM ", "title": "Caissier"},
+        {
+            "email": " Invitee@Example.COM ",
+            "title": "Caissier",
+            "permissions": [Permission.VIEW_CATALOG, Permission.VIEW_INVENTORY],
+        },
         format="json",
     )
 
     assert created.status_code == 201
     assert created.data["email"] == "invitee@example.com"
     assert created.data["title"] == "Caissier"
+    assert created.data["permissions"] == [
+        Permission.VIEW_CATALOG,
+        Permission.VIEW_INVENTORY,
+    ]
     assert created.data["status"] == "PENDING"
     assert created.data["last_sent_at"] is not None
     assert created.data["public_id"].startswith("MI")
@@ -123,6 +131,33 @@ def test_owner_creates_and_lists_compact_paginated_invitations(mailoutbox):
     assert "token_hash" not in str(listed.data)
 
 
+def test_invitation_rejects_unknown_permission_and_defaults_to_none(mailoutbox):
+    business, identity, owner = create_business_with_owner("permissions")
+    client = client_for(identity)
+
+    invalid = client.post(
+        collection_url(business),
+        {
+            "email": "invalid-permission@example.com",
+            "permissions": ["UNKNOWN_PERMISSION"],
+        },
+        format="json",
+    )
+    valid = client.post(
+        collection_url(business),
+        {"email": "permissionless@example.com"},
+        format="json",
+    )
+
+    assert invalid.status_code == 400
+    assert "permissions" in invalid.data
+    assert not BusinessMemberInvitation.objects.filter(
+        normalized_email="invalid-permission@example.com"
+    ).exists()
+    assert valid.status_code == 201
+    assert valid.data["permissions"] == []
+
+
 def test_member_with_manage_members_can_invite_but_legacy_manager_cannot(
     mailoutbox,
 ):
@@ -152,6 +187,25 @@ def test_member_with_manage_members_can_invite_but_legacy_manager_cannot(
         "code": "invitation_permission_denied",
         "detail": "Vous n'êtes pas autorisé à gérer les invitations de cette entreprise.",
     }
+
+
+def test_view_members_can_list_invitations_but_cannot_create(mailoutbox):
+    business, owner_identity, owner = create_business_with_owner("viewer")
+    identity, viewer = create_member(business, "viewer")
+    grant_permission(owner, viewer, Permission.VIEW_MEMBERS)
+
+    listed = client_for(identity).get(collection_url(business))
+    created = client_for(identity).post(
+        collection_url(business),
+        {"email": "blocked@example.com"},
+        format="json",
+    )
+
+    assert listed.status_code == 200
+    assert created.status_code == 403
+    assert not BusinessMemberInvitation.objects.filter(
+        normalized_email="blocked@example.com"
+    ).exists()
 
 
 def test_suspended_manager_is_refused():
