@@ -36,7 +36,7 @@ def setup_pos():
     grant_permission(
         owner_member,
         employee_member,
-        BusinessMemberPermission.Permission.USE_POS,
+        BusinessMemberPermission.Permission.SALE_CREATE,
     )
     client = APIClient()
     client.force_authenticate(user=employee)

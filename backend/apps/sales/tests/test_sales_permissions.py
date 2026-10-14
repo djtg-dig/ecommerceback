@@ -1,4 +1,5 @@
 from decimal import Decimal
+from multiprocessing import context
 
 import pytest
 from rest_framework.test import APIClient
@@ -89,11 +90,19 @@ def test_pos_mutations_require_permission_and_preserve_owner_access(permission_c
         format="json",
     ).status_code == 201
 
-    grant_permission(context["owner"], context["manager"], Permission.USE_POS)
+    grant_permission(context["owner"], context["manager"], Permission.SALE_CREATE)
     created = manager_client.post(base + "sales/", {}, format="json")
     sale_url = base + f"sales/{created.data['public_id']}/"
 
     assert created.status_code == 201
+    grant_permission(context["owner"], context["manager"], Permission.SALE_UPDATE)
+    grant_permission(context["owner"], context["manager"], Permission.SALE_LINE_CREATE)
+
+    grant_permission(context["owner"], context["manager"], Permission.SALE_UPDATE)
+    grant_permission(context["owner"], context["manager"], Permission.SALE_LINE_CREATE)
+    grant_permission(context["owner"], context["manager"], Permission.SALE_COMPLETE)
+
+    
     assert manager_client.patch(
         sale_url,
         {"reference": "POS-EXPLICIT"},
@@ -113,20 +122,20 @@ def test_pos_mutations_require_permission_and_preserve_owner_access(permission_c
 
 def test_cancel_requires_manage_sales_not_use_pos(permission_context):
     context = permission_context
-    grant_permission(context["owner"], context["manager"], Permission.USE_POS)
+    grant_permission(context["owner"], context["manager"], Permission.SALE_CREATE)
     client = client_for(context["manager_identity"])
     created = client.post(context["base"] + "sales/", {}, format="json")
     cancel_url = context["base"] + f"sales/{created.data['public_id']}/cancel/"
 
     assert client.post(cancel_url, {}, format="json").status_code == 403
 
-    grant_permission(context["owner"], context["manager"], Permission.MANAGE_SALES)
+    grant_permission(context["owner"], context["manager"], Permission.SALE_CANCEL)
     assert client.post(cancel_url, {}, format="json").status_code == 200
 
 
 def test_suspended_member_and_foreign_tenant_are_rejected(permission_context):
     context = permission_context
-    grant_permission(context["owner"], context["manager"], Permission.USE_POS)
+    grant_permission(context["owner"], context["manager"], Permission.SALE_CREATE)
     context["manager"].status = BusinessMember.Status.SUSPENDED
     context["manager"].save()
 
@@ -189,7 +198,12 @@ def test_receivable_mutations_require_manage_receivables(permission_context):
     grant_permission(
         context["owner"],
         context["manager"],
-        Permission.MANAGE_RECEIVABLES,
+        Permission.RECEIVABLE_UPDATE,
+    )
+    grant_permission(
+        context["owner"],
+        context["manager"],
+        Permission.RECEIVABLE_PAYMENT_CREATE,
     )
     assert client.patch(url, {"notes": "authorized"}, format="json").status_code == 200
     assert client.post(

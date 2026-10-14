@@ -58,7 +58,12 @@ def api_context(quantity=Decimal("10.000"), *, manager_permission=True):
         grant_permission(
             owner_member,
             manager_member,
-            BusinessMemberPermission.Permission.MANAGE_SALE_RETURNS,
+            BusinessMemberPermission.Permission.SALE_RETURN,
+        )
+        grant_permission(
+            owner_member,
+            manager_member,
+            BusinessMemberPermission.Permission.SALE_RETURN_VIEW,
         )
     product = Product.objects.create(
         business=business,
@@ -137,7 +142,7 @@ def test_post_permissions_required_header_and_business_isolation():
     grant_permission(
         owner_member,
         manager_member,
-        BusinessMemberPermission.Permission.MANAGE_SALE_RETURNS,
+        BusinessMemberPermission.Permission.SALE_RETURN,
     )
 
     owner_response = client_for(owner).post(

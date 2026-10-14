@@ -32,7 +32,7 @@ def commercial_context():
     BusinessMember.objects.create(business=business, identity=owner, role="OWNER")
     BusinessMember.objects.create(business=other, identity=owner, role="OWNER")
     member = BusinessMember.objects.create(business=business, identity=limited, role="EMPLOYEE")
-    BusinessMemberPermission.objects.create(member=member, permission="VIEW_CUSTOMERS")
+    BusinessMemberPermission.objects.create(member=member, permission="CUSTOMER_VIEW")
     customer = Customer.objects.create(business=business, name="Ada Client", phone="099000")
     supplier = Supplier.objects.create(business=business, name="Kivu Fournitures", email="kivu@example.com")
     category = ProductCategory.objects.create(code="PARTNERS", name="Partners", slug="partners")

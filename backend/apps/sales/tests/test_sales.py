@@ -23,6 +23,8 @@ def test_internal_sale():
         member=member,
         permission=BusinessMemberPermission.Permission.SALE_CREATE,
     )
+    BusinessMemberPermission.objects.create(member=member, permission=BusinessMemberPermission.Permission.SALE_LINE_CREATE)
+    BusinessMemberPermission.objects.create(member=member, permission=BusinessMemberPermission.Permission.SALE_COMPLETE)
     product = Product.objects.create(
         business=business,
         category=category,
@@ -86,6 +88,8 @@ def test_sale_currency_is_imposed_by_business():
         member=member,
         permission=BusinessMemberPermission.Permission.SALE_CREATE,
     )
+    BusinessMemberPermission.objects.create(member=member, permission=BusinessMemberPermission.Permission.SALE_LINE_CREATE)
+    BusinessMemberPermission.objects.create(member=member, permission=BusinessMemberPermission.Permission.SALE_COMPLETE)
 
     client = APIClient()
     client.force_authenticate(user=identity)
@@ -114,6 +118,8 @@ def build_sale_context(customer=True):
         member=member,
         permission=BusinessMemberPermission.Permission.SALE_CREATE,
     )
+    BusinessMemberPermission.objects.create(member=member, permission=BusinessMemberPermission.Permission.SALE_LINE_CREATE)
+    BusinessMemberPermission.objects.create(member=member, permission=BusinessMemberPermission.Permission.SALE_COMPLETE)
     product = Product.objects.create(
         business=business, category=category, name="Item", selling_price="100.00", cost_price="60.00", currency="CDF", attributes={}
     )

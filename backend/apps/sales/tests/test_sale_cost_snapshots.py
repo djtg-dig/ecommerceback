@@ -34,8 +34,14 @@ def sale_context(*, cost_price=Decimal("7.50")):
     )
     BusinessMemberPermission.objects.create(
         member=member,
-        permission=BusinessMemberPermission.Permission.USE_POS,
+        permission=BusinessMemberPermission.Permission.SALE_CREATE,
     )
+    for permission in (
+        BusinessMemberPermission.Permission.SALE_LINE_CREATE,
+        BusinessMemberPermission.Permission.SALE_COMPLETE,
+        BusinessMemberPermission.Permission.SALE_UPDATE,
+    ):
+        BusinessMemberPermission.objects.create(member=member, permission=permission)
     product = Product.objects.create(
         business=business,
         category=category,
