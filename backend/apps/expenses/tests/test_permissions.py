@@ -52,7 +52,7 @@ def test_expense_permissions_are_granular_and_title_grants_nothing():
         format="json",
     ).status_code == 403
 
-    grant_permission(owner, manager, Permission.VIEW_EXPENSES)
+    grant_permission(owner, manager, Permission.EXPENSE_VIEW)
     assert manager_client.get(base + "expenses/").status_code == 200
     assert manager_client.post(
         base + "expenses/",
@@ -60,7 +60,7 @@ def test_expense_permissions_are_granular_and_title_grants_nothing():
         format="json",
     ).status_code == 403
 
-    grant_permission(owner, manager, Permission.CREATE_EXPENSES)
+    grant_permission(owner, manager, Permission.EXPENSE_CREATE)
     created = manager_client.post(
         base + "expenses/",
         expense_payload,
@@ -74,7 +74,7 @@ def test_expense_permissions_are_granular_and_title_grants_nothing():
         {"code": "DENIED", "name": "Denied"},
         format="json",
     ).status_code == 403
-    grant_permission(owner, manager, Permission.MANAGE_EXPENSE_CATEGORIES)
+    grant_permission(owner, manager, Permission.EXPENSE_CATEGORY_CREATE)
     assert manager_client.post(
         category_url,
         {"code": "ALLOWED", "name": "Allowed"},
@@ -87,7 +87,7 @@ def test_expense_permissions_are_granular_and_title_grants_nothing():
         {"reference": "denied"},
         format="json",
     ).status_code == 403
-    grant_permission(owner, manager, Permission.MANAGE_EXPENSES)
+    grant_permission(owner, manager, Permission.EXPENSE_UPDATE)
     assert manager_client.patch(
         expense_url,
         {"reference": "allowed"},

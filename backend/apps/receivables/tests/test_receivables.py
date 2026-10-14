@@ -61,7 +61,7 @@ def test_payment_lifecycle_permissions_and_metadata_patch(data):
     member = BusinessMember.objects.get(business=business, identity=employee)
     BusinessMemberPermission.objects.create(
         member=member,
-        permission=BusinessMemberPermission.Permission.MANAGE_RECEIVABLES,
+        permission=BusinessMemberPermission.Permission.RECEIVABLE_PAYMENT_CREATE,
     )
     assert employee_client.post(
         payments_url,
