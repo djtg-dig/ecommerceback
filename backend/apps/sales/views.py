@@ -1,13 +1,15 @@
 from decimal import Decimal
 from django.core.exceptions import ValidationError
-from django.db.models import Q
+from django.db.models import Q, Sum
 from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
 from rest_framework import serializers, status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from apps.businesses.models import Business, BusinessMemberPermission
-from apps.businesses.permissions import require_permission
+from apps.businesses.permissions import has_permission, membership_for, require_permission
+from apps.finance.models import FinancialMovement
+from apps.receivables.models import Receivable, ReceivableAdjustment, ReceivablePayment
 from .models import Customer, Sale, SaleLine, SaleReturn
 from .serializers import *
 from .services import SaleReturnIdempotencyConflict, cancel, complete, create_sale_return
@@ -40,13 +42,30 @@ class Customers(M, APIView):
             BusinessMemberPermission.Permission.VIEW_CUSTOMERS,
             write=False,
         )
-        return (
-            Response(
-                CustomerSerializer(Customer.objects.filter(business=b), many=True).data
-            )
-            if b
-            else self.nf()
+        if not b:
+            return self.nf()
+        customers = Customer.objects.filter(business=b)
+        paginated = any(
+            parameter in r.query_params
+            for parameter in ("q", "ordering", "page", "page_size")
         )
+        query = r.query_params.get("q", "").strip()
+        if query:
+            customers = customers.filter(
+                Q(name__icontains=query)
+                | Q(phone__icontains=query)
+                | Q(email__icontains=query)
+                | Q(public_id__iexact=query)
+            )
+        ordering = r.query_params.get("ordering", "name")
+        if ordering not in {"name", "-name", "created_at", "-created_at"}:
+            return Response({"ordering": ["Tri de clients invalide."]}, status=400)
+        customers = customers.order_by(ordering, "public_id")
+        if not paginated:
+            return Response(CustomerSerializer(customers, many=True).data)
+        paginator = CommercialPartnerPagination()
+        page = paginator.paginate_queryset(customers, r)
+        return paginator.get_paginated_response(CustomerSerializer(page, many=True).data)
 
     def post(self, r, business_public_id):
         b = self.authorized_business(
@@ -59,6 +78,129 @@ class Customers(M, APIView):
         s = CustomerSerializer(data=r.data)
         s.is_valid(raise_exception=True)
         return Response(CustomerSerializer(s.save(business=b)).data, 201)
+
+
+class CommercialPartnerPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+class CustomerDetail(M, APIView):
+    """Read or update one customer without touching historical sales."""
+
+    @staticmethod
+    def customer(business, public_id):
+        return Customer.objects.filter(business=business, public_id=public_id).first()
+
+    def get(self, request, business_public_id, customer_public_id):
+        business = self.authorized_business(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_CUSTOMERS,
+            write=False,
+        )
+        customer = self.customer(business, customer_public_id) if business else None
+        return Response(CustomerSerializer(customer).data) if customer else self.nf()
+
+    def patch(self, request, business_public_id, customer_public_id):
+        business = self.authorized_business(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.MANAGE_CUSTOMERS,
+        )
+        customer = self.customer(business, customer_public_id) if business else None
+        if not customer:
+            return self.nf()
+        serializer = CustomerSerializer(customer, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+
+class CustomerCommercialProfile(CustomerDetail):
+    """Expose permission-filtered sales and reliable ledger-backed totals."""
+
+    def get(self, request, business_public_id, customer_public_id):
+        business = self.authorized_business(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_CUSTOMERS,
+            write=False,
+        )
+        customer = self.customer(business, customer_public_id) if business else None
+        if not customer:
+            return self.nf()
+
+        member = membership_for(request.user, business)
+        can_view_sales = has_permission(member, BusinessMemberPermission.Permission.VIEW_SALES)
+        can_view_financials = has_permission(
+            member, BusinessMemberPermission.Permission.VIEW_FINANCIAL_SUMMARY
+        )
+        can_view_receivables = has_permission(
+            member, BusinessMemberPermission.Permission.VIEW_RECEIVABLES
+        )
+        sales_data = None
+        if can_view_sales:
+            sales = (
+                Sale.objects.filter(business=business, customer=customer)
+                .select_related("receivable")
+                .prefetch_related("lines")
+                .order_by("-created_at", "-public_id")
+            )
+            paginator = CommercialPartnerPagination()
+            page = paginator.paginate_queryset(sales, request)
+            sales_data = paginator.get_paginated_response(
+                CustomerSaleHistorySerializer(page, many=True).data
+            ).data
+
+        financial_summary = None
+        if can_view_financials:
+            completed_sales = Sale.objects.filter(
+                business=business,
+                customer=customer,
+                status=Sale.Status.COMPLETED,
+            ).prefetch_related("lines")
+            total_sales = sum((sale.total for sale in completed_sales), Decimal("0.00"))
+            movements = FinancialMovement.objects.filter(business=business).filter(
+                Q(sale__customer=customer)
+                | Q(receivable_payment__receivable__customer=customer)
+                | Q(sale_return__customer=customer)
+            )
+            inflow = movements.filter(
+                direction=FinancialMovement.Direction.INFLOW
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+            outflow = movements.filter(
+                direction=FinancialMovement.Direction.OUTFLOW
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+            receivables = Receivable.objects.filter(business=business, customer=customer)
+            original = receivables.aggregate(total=Sum("original_amount"))["total"] or Decimal("0.00")
+            paid = ReceivablePayment.objects.filter(
+                business=business,
+                receivable__customer=customer,
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+            adjusted = ReceivableAdjustment.objects.filter(
+                business=business,
+                receivable__customer=customer,
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+            financial_summary = {
+                "currency": business.primary_currency,
+                "total_completed_sales": total_sales,
+                "net_collected": inflow - outflow,
+                "outstanding_receivables": original - paid - adjusted,
+                "open_receivables": receivables.exclude(status=Receivable.Status.PAID).count(),
+            }
+
+        return Response({
+            "customer": CustomerSerializer(customer).data,
+            "sales": sales_data,
+            "financial_summary": financial_summary,
+            "capabilities": {
+                "view_sales": can_view_sales,
+                "view_financials": can_view_financials,
+                "view_receivables": can_view_receivables,
+            },
+        })
 
 
 class PosCustomerPagination(PageNumberPagination):

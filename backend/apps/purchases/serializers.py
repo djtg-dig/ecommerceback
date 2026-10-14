@@ -4,6 +4,18 @@ from apps.catalog.models import Product,ProductVariant
 from .models import Supplier,Purchase,PurchaseLine
 class SupplierSerializer(serializers.ModelSerializer):
  class Meta:model=Supplier;fields=('public_id','name','phone','email','address','notes','is_active','created_at','updated_at');read_only_fields=('public_id','created_at','updated_at')
+
+
+class SupplierPurchaseHistorySerializer(serializers.ModelSerializer):
+ supplier=serializers.CharField(source='supplier.public_id',read_only=True,allow_null=True)
+ total=serializers.SerializerMethodField();paid_amount=serializers.SerializerMethodField();balance=serializers.SerializerMethodField();payment_status=serializers.SerializerMethodField()
+ class Meta:model=Purchase;fields=('public_id','supplier','status','currency','reference','total','paid_amount','balance','payment_status','created_at','confirmed_at','received_at')
+ def get_total(self,purchase):return sum((line.line_total for line in purchase.lines.all()),Decimal('0.00'))
+ def get_paid_amount(self,purchase):return sum((payment.amount for payment in purchase.active_commercial_payments),Decimal('0.00'))
+ def get_balance(self,purchase):return self.get_total(purchase)-self.get_paid_amount(purchase)
+ def get_payment_status(self,purchase):
+  paid=self.get_paid_amount(purchase);total=self.get_total(purchase)
+  return 'UNPAID' if paid==0 else ('PAID' if paid==total else 'PARTIALLY_PAID')
 class PurchaseLineSerializer(serializers.ModelSerializer):
  product=serializers.CharField(source='product.public_id',read_only=True,allow_null=True);variant=serializers.CharField(source='variant.public_id',read_only=True,allow_null=True)
  class Meta:model=PurchaseLine;fields=('public_id','product','variant','quantity','unit_cost','line_total','created_at','updated_at')

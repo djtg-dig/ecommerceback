@@ -3,6 +3,8 @@ from django.urls import path
 from .views import (
     Cancel,
     Complete,
+    CustomerCommercialProfile,
+    CustomerDetail,
     Customers,
     Lines,
     PosCustomerSearch,
@@ -15,6 +17,8 @@ from .views import (
 urlpatterns = [
     path("customers/", Customers.as_view()),
     path("customers/pos/search/", PosCustomerSearch.as_view()),
+    path("customers/<str:customer_public_id>/profile/", CustomerCommercialProfile.as_view()),
+    path("customers/<str:customer_public_id>/", CustomerDetail.as_view()),
     path("sales/", Sales.as_view()),
     path("sales/<str:sale_public_id>/", SD.as_view()),
     path("sales/<str:sale_public_id>/lines/", Lines.as_view()),

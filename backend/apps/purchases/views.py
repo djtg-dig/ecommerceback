@@ -1,14 +1,19 @@
+from decimal import Decimal
+
 from django.core.exceptions import ValidationError
+from django.db.models import Prefetch, Q, Sum
+from rest_framework.pagination import PageNumberPagination
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.businesses.models import Business, BusinessMemberPermission
-from apps.businesses.permissions import require_permission
+from apps.businesses.permissions import has_permission, membership_for, require_permission
 
-from .models import Supplier, Purchase, PurchaseLine
+from .models import Supplier, Purchase, PurchaseLine, SupplierPayment
 from .serializers import (
     SupplierSerializer,
+    SupplierPurchaseHistorySerializer,
     PurchaseSerializer,
     PurchaseWriteSerializer,
     PurchaseLineSerializer,
@@ -55,13 +60,30 @@ class Suppliers(Mixin, APIView):
             business_public_id,
             BusinessMemberPermission.Permission.VIEW_PURCHASES,
         )
-        return (
-            Response(
-                SupplierSerializer(Supplier.objects.filter(business=b), many=True).data
-            )
-            if b
-            else self.nf()
+        if not b:
+            return self.nf()
+        suppliers = Supplier.objects.filter(business=b)
+        paginated = any(
+            parameter in r.query_params
+            for parameter in ("q", "ordering", "page", "page_size")
         )
+        query = r.query_params.get("q", "").strip()
+        if query:
+            suppliers = suppliers.filter(
+                Q(name__icontains=query)
+                | Q(phone__icontains=query)
+                | Q(email__icontains=query)
+                | Q(public_id__iexact=query)
+            )
+        ordering = r.query_params.get("ordering", "name")
+        if ordering not in {"name", "-name", "created_at", "-created_at"}:
+            return Response({"ordering": ["Tri de fournisseurs invalide."]}, status=400)
+        suppliers = suppliers.order_by(ordering, "public_id")
+        if not paginated:
+            return Response(SupplierSerializer(suppliers, many=True).data)
+        paginator = CommercialPartnerPagination()
+        page = paginator.paginate_queryset(suppliers, r)
+        return paginator.get_paginated_response(SupplierSerializer(page, many=True).data)
 
     def post(self, r, business_public_id):
         b = self.business(
@@ -76,6 +98,12 @@ class Suppliers(Mixin, APIView):
         s.is_valid(raise_exception=True)
         o = s.save(business=b)
         return Response(SupplierSerializer(o).data, 201)
+
+
+class CommercialPartnerPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
 
 
 class SupplierDetail(Suppliers):
@@ -105,6 +133,69 @@ class SupplierDetail(Suppliers):
         s.is_valid(raise_exception=True)
         s.save()
         return Response(s.data)
+
+
+class SupplierCommercialProfile(SupplierDetail):
+    """Return purchase history and permission-gated payable totals."""
+
+    def get(self, request, business_public_id, supplier_public_id):
+        business = self.business(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.VIEW_PURCHASES,
+        )
+        supplier = self.obj(business, supplier_public_id) if business else None
+        if not supplier:
+            return self.nf()
+        active_payments = SupplierPayment.objects.filter(reversed_at__isnull=True)
+        purchases = (
+            Purchase.objects.filter(business=business, supplier=supplier)
+            .prefetch_related(
+                "lines",
+                Prefetch(
+                    "payments",
+                    queryset=active_payments,
+                    to_attr="active_commercial_payments",
+                ),
+            )
+            .order_by("-created_at", "-public_id")
+        )
+        paginator = CommercialPartnerPagination()
+        page = paginator.paginate_queryset(purchases, request)
+        history = paginator.get_paginated_response(
+            SupplierPurchaseHistorySerializer(page, many=True).data
+        ).data
+
+        member = membership_for(request.user, business)
+        can_view_financials = has_permission(
+            member, BusinessMemberPermission.Permission.VIEW_FINANCIAL_SUMMARY
+        )
+        financial_summary = None
+        if can_view_financials:
+            recognized = Purchase.objects.filter(
+                business=business,
+                supplier=supplier,
+                status__in=(Purchase.Status.CONFIRMED, Purchase.Status.RECEIVED),
+            )
+            total = PurchaseLine.objects.filter(purchase__in=recognized).aggregate(
+                total=Sum("line_total")
+            )["total"] or Decimal("0.00")
+            paid = SupplierPayment.objects.filter(
+                purchase__in=recognized,
+                reversed_at__isnull=True,
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+            financial_summary = {
+                "currency": business.primary_currency,
+                "total_recognized_purchases": total,
+                "paid_amount": paid,
+                "outstanding_payables": total - paid,
+            }
+        return Response({
+            "supplier": SupplierSerializer(supplier).data,
+            "purchases": history,
+            "financial_summary": financial_summary,
+            "capabilities": {"view_financials": can_view_financials},
+        })
 
 
 class Purchases(Mixin, APIView):

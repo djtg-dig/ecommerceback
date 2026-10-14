@@ -1,4 +1,5 @@
 from decimal import Decimal
+from django.core.exceptions import ObjectDoesNotExist
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from apps.businesses.models import BusinessPaymentMethod
@@ -18,8 +19,38 @@ class CustomerSerializer(serializers.ModelSerializer):
             "address",
             "notes",
             "is_active",
+            "created_at",
+            "updated_at",
         )
-        read_only_fields = ("public_id",)
+        read_only_fields = ("public_id", "created_at", "updated_at")
+
+
+class CustomerSaleHistorySerializer(serializers.ModelSerializer):
+    """Compact, read-only commercial history for one customer."""
+
+    total = serializers.DecimalField(max_digits=16, decimal_places=2, read_only=True)
+    payment_status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Sale
+        fields = (
+            "public_id",
+            "reference",
+            "status",
+            "currency",
+            "total",
+            "payment_status",
+            "created_at",
+            "completed_at",
+        )
+
+    def get_payment_status(self, sale):
+        if sale.status != Sale.Status.COMPLETED:
+            return "NOT_APPLICABLE"
+        try:
+            return sale.receivable.status
+        except ObjectDoesNotExist:
+            return "PAID"
 
 
 class PosCustomerSerializer(serializers.ModelSerializer):
