@@ -683,7 +683,10 @@ class BusinessInvitationAdminMixin:
                 request.user,
                 business,
                 permission,
-                write=write,
+                # Report the documented inactive-business state to an otherwise
+                # authorized caller; the mutation service remains the final
+                # write guard.
+                write=False,
             )
         except PermissionDenied as exc:
             raise InvitationPermissionDenied from exc

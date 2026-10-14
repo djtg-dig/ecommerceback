@@ -88,10 +88,10 @@ def _validate_actor(actor_member, business, permission):
         raise ValidationError("An active member is required.")
     if actor_member.business_id != business.pk:
         raise ValidationError("The invitation must stay inside one Business.")
-    if not has_permission(actor_member, permission, write=True):
-        raise ValidationError("An authorized member manager is required.")
     if business.status != Business.Status.ACTIVE:
         raise ValidationError("Invitations require an active Business.")
+    if not has_permission(actor_member, permission, write=True):
+        raise ValidationError("An authorized member manager is required.")
 
 
 def _expire_stale_pending_invitations(business, normalized_email):

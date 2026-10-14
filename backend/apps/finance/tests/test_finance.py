@@ -42,7 +42,7 @@ def make_context():
     grant_permission(
         owner_member,
         manager_member,
-        BusinessMemberPermission.Permission.VIEW_FINANCIAL_SUMMARY,
+        BusinessMemberPermission.Permission.FINANCIAL_MOVEMENT_VIEW,
     )
     category = ExpenseCategory.objects.create(business=business, code="FIN", name="Finance")
     expense = Expense.objects.create(

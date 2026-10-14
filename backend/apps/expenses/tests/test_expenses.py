@@ -45,14 +45,27 @@ def setup_business():
         business=business, identity=employee, role="EMPLOYEE"
     )
     for permission in (
-        BusinessMemberPermission.Permission.MANAGE_EXPENSE_CATEGORIES,
-        BusinessMemberPermission.Permission.MANAGE_EXPENSES,
+        BusinessMemberPermission.Permission.EXPENSE_CATEGORY_VIEW,
+        BusinessMemberPermission.Permission.EXPENSE_CATEGORY_CREATE,
+        BusinessMemberPermission.Permission.EXPENSE_CATEGORY_UPDATE,
+        BusinessMemberPermission.Permission.EXPENSE_VIEW,
+        BusinessMemberPermission.Permission.EXPENSE_CREATE,
+        BusinessMemberPermission.Permission.EXPENSE_UPDATE,
+        BusinessMemberPermission.Permission.EXPENSE_CANCEL,
+        BusinessMemberPermission.Permission.EXPENSE_PAYMENT_VIEW,
+        BusinessMemberPermission.Permission.EXPENSE_PAYMENT_CREATE,
+        BusinessMemberPermission.Permission.EXPENSE_PAYMENT_REVERSE,
     ):
         grant_permission(owner_member, manager_member, permission)
     grant_permission(
         owner_member,
         employee_member,
-        BusinessMemberPermission.Permission.VIEW_EXPENSES,
+        BusinessMemberPermission.Permission.EXPENSE_VIEW,
+    )
+    grant_permission(
+        owner_member,
+        employee_member,
+        BusinessMemberPermission.Permission.EXPENSE_CATEGORY_VIEW,
     )
     ensure_default_expense_categories(business)
     return business, owner, manager, employee, outsider

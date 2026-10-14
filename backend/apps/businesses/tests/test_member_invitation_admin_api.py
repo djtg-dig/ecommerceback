@@ -87,7 +87,7 @@ def test_owner_creates_and_lists_compact_paginated_invitations(mailoutbox):
         {
             "email": " Invitee@Example.COM ",
             "title": "Caissier",
-            "permissions": [Permission.VIEW_CATALOG, Permission.VIEW_INVENTORY],
+            "permissions": [Permission.PRODUCT_VIEW, Permission.INVENTORY_VIEW],
         },
         format="json",
     )
@@ -96,8 +96,8 @@ def test_owner_creates_and_lists_compact_paginated_invitations(mailoutbox):
     assert created.data["email"] == "invitee@example.com"
     assert created.data["title"] == "Caissier"
     assert created.data["permissions"] == [
-        Permission.VIEW_CATALOG,
-        Permission.VIEW_INVENTORY,
+        Permission.PRODUCT_VIEW,
+        Permission.INVENTORY_VIEW,
     ]
     assert created.data["status"] == "PENDING"
     assert created.data["last_sent_at"] is not None
@@ -168,7 +168,7 @@ def test_member_with_manage_members_can_invite_but_legacy_manager_cannot(
         "legacy-manager",
         role=BusinessMember.Role.MANAGER,
     )
-    grant_permission(owner, allowed, Permission.MANAGE_MEMBERS)
+    grant_permission(owner, allowed, Permission.INVITATION_CREATE)
 
     allowed_response = client_for(allowed_identity).post(
         collection_url(business),
@@ -192,7 +192,7 @@ def test_member_with_manage_members_can_invite_but_legacy_manager_cannot(
 def test_view_members_can_list_invitations_but_cannot_create(mailoutbox):
     business, owner_identity, owner = create_business_with_owner("viewer")
     identity, viewer = create_member(business, "viewer")
-    grant_permission(owner, viewer, Permission.VIEW_MEMBERS)
+    grant_permission(owner, viewer, Permission.INVITATION_VIEW)
 
     listed = client_for(identity).get(collection_url(business))
     created = client_for(identity).post(
@@ -211,7 +211,7 @@ def test_view_members_can_list_invitations_but_cannot_create(mailoutbox):
 def test_suspended_manager_is_refused():
     business, owner_identity, owner = create_business_with_owner("suspended")
     identity, manager = create_member(business, "suspended-manager")
-    grant_permission(owner, manager, Permission.MANAGE_MEMBERS)
+    grant_permission(owner, manager, Permission.INVITATION_CREATE)
     manager.status = BusinessMember.Status.SUSPENDED
     manager.save(update_fields=("status", "updated_at"))
 

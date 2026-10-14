@@ -106,8 +106,8 @@ def test_recipient_accepts_and_gets_permissionless_non_owner_membership():
 
 def test_recipient_acceptance_applies_initial_permissions_atomically():
     permission_values = [
-        BusinessMemberPermission.Permission.VIEW_CATALOG,
-        BusinessMemberPermission.Permission.VIEW_INVENTORY,
+        BusinessMemberPermission.Permission.PRODUCT_VIEW,
+        BusinessMemberPermission.Permission.INVENTORY_VIEW,
     ]
     business, owner, recipient, invitation, token = invitation_context(
         "initial-permissions",
@@ -134,7 +134,7 @@ def test_recipient_acceptance_applies_initial_permissions_atomically():
 def test_permission_failure_rolls_back_member_and_invitation_acceptance():
     business, owner, recipient, invitation, token = invitation_context(
         "atomic-permissions",
-        permissions=[BusinessMemberPermission.Permission.VIEW_CATALOG],
+        permissions=[BusinessMemberPermission.Permission.PRODUCT_VIEW],
     )
 
     with patch.object(
@@ -157,7 +157,7 @@ def test_permission_failure_rolls_back_member_and_invitation_acceptance():
 def test_recipient_inbox_lists_only_matching_pending_invitations():
     business, owner, recipient, invitation, token = invitation_context(
         "inbox",
-        permissions=[BusinessMemberPermission.Permission.VIEW_CATALOG],
+        permissions=[BusinessMemberPermission.Permission.PRODUCT_VIEW],
     )
     other = identity("other-inbox")
 
@@ -173,7 +173,7 @@ def test_recipient_inbox_lists_only_matching_pending_invitations():
     assert response.data[0]["business_name"] == business.name
     assert response.data[0]["title"] == "Caissier"
     assert response.data[0]["permissions"] == [
-        BusinessMemberPermission.Permission.VIEW_CATALOG
+        BusinessMemberPermission.Permission.PRODUCT_VIEW
     ]
     assert response.data[0]["status"] == BusinessMemberInvitation.Status.PENDING
     assert response.data[0]["expires_at"]
@@ -184,7 +184,7 @@ def test_recipient_inbox_lists_only_matching_pending_invitations():
 def test_recipient_can_accept_or_decline_from_authenticated_inbox():
     business, owner, recipient, invitation, token = invitation_context(
         "account-accept",
-        permissions=[BusinessMemberPermission.Permission.VIEW_SALES],
+        permissions=[BusinessMemberPermission.Permission.SALE_VIEW],
     )
     accepted = client_for(recipient).post(
         f"/api/v1/me/business-invitations/{invitation.public_id}/accept-authenticated/",
@@ -195,7 +195,7 @@ def test_recipient_can_accept_or_decline_from_authenticated_inbox():
     assert accepted.status_code == 200
     member = BusinessMember.objects.get(business=business, identity=recipient)
     assert member.permissions.filter(
-        permission=BusinessMemberPermission.Permission.VIEW_SALES
+        permission=BusinessMemberPermission.Permission.SALE_VIEW
     ).exists()
 
     business2, owner2, recipient2, invitation2, token2 = invitation_context(

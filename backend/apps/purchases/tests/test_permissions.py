@@ -70,7 +70,7 @@ def test_purchase_read_and_manage_permissions_are_independent(
         format="json",
     ).status_code == 201
 
-    grant_permission(context["owner"], context["manager"], Permission.VIEW_PURCHASES)
+    grant_permission(context["owner"], context["manager"], Permission.SUPPLIER_VIEW)
     assert manager_client.get(suppliers_url).status_code == 200
     assert manager_client.post(
         suppliers_url,
@@ -81,7 +81,7 @@ def test_purchase_read_and_manage_permissions_are_independent(
     grant_permission(
         context["owner"],
         context["manager"],
-        Permission.MANAGE_PURCHASES,
+        Permission.SUPPLIER_CREATE,
     )
     assert manager_client.post(
         suppliers_url,
@@ -94,7 +94,7 @@ def test_purchase_permissions_reject_suspended_and_foreign_members(
     purchase_permission_context,
 ):
     context = purchase_permission_context
-    grant_permission(context["owner"], context["manager"], Permission.VIEW_PURCHASES)
+    grant_permission(context["owner"], context["manager"], Permission.SUPPLIER_VIEW)
     context["manager"].status = BusinessMember.Status.SUSPENDED
     context["manager"].save()
     suppliers_url = context["base"] + "suppliers/"

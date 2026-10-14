@@ -34,15 +34,23 @@ def setup():
     employee_member = BusinessMember.objects.create(
         business=business, identity=employee, role="EMPLOYEE"
     )
+    for permission in (
+        BusinessMemberPermission.Permission.INVENTORY_INITIALIZE,
+        BusinessMemberPermission.Permission.INVENTORY_IN,
+        BusinessMemberPermission.Permission.INVENTORY_OUT,
+        BusinessMemberPermission.Permission.INVENTORY_ADJUST,
+        BusinessMemberPermission.Permission.INVENTORY_MOVEMENT_VIEW,
+    ):
+        grant_permission(owner_member, manager_member, permission)
     grant_permission(
         owner_member,
-        manager_member,
-        BusinessMemberPermission.Permission.MANAGE_INVENTORY,
+        employee_member,
+        BusinessMemberPermission.Permission.INVENTORY_VIEW,
     )
     grant_permission(
         owner_member,
         employee_member,
-        BusinessMemberPermission.Permission.VIEW_INVENTORY,
+        BusinessMemberPermission.Permission.INVENTORY_MOVEMENT_VIEW,
     )
     product = Product.objects.create(business=business, category=category, name="Simple", selling_price="1", currency="CDF", attributes={})
     other_product = Product.objects.create(business=other, category=category, name="Other", selling_price="1", currency="CDF", attributes={})

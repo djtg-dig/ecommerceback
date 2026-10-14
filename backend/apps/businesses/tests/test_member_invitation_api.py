@@ -152,14 +152,14 @@ def test_expired_pending_invitation_is_expired_before_recreation():
     assert second.pk != first.pk
 
 
-def test_invitation_requires_manage_members_permission():
+def test_invitation_requires_invitation_create_permission():
     business, owner_identity, owner = create_business_with_owner("permission")
     employee_identity, employee = create_member(business, "employee")
 
     with pytest.raises(ValidationError, match="authorized member manager"):
         invite_member(employee, business, "noperm@example.com")
 
-    grant_permission(owner, employee, Permission.MANAGE_MEMBERS)
+    grant_permission(owner, employee, Permission.INVITATION_CREATE)
     invitation, _ = invite_member(employee, business, "granted@example.com")
 
     assert invitation.status == BusinessMemberInvitation.Status.PENDING
@@ -185,7 +185,7 @@ def test_legacy_manager_without_permission_cannot_invite():
 def test_suspended_member_cannot_invite():
     business, owner_identity, owner = create_business_with_owner("suspended")
     manager_identity, manager = create_member(business, "suspended-manager")
-    grant_permission(owner, manager, Permission.MANAGE_MEMBERS)
+    grant_permission(owner, manager, Permission.INVITATION_CREATE)
 
     manager.status = BusinessMember.Status.SUSPENDED
     manager.save()
@@ -201,7 +201,7 @@ def test_suspended_member_cannot_invite():
 def test_removed_member_cannot_invite():
     business, owner_identity, owner = create_business_with_owner("removed")
     manager_identity, manager = create_member(business, "removed-manager")
-    grant_permission(owner, manager, Permission.MANAGE_MEMBERS)
+    grant_permission(owner, manager, Permission.INVITATION_CREATE)
 
     remove_member(owner, manager)
 
