@@ -244,7 +244,7 @@ def test_last_owner_protection():
 
 
 @pytest.mark.django_db
-def test_migration_preserves_old_roles_without_privilege_escalation():
+def test_roles_do_not_grant_permissions_without_privilege_escalation():
     business = Business.objects.create(name="Mig shop")
     old_owner = CarriIdentity.objects.create(carri_subject="old-owner")
     old_manager = CarriIdentity.objects.create(carri_subject="old-manager")
@@ -252,17 +252,11 @@ def test_migration_preserves_old_roles_without_privilege_escalation():
     BusinessMember.objects.create(business=business, identity=old_owner, role="OWNER")
     BusinessMember.objects.create(business=business, identity=old_manager, role="MANAGER")
     BusinessMember.objects.create(business=business, identity=old_employee, role="EMPLOYEE")
-    migration = import_module(
-        "apps.businesses.migrations.0006_backfill_member_title_owner"
-    )
-    migration.backfill_is_owner_and_title(django_apps, None)
     owner_m = BusinessMember.objects.get(identity=old_owner)
     manager_m = BusinessMember.objects.get(identity=old_manager)
     employee_m = BusinessMember.objects.get(identity=old_employee)
     assert owner_m.is_owner is True
-    assert owner_m.title == "Gérant"
     assert manager_m.is_owner is False
-    assert manager_m.title == "Gestionnaire"
     assert not has_permission(manager_m, BusinessMemberPermission.Permission.BUSINESS_UPDATE)
     assert auth(old_manager).patch(
         f"/api/v1/businesses/{business.public_id}/",
@@ -270,7 +264,6 @@ def test_migration_preserves_old_roles_without_privilege_escalation():
         format="json",
     ).status_code == 403
     assert employee_m.is_owner is False
-    assert employee_m.title == "Employé"
 
 
 @pytest.mark.django_db

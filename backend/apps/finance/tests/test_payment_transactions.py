@@ -155,14 +155,12 @@ def test_payment_transaction_and_movement_roll_back_together_and_reversal_has_no
     assert historical.payment_transaction_id is None
 
 
-def test_default_payment_method_backfill_is_idempotent_for_existing_businesses():
-    from django.apps import apps as django_apps
-    from importlib import import_module
-    create_default_payment_methods = import_module("apps.businesses.migrations.0004_default_payment_methods").create_default_payment_methods
+def test_default_payment_method_initialization_is_idempotent_for_existing_businesses():
+    from apps.businesses.services import ensure_default_payment_methods
 
     business = Business.objects.create(name="Pre-existing business")
-    create_default_payment_methods(django_apps, None)
-    create_default_payment_methods(django_apps, None)
+    ensure_default_payment_methods(business)
+    ensure_default_payment_methods(business)
 
     assert business.payment_methods.count() == 5
 
