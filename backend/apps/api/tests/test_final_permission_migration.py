@@ -118,10 +118,11 @@ def administrative_read_urls(context):
 
 def grant_final_permissions(context, member):
     for permission in (
-        Permission.VIEW_PAYMENT_METHODS,
-        Permission.VIEW_CUSTOMERS,
-        Permission.MANAGE_CUSTOMERS,
-        Permission.VIEW_SALES,
+        Permission.PAYMENT_METHOD_VIEW,
+        Permission.CUSTOMER_VIEW,
+        Permission.CUSTOMER_CREATE,
+        Permission.SALE_VIEW,
+        Permission.SALE_LINE_VIEW,
     ):
         grant_permission(context["owner"], member, permission)
 
@@ -157,21 +158,15 @@ def test_owner_and_explicit_permissions_cover_all_final_operations(permission_co
     ).status_code == 201
 
 
-def test_use_pos_gets_only_compact_customers_and_active_payment_methods(
+def test_sale_create_gets_only_compact_customer_search_and_sale_creation(
     permission_context,
 ):
     context = permission_context
-    grant_permission(context["owner"], context["manager"], Permission.USE_POS)
+    grant_permission(context["owner"], context["manager"], Permission.SALE_CREATE)
     client = client_for(context["manager_identity"])
 
     methods = client.get(context["methods"])
-    assert methods.status_code == 200
-    assert {row["public_id"] for row in methods.data} == {
-        context["active_method"].public_id,
-    }
-    assert client.get(
-        context["methods"] + f"{context['inactive_method'].public_id}/"
-    ).status_code == 404
+    assert methods.status_code == 403
 
     customers = client.get(context["pos_customers"], {"q": "Alice"})
     assert customers.status_code == 200
@@ -192,11 +187,17 @@ def test_use_pos_gets_only_compact_customers_and_active_payment_methods(
     assert client.get(context["sales"]).status_code == 403
     assert client.post(context["sales"], {}, format="json").status_code == 201
 
+    grant_permission(context["owner"], context["manager"], Permission.SALE_COMPLETE)
+    methods = client.get(context["methods"])
+    assert methods.status_code == 200
+    assert {row["public_id"] for row in methods.data} == {context["active_method"].public_id}
+    assert client.get(context["methods"] + f"{context['inactive_method'].public_id}/").status_code == 404
+
 
 def test_suspended_and_foreign_members_keep_canonical_errors(permission_context):
     context = permission_context
     grant_final_permissions(context, context["suspended"])
-    grant_permission(context["owner"], context["suspended"], Permission.USE_POS)
+    grant_permission(context["owner"], context["suspended"], Permission.SALE_CREATE)
     context["suspended"].status = BusinessMember.Status.SUSPENDED
     context["suspended"].save(update_fields=("status", "updated_at"))
 
@@ -238,9 +239,10 @@ def test_new_permissions_do_not_appear_on_existing_non_owner_members(
     assert context["manager"].role == BusinessMember.Role.MANAGER
     assert not context["manager"].permissions.filter(
         permission__in=(
-            Permission.VIEW_PAYMENT_METHODS,
-            Permission.VIEW_CUSTOMERS,
-            Permission.MANAGE_CUSTOMERS,
-            Permission.VIEW_SALES,
+            Permission.PAYMENT_METHOD_VIEW,
+            Permission.CUSTOMER_VIEW,
+            Permission.CUSTOMER_CREATE,
+            Permission.SALE_VIEW,
+            Permission.SALE_LINE_VIEW,
         )
     ).exists()

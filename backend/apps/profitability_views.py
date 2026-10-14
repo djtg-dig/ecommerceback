@@ -21,7 +21,7 @@ class ProfitabilitySummaryView(APIView):
         require_permission(
             request.user,
             business,
-            BusinessMemberPermission.Permission.VIEW_PROFITABILITY,
+            BusinessMemberPermission.Permission.PROFITABILITY_VIEW,
         )
         start, end = resolve_reporting_period(request.query_params)
         return Response(build_profitability_summary(business, start, end))

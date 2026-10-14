@@ -1,3 +1,6 @@
+from importlib import import_module
+from types import SimpleNamespace
+
 import pytest
 from django.core.exceptions import ValidationError
 from rest_framework.exceptions import NotFound, PermissionDenied
@@ -41,7 +44,9 @@ def create_memberships():
 def test_owner_has_every_registered_permission_but_unknown_is_rejected():
     business, owner_identity, _, owner, _ = create_memberships()
 
-    for permission in Permission.values:
+    from apps.businesses.permissions import atomic_permission_values
+
+    for permission in atomic_permission_values():
         assert has_permission(owner, permission)
         assert require_permission(owner_identity, business, permission) == owner
 
@@ -59,9 +64,9 @@ def test_owner_has_every_registered_permission_but_unknown_is_rejected():
 def test_individual_permission_can_be_granted_required_and_revoked():
     business, _, member_identity, owner, member = create_memberships()
 
-    assert not has_permission(member, Permission.USE_POS)
+    assert not has_permission(member, Permission.SALE_CREATE)
     with pytest.raises(PermissionDenied):
-        require_permission(member_identity, business, Permission.USE_POS)
+        require_permission(member_identity, business, Permission.SALE_CREATE)
 
 
 @pytest.mark.django_db
@@ -72,29 +77,29 @@ def test_any_permission_gate_accepts_one_explicit_right_and_rejects_unknown():
         require_any_permission(
             member_identity,
             business,
-            (Permission.VIEW_PAYMENT_METHODS, Permission.USE_POS),
+            (Permission.PAYMENT_METHOD_VIEW, Permission.SALE_CREATE),
         )
 
-    grant_permission(owner, member, Permission.USE_POS)
+    grant_permission(owner, member, Permission.SALE_CREATE)
     assert require_any_permission(
         member_identity,
         business,
-        (Permission.VIEW_PAYMENT_METHODS, Permission.USE_POS),
+        (Permission.PAYMENT_METHOD_VIEW, Permission.SALE_CREATE),
     ) == member
 
     with pytest.raises(ValidationError, match="Unknown Business permission"):
         require_any_permission(
             member_identity,
             business,
-            (Permission.USE_POS, "CLIENT_PERMISSION"),
+            (Permission.SALE_CREATE, "CLIENT_PERMISSION"),
         )
 
-    grant_permission(owner, member, Permission.USE_POS)
-    assert require_permission(member_identity, business, Permission.USE_POS) == member
+    grant_permission(owner, member, Permission.SALE_CREATE)
+    assert require_permission(member_identity, business, Permission.SALE_CREATE) == member
 
-    revoke_permission(owner, member, Permission.USE_POS)
+    revoke_permission(owner, member, Permission.SALE_CREATE)
     with pytest.raises(PermissionDenied):
-        require_permission(member_identity, business, Permission.USE_POS)
+        require_permission(member_identity, business, Permission.SALE_CREATE)
 
 
 @pytest.mark.django_db
@@ -103,24 +108,24 @@ def test_titles_and_legacy_roles_never_grant_implicit_permissions():
 
     assert member.role == BusinessMember.Role.MANAGER
     assert member.title == "Gestionnaire"
-    assert not has_permission(member, Permission.MANAGE_MEMBERS)
+    assert not has_permission(member, Permission.MEMBER_PERMISSION_GRANT)
 
     member.role = BusinessMember.Role.EMPLOYEE
     member.title = "Employé"
     member.save()
-    grant_permission(owner, member, Permission.MANAGE_MEMBERS)
+    grant_permission(owner, member, Permission.MEMBER_PERMISSION_GRANT)
 
     assert require_permission(
         member_identity,
         business,
-        Permission.MANAGE_MEMBERS,
+        Permission.MEMBER_PERMISSION_GRANT,
     ) == member
 
 
 @pytest.mark.django_db
 def test_suspended_member_has_no_access_and_receives_403():
     business, _, member_identity, owner, member = create_memberships()
-    grant_permission(owner, member, Permission.VIEW_CATALOG)
+    grant_permission(owner, member, Permission.PRODUCT_VIEW)
     member.status = BusinessMember.Status.SUSPENDED
     member.save()
 
@@ -130,9 +135,9 @@ def test_suspended_member_has_no_access_and_receives_403():
         business,
         include_suspended=True,
     ) == member
-    assert not has_permission(member, Permission.VIEW_CATALOG)
+    assert not has_permission(member, Permission.PRODUCT_VIEW)
     with pytest.raises(PermissionDenied) as error:
-        require_permission(member_identity, business, Permission.VIEW_CATALOG)
+        require_permission(member_identity, business, Permission.PRODUCT_VIEW)
 
     assert error.value.status_code == 403
 
@@ -147,17 +152,17 @@ def test_inactive_business_allows_authorized_read_but_blocks_writes(business_sta
     assert require_permission(
         owner_identity,
         business,
-        Permission.VIEW_MEMBERS,
+        Permission.MEMBER_VIEW,
     ) == owner
     with pytest.raises(PermissionDenied):
         require_permission(
             owner_identity,
             business,
-            Permission.MANAGE_MEMBERS,
+            Permission.MEMBER_PERMISSION_GRANT,
             write=True,
         )
-    with pytest.raises(ValidationError, match="inactive Business"):
-        grant_permission(owner, member, Permission.VIEW_CATALOG)
+    with pytest.raises(ValidationError, match="authorized active member"):
+        grant_permission(owner, member, Permission.PRODUCT_VIEW)
 
 
 @pytest.mark.django_db
@@ -174,26 +179,26 @@ def test_missing_membership_is_404_and_never_crosses_businesses():
     )
 
     with pytest.raises(NotFound) as error:
-        require_permission(outsider, business, Permission.VIEW_MEMBERS)
+        require_permission(outsider, business, Permission.MEMBER_VIEW)
     assert error.value.status_code == 404
 
-    with pytest.raises(ValidationError, match="active Business owner"):
-        grant_permission(other_owner, member, Permission.USE_POS)
+    with pytest.raises(ValidationError, match="authorized active member"):
+        grant_permission(other_owner, member, Permission.SALE_CREATE)
     assert not member.permissions.exists()
 
 
 @pytest.mark.django_db
 def test_non_owner_cannot_self_assign_or_revoke_permissions():
     _, _, _, owner, member = create_memberships()
-    grant_permission(owner, member, Permission.USE_POS)
+    grant_permission(owner, member, Permission.SALE_CREATE)
 
-    with pytest.raises(ValidationError, match="active Business owner"):
-        grant_permission(member, member, Permission.MANAGE_MEMBERS)
-    with pytest.raises(ValidationError, match="active Business owner"):
-        revoke_permission(member, member, Permission.USE_POS)
+    with pytest.raises(ValidationError, match="authorized active member"):
+        grant_permission(member, member, Permission.MEMBER_PERMISSION_GRANT)
+    with pytest.raises(ValidationError, match="authorized active member"):
+        revoke_permission(member, member, Permission.SALE_CREATE)
 
-    assert member.permissions.filter(permission=Permission.USE_POS).exists()
-    assert not member.permissions.filter(permission=Permission.MANAGE_MEMBERS).exists()
+    assert member.permissions.filter(permission=Permission.SALE_CREATE).exists()
+    assert not member.permissions.filter(permission=Permission.MEMBER_PERMISSION_GRANT).exists()
 
 
 @pytest.mark.django_db
@@ -201,11 +206,11 @@ def test_owner_implicit_rights_cannot_be_granted_or_revoked():
     _, _, _, owner, _ = create_memberships()
 
     with pytest.raises(ValidationError, match="already have all permissions"):
-        grant_permission(owner, owner, Permission.USE_POS)
+        grant_permission(owner, owner, Permission.SALE_CREATE)
     with pytest.raises(ValidationError, match="cannot be revoked"):
-        revoke_permission(owner, owner, Permission.USE_POS)
+        revoke_permission(owner, owner, Permission.SALE_CREATE)
 
-    assert has_permission(owner, Permission.USE_POS)
+    assert has_permission(owner, Permission.SALE_CREATE)
     assert not owner.permissions.exists()
 
 
@@ -217,3 +222,49 @@ def test_grant_and_revoke_reject_unknown_permissions():
         grant_permission(owner, member, "UNKNOWN")
     with pytest.raises(ValidationError, match="Unknown Business permission"):
         revoke_permission(owner, member, "UNKNOWN")
+
+
+def test_invitation_permission_migration_expands_known_and_drops_unknown_codes():
+    invitation = SimpleNamespace(
+        pk="invitation-1",
+        permissions=["VIEW_CATALOG", "PRODUCT_DELETE", "UNKNOWN_PERMISSION"],
+        saved_fields=None,
+    )
+
+    class QuerySet(list):
+        def only(self, *_fields):
+            return self
+
+    class Manager:
+        def filter(self, **_filters):
+            return []
+
+        def all(self):
+            return QuerySet([invitation])
+
+    class FakePermissionModel:
+        objects = Manager()
+
+    class FakeInvitationModel:
+        objects = Manager()
+
+    def save(*, update_fields):
+        invitation.saved_fields = update_fields
+
+    invitation.save = save
+
+    class HistoricalApps:
+        def get_model(self, app_label, model_name):
+            assert app_label == "businesses"
+            return FakePermissionModel if model_name == "BusinessMemberPermission" else FakeInvitationModel
+
+    migration = import_module("apps.businesses.migrations.0012_expand_atomic_permissions")
+    migration.forwards(HistoricalApps(), None)
+
+    assert invitation.permissions == [
+        "VIEW_CATALOG",
+        "PRODUCT_VIEW",
+        "PRODUCT_VARIANT_VIEW",
+        "PRODUCT_DELETE",
+    ]
+    assert invitation.saved_fields == ("permissions",)

@@ -33,6 +33,7 @@ class FinanceBusinessAPIView(APIView):
     """Restrict financial reporting to explicitly authorized members."""
 
     http_method_names = ["get", "head", "options"]
+    required_permission = BusinessMemberPermission.Permission.FINANCIAL_MOVEMENT_VIEW
 
     def get_business(self, request, business_public_id):
         business = Business.objects.filter(public_id=business_public_id).first()
@@ -42,7 +43,7 @@ class FinanceBusinessAPIView(APIView):
         require_permission(
             request.user,
             business,
-            BusinessMemberPermission.Permission.VIEW_FINANCIAL_SUMMARY,
+            self.required_permission,
         )
         return business
 
@@ -125,6 +126,7 @@ class FinancialMovementDetailView(FinanceBusinessAPIView):
 
 
 class FinancialSummaryView(FinanceBusinessAPIView):
+    required_permission = BusinessMemberPermission.Permission.FINANCIAL_SUMMARY_VIEW
     @extend_schema(
         parameters=FILTER_PARAMETERS,
         responses={200: dict, 400: None, 403: None, 404: None},

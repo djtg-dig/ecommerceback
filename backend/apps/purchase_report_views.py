@@ -25,7 +25,7 @@ class Base(APIView):
         require_permission(
             request.user,
             business,
-            BusinessMemberPermission.Permission.VIEW_REPORTS,
+            BusinessMemberPermission.Permission.PURCHASE_REPORT_VIEW,
         )
         return business
 

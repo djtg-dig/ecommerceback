@@ -4,7 +4,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.accounts.models import CarriIdentity
 from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
-from apps.businesses.permissions import has_permission
+from apps.businesses.permissions import atomic_permission_values, has_permission
 
 
 def client_for(identity):
@@ -24,9 +24,9 @@ def test_my_permissions_matches_existing_authorization_rules():
     owner = member(business, "owner", owner=True)
     limited = member(business, "limited")
     empty = member(business, "empty")
-    BusinessMemberPermission.objects.create(member=limited, permission="VIEW_CATALOG")
+    BusinessMemberPermission.objects.create(member=limited, permission="PRODUCT_VIEW")
     url = f"/api/v1/businesses/{business.public_id}/my-permissions/"
-    all_permissions = list(BusinessMemberPermission.Permission.values)
+    all_permissions = atomic_permission_values()
     for current in (owner, limited, empty):
         response = client_for(current.identity).get(url)
         assert response.status_code == 200

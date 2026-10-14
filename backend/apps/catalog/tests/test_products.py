@@ -43,12 +43,12 @@ def actors():
     grant_permission(
         owner_member,
         manager_member,
-        BusinessMemberPermission.Permission.MANAGE_CATALOG,
+        BusinessMemberPermission.Permission.PRODUCT_CREATE,
     )
     grant_permission(
         owner_member,
         employee_member,
-        BusinessMemberPermission.Permission.VIEW_CATALOG,
+        BusinessMemberPermission.Permission.PRODUCT_VIEW,
     )
     return business, other_business, owner, manager, employee, outsider
 
@@ -157,6 +157,43 @@ def test_product_archive_and_cross_product_variant_scope(catalog_category, actor
     assert api(owner).get(sibling_path).status_code == 404
     archive = api(owner).post(f"/api/v1/businesses/{business.public_id}/products/{product['public_id']}/archive/")
     assert archive.status_code == 200 and archive.data["status"] == "ARCHIVED"
+
+
+def test_delete_only_permission_deletes_without_catalog_read_access(catalog_category, actors):
+    _, category = catalog_category
+    business, _, owner, _, employee, _ = actors
+    product = create_product(api(owner), business, category)
+    owner_member = business.members.get(identity=owner)
+    employee_member = business.members.get(identity=employee)
+    employee_member.permissions.all().delete()
+    grant_permission(owner_member, employee_member, BusinessMemberPermission.Permission.PRODUCT_DELETE)
+    client = api(employee)
+    collection = f"/api/v1/businesses/{business.public_id}/products/"
+    detail = collection + f"{product['public_id']}/"
+
+    assert client.get(collection).status_code == 403
+    assert client.get(detail).status_code == 403
+    assert client.post(collection, payload(category, name="Denied"), format="json").status_code == 403
+    assert client.patch(detail, {"name": "Denied"}, format="json").status_code == 403
+    assert client.delete(detail).status_code == 204
+    assert not Product.objects.filter(public_id=product["public_id"]).exists()
+
+
+def test_product_delete_respects_protected_variant_references(catalog_category, actors):
+    _, category = catalog_category
+    business, _, owner, _, employee, _ = actors
+    product = create_product(api(owner), business, category)
+    ProductVariant.objects.create(product=Product.objects.get(public_id=product["public_id"]), attributes={"size": "42"})
+    owner_member = business.members.get(identity=owner)
+    employee_member = business.members.get(identity=employee)
+    employee_member.permissions.all().delete()
+    grant_permission(owner_member, employee_member, BusinessMemberPermission.Permission.PRODUCT_DELETE)
+    response = api(employee).delete(
+        f"/api/v1/businesses/{business.public_id}/products/{product['public_id']}/"
+    )
+
+    assert response.status_code == 409
+    assert Product.objects.filter(public_id=product["public_id"]).exists()
 
 
 def test_all_dynamic_attribute_types_are_checked_and_public_ids_immutable(catalog_category, actors):

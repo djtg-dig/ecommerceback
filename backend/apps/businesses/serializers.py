@@ -10,6 +10,7 @@ from .models import (
     BusinessPaymentMethod,
 )
 from .services.invitations import validate_invitation_state
+from .permissions import atomic_permission_values
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -127,13 +128,17 @@ class BusinessMemberSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(serializers.ListField(child=serializers.CharField()))
     def get_permissions(self, member):
+        from .permissions import atomic_permission_values
+
+        if not self.context.get("include_permissions", True):
+            return []
         if member.is_owner:
-            return list(BusinessMemberPermission.Permission.values)
+            return atomic_permission_values()
         prefetched = getattr(member, "_prefetched_permissions", None)
         if prefetched is not None:
-            return [row.permission for row in prefetched]
+            return [row.permission for row in prefetched if row.permission in atomic_permission_values()]
         return list(
-            member.permissions.values_list("permission", flat=True)
+            member.permissions.filter(permission__in=atomic_permission_values()).values_list("permission", flat=True)
         )
 
 
@@ -149,17 +154,13 @@ class BusinessMemberTitleSerializer(serializers.ModelSerializer):
 class BusinessMemberPermissionSerializer(serializers.Serializer):
     """Compact projection of one registered Business permission."""
 
-    permission = serializers.ChoiceField(
-        choices=BusinessMemberPermission.Permission.choices,
-    )
+    permission = serializers.ChoiceField(choices=atomic_permission_values())
 
 
 class BusinessMemberPermissionGrantSerializer(serializers.Serializer):
     """Payload used to grant one registered permission to a member."""
 
-    permission = serializers.ChoiceField(
-        choices=BusinessMemberPermission.Permission.choices,
-    )
+    permission = serializers.ChoiceField(choices=atomic_permission_values())
 
 
 class BusinessMemberInvitationCreateSerializer(serializers.Serializer):

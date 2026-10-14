@@ -20,7 +20,7 @@ class ReportBase(APIView):
         require_permission(
             request.user,
             business,
-            BusinessMemberPermission.Permission.VIEW_REPORTS,
+            BusinessMemberPermission.Permission.SALE_REPORT_VIEW,
         )
         return business
 

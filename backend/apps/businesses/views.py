@@ -23,6 +23,7 @@ from .models import (
     BusinessPaymentMethod,
 )
 from .permissions import (
+    atomic_permission_values,
     has_permission,
     membership_for,
     require_any_permission,
@@ -246,7 +247,7 @@ class BusinessDetailView(APIView):
         business = Business.objects.filter(public_id=public_id).first()
         if business is None:
             return Response({"detail": "Not found."}, status=404)
-        require_permission(request.user, business, BusinessMemberPermission.Permission.UPDATE_BUSINESS, write=True)
+        require_permission(request.user, business, BusinessMemberPermission.Permission.BUSINESS_UPDATE, write=True)
         serializer = BusinessUpdateSerializer(business, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         data = dict(serializer.validated_data)
@@ -276,7 +277,7 @@ class BusinessMyPermissionsView(APIView):
         if member.status != BusinessMember.Status.ACTIVE:
             raise PermissionDenied("Forbidden.")
         permissions = [
-            permission for permission in BusinessMemberPermission.Permission.values
+            permission for permission in atomic_permission_values()
             if has_permission(member, permission, write=False)
         ]
         return Response({"member_status": member.status, "permissions": permissions})
@@ -286,10 +287,10 @@ class BusinessMembersView(APIView):
         business = Business.objects.filter(public_id=public_id).first()
         if business is None:
             return Response({"detail": "Not found."}, status=404)
-        require_permission(
+        actor = require_permission(
             request.user,
             business,
-            BusinessMemberPermission.Permission.VIEW_MEMBERS,
+            BusinessMemberPermission.Permission.MEMBER_VIEW,
         )
 
         paginator = MemberPagination()
@@ -298,7 +299,16 @@ class BusinessMembersView(APIView):
         )
 
         return paginator.get_paginated_response(
-            BusinessMemberSerializer(page, many=True).data
+            BusinessMemberSerializer(
+                page,
+                many=True,
+                context={
+                    "include_permissions": has_permission(
+                        actor,
+                        BusinessMemberPermission.Permission.MEMBER_PERMISSION_VIEW,
+                    )
+                },
+            ).data
         )
 
 
@@ -312,10 +322,10 @@ class BusinessMemberDetailView(APIView):
         business = self.get_business(public_id)
         if business is None:
             return Response({"detail": "Not found."}, status=404)
-        require_permission(
+        actor = require_permission(
             request.user,
             business,
-            BusinessMemberPermission.Permission.VIEW_MEMBERS,
+            BusinessMemberPermission.Permission.MEMBER_VIEW,
         )
         member = (
             member_queryset(business)
@@ -325,7 +335,17 @@ class BusinessMemberDetailView(APIView):
         if member is None:
             return Response({"detail": "Not found."}, status=404)
 
-        return Response(BusinessMemberSerializer(member).data)
+        return Response(
+            BusinessMemberSerializer(
+                member,
+                context={
+                    "include_permissions": has_permission(
+                        actor,
+                        BusinessMemberPermission.Permission.MEMBER_PERMISSION_VIEW,
+                    )
+                },
+            ).data
+        )
 
     def patch(self, request, public_id, member_public_id):
         business = self.get_business(public_id)
@@ -336,7 +356,7 @@ class BusinessMemberDetailView(APIView):
             actor = require_permission(
                 request.user,
                 business,
-                BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+                BusinessMemberPermission.Permission.MEMBER_UPDATE,
                 write=True,
             )
             member = (
@@ -373,7 +393,7 @@ class BusinessMemberDetailView(APIView):
             actor = require_permission(
                 request.user,
                 business,
-                BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+                BusinessMemberPermission.Permission.MEMBER_REMOVE,
                 write=True,
             )
             member = (
@@ -401,7 +421,7 @@ class BusinessMemberSuspendView(APIView):
         actor = require_permission(
             request.user,
             business,
-            BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+            BusinessMemberPermission.Permission.MEMBER_SUSPEND,
             write=True,
         )
         member = (
@@ -440,7 +460,7 @@ class BusinessMemberReactivateView(APIView):
         actor = require_permission(
             request.user,
             business,
-            BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+            BusinessMemberPermission.Permission.MEMBER_REACTIVATE,
             write=True,
         )
         member = (
@@ -477,15 +497,20 @@ class BusinessPermissionCatalogView(APIView):
         business = Business.objects.filter(public_id=public_id).first()
         if business is None:
             return Response({"detail": "Not found."}, status=404)
-        require_permission(
+        require_any_permission(
             request.user,
             business,
-            BusinessMemberPermission.Permission.VIEW_MEMBERS,
+            (
+                BusinessMemberPermission.Permission.MEMBER_PERMISSION_VIEW,
+                BusinessMemberPermission.Permission.INVITATION_CREATE,
+                BusinessMemberPermission.Permission.MEMBER_PERMISSION_GRANT,
+            ),
         )
 
         catalog = [
             {"permission": value, "label": label}
             for value, label in BusinessMemberPermission.Permission.choices
+            if value in atomic_permission_values()
         ]
 
         return Response(
@@ -506,11 +531,9 @@ class BusinessMemberPermissionGrantView(APIView):
         actor = require_permission(
             request.user,
             business,
-            BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+            BusinessMemberPermission.Permission.MEMBER_PERMISSION_GRANT,
             write=True,
         )
-        if not actor.is_owner:
-            raise PermissionDenied("Forbidden.")
         member = (
             BusinessMember.objects.filter(
                 business=business,
@@ -529,7 +552,7 @@ class BusinessMemberPermissionGrantView(APIView):
         require_permission(
             request.user,
             business,
-            BusinessMemberPermission.Permission.VIEW_MEMBERS,
+            BusinessMemberPermission.Permission.MEMBER_PERMISSION_VIEW,
         )
         member = (
             member_queryset(business)
@@ -540,14 +563,20 @@ class BusinessMemberPermissionGrantView(APIView):
             return Response({"detail": "Not found."}, status=404)
 
         if member.is_owner:
-            permissions = list(BusinessMemberPermission.Permission.values)
+            permissions = atomic_permission_values()
         else:
             prefetched = getattr(member, "_prefetched_permissions", None)
             if prefetched is not None:
-                permissions = [row.permission for row in prefetched]
+                permissions = [
+                    row.permission
+                    for row in prefetched
+                    if row.permission in atomic_permission_values()
+                ]
             else:
                 permissions = list(
-                    member.permissions.order_by("permission").values_list(
+                    member.permissions.filter(
+                        permission__in=atomic_permission_values(),
+                    ).order_by("permission").values_list(
                         "permission",
                         flat=True,
                     )
@@ -604,11 +633,9 @@ class BusinessMemberPermissionDetailView(APIView):
         actor = require_permission(
             request.user,
             business,
-            BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+            BusinessMemberPermission.Permission.MEMBER_PERMISSION_REVOKE,
             write=True,
         )
-        if not actor.is_owner:
-            raise PermissionDenied("Forbidden.")
         member = (
             BusinessMember.objects.filter(
                 business=business,
@@ -646,7 +673,7 @@ class BusinessInvitationAdminMixin:
         public_id,
         *,
         write=False,
-        permission=BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+        permission=BusinessMemberPermission.Permission.INVITATION_CREATE,
     ):
         business = Business.objects.filter(public_id=public_id).first()
         if business is None:
@@ -656,6 +683,7 @@ class BusinessInvitationAdminMixin:
                 request.user,
                 business,
                 permission,
+                write=write,
             )
         except PermissionDenied as exc:
             raise InvitationPermissionDenied from exc
@@ -696,7 +724,7 @@ class BusinessInvitationsView(BusinessInvitationAdminMixin, APIView):
         business, actor, error = self.get_context(
             request,
             public_id,
-            permission=BusinessMemberPermission.Permission.VIEW_MEMBERS,
+            permission=BusinessMemberPermission.Permission.INVITATION_VIEW,
         )
         invitations = BusinessMemberInvitation.objects.filter(
             business=business,
@@ -712,6 +740,7 @@ class BusinessInvitationsView(BusinessInvitationAdminMixin, APIView):
             request,
             public_id,
             write=True,
+            permission=BusinessMemberPermission.Permission.INVITATION_CREATE,
         )
         if error:
             return error
@@ -759,6 +788,7 @@ class BusinessInvitationResendView(BusinessInvitationAdminMixin, APIView):
             request,
             public_id,
             write=True,
+            permission=BusinessMemberPermission.Permission.INVITATION_RESEND,
         )
         if error:
             return error
@@ -783,6 +813,7 @@ class BusinessInvitationRevokeView(BusinessInvitationAdminMixin, APIView):
             request,
             public_id,
             write=True,
+            permission=BusinessMemberPermission.Permission.INVITATION_REVOKE,
         )
         if error:
             return error
@@ -929,20 +960,23 @@ class BusinessPaymentMethodsView(APIView):
             request.user,
             business,
             (
-                BusinessMemberPermission.Permission.VIEW_PAYMENT_METHODS,
-                BusinessMemberPermission.Permission.USE_POS,
+                BusinessMemberPermission.Permission.PAYMENT_METHOD_VIEW,
+                BusinessMemberPermission.Permission.SALE_COMPLETE,
+                BusinessMemberPermission.Permission.SUPPLIER_PAYMENT_CREATE,
+                BusinessMemberPermission.Permission.RECEIVABLE_PAYMENT_CREATE,
+                BusinessMemberPermission.Permission.EXPENSE_PAYMENT_CREATE,
             ),
         )
         return business, member
 
-    def get_authorized_business(self, request, public_id):
+    def get_authorized_business(self, request, public_id, permission):
         business = Business.objects.filter(public_id=public_id).first()
         if business is None:
             return None
         require_permission(
             request.user,
             business,
-            BusinessMemberPermission.Permission.MANAGE_PAYMENT_METHODS,
+            permission,
             write=True,
         )
         return business
@@ -954,13 +988,17 @@ class BusinessPaymentMethodsView(APIView):
         methods = business.payment_methods.all()
         if not has_permission(
             member,
-            BusinessMemberPermission.Permission.VIEW_PAYMENT_METHODS,
+            BusinessMemberPermission.Permission.PAYMENT_METHOD_VIEW,
         ):
             methods = methods.filter(is_active=True)
         return Response(BusinessPaymentMethodSerializer(methods, many=True).data)
 
     def post(self, request, public_id):
-        business = self.get_authorized_business(request, public_id)
+        business = self.get_authorized_business(
+            request,
+            public_id,
+            BusinessMemberPermission.Permission.PAYMENT_METHOD_CREATE,
+        )
         if business is None:
             return Response({"detail": "Not found."}, status=404)
         serializer = BusinessPaymentMethodSerializer(data=request.data)
@@ -989,13 +1027,17 @@ class BusinessPaymentMethodDetailView(BusinessPaymentMethodsView):
             return Response({"detail": "Not found."}, status=404)
         if not method.is_active and not has_permission(
             member,
-            BusinessMemberPermission.Permission.VIEW_PAYMENT_METHODS,
+            BusinessMemberPermission.Permission.PAYMENT_METHOD_VIEW,
         ):
             return Response({"detail": "Not found."}, status=404)
         return Response(BusinessPaymentMethodSerializer(method).data)
 
     def patch(self, request, public_id, method_public_id):
-        business = self.get_authorized_business(request, public_id)
+        business = self.get_authorized_business(
+            request,
+            public_id,
+            BusinessMemberPermission.Permission.PAYMENT_METHOD_UPDATE,
+        )
         method = (
             business.payment_methods.filter(public_id=method_public_id).first()
             if business

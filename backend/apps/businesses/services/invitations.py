@@ -23,6 +23,8 @@ from ..models import (
     BusinessMemberInvitation,
     BusinessMemberPermission,
 )
+from ..permissions import has_permission
+from ..permissions import LEGACY_PERMISSION_VALUES, atomic_permission_values
 
 
 class InvitationActionError(Exception):
@@ -60,7 +62,7 @@ def invitation_expiry():
     return timezone.now() + timedelta(hours=hours)
 
 
-def _validated_permissions(permissions):
+def _validated_permissions(permissions, *, persisted_invitation=False):
     """Return unique registered permission values in caller order."""
     permissions = list(permissions or [])
     invalid = [
@@ -72,19 +74,21 @@ def _validated_permissions(permissions):
         raise ValidationError(
             {"permissions": f"Permission inconnue : {invalid[0]}."}
         )
+    if persisted_invitation:
+        permissions = [permission for permission in permissions if permission not in LEGACY_PERMISSION_VALUES]
+    legacy = [permission for permission in permissions if permission not in atomic_permission_values()]
+    if legacy:
+        raise ValidationError({"permissions": "Les permissions historiques ne peuvent plus être attribuées."})
     return list(dict.fromkeys(permissions))
 
 
-def _validate_actor(actor_member, business):
+def _validate_actor(actor_member, business, permission):
     """Enforce the invitation permission from locked server-side data."""
     if not actor_member or actor_member.status != BusinessMember.Status.ACTIVE:
         raise ValidationError("An active member is required.")
     if actor_member.business_id != business.pk:
         raise ValidationError("The invitation must stay inside one Business.")
-    if not actor_member.is_owner and not BusinessMemberPermission.objects.filter(
-        member=actor_member,
-        permission=BusinessMemberPermission.Permission.MANAGE_MEMBERS,
-    ).exists():
+    if not has_permission(actor_member, permission, write=True):
         raise ValidationError("An authorized member manager is required.")
     if business.status != Business.Status.ACTIVE:
         raise ValidationError("Invitations require an active Business.")
@@ -109,7 +113,7 @@ def _expire_stale_pending_invitations(business, normalized_email):
 def invite_member(actor_member, business, email, title="", permissions=None):
     """Create one pending invitation for a Business email address.
 
-    The actor must be an active member with ``MANAGE_MEMBERS`` on an
+    The actor must be an active member with ``INVITATION_CREATE`` on an
     active Business. The address is normalized before any comparison.
     An existing active membership (active or suspended) blocks the
     invitation. A pending invitation for the same address is rejected
@@ -117,8 +121,22 @@ def invite_member(actor_member, business, email, title="", permissions=None):
     raw token is returned alongside the invitation so the caller can
     deliver it exactly once; only its hash is persisted.
     """
-    _validate_actor(actor_member, business)
+    _validate_actor(
+        actor_member,
+        business,
+        BusinessMemberPermission.Permission.INVITATION_CREATE,
+    )
     permissions = _validated_permissions(permissions)
+    if not actor_member.is_owner:
+        missing = [
+            permission
+            for permission in permissions
+            if not has_permission(actor_member, permission, write=False)
+        ]
+        if missing:
+            raise ValidationError(
+                {"permissions": "Vous ne pouvez proposer que des permissions que vous possédez."}
+            )
 
     normalized_email = normalize_email(email)
     try:
@@ -133,7 +151,18 @@ def invite_member(actor_member, business, email, title="", permissions=None):
         locked_actor = BusinessMember.objects.select_for_update().get(
             pk=actor_member.pk,
         )
-        _validate_actor(locked_actor, locked_business)
+        _validate_actor(
+            locked_actor,
+            locked_business,
+            BusinessMemberPermission.Permission.INVITATION_CREATE,
+        )
+        if not locked_actor.is_owner and any(
+            not has_permission(locked_actor, permission, write=False)
+            for permission in permissions
+        ):
+            raise ValidationError(
+                {"permissions": "Vous ne pouvez proposer que des permissions que vous possédez."}
+            )
 
         existing_membership = BusinessMember.objects.filter(
             business=locked_business,
@@ -222,7 +251,19 @@ def resend_member_invitation(actor_member, invitation):
         )
         if locked_invitation is None:
             raise ValidationError("Invitation introuvable.")
-        _validate_actor(locked_actor, locked_business)
+        _validate_actor(
+            locked_actor,
+            locked_business,
+            BusinessMemberPermission.Permission.INVITATION_RESEND,
+        )
+        if not locked_actor.is_owner and any(
+            not has_permission(locked_actor, permission, write=False)
+            for permission in locked_invitation.permissions
+            if permission not in LEGACY_PERMISSION_VALUES
+        ):
+            raise ValidationError(
+                {"permissions": "Vous ne pouvez renvoyer que des permissions que vous possédez."}
+            )
 
         effective_status = validate_invitation_state(locked_invitation)
         if effective_status == BusinessMemberInvitation.Status.REVOKED:
@@ -274,7 +315,11 @@ def revoke_member_invitation(actor_member, invitation):
         )
         if locked_invitation is None:
             raise ValidationError("Invitation introuvable.")
-        _validate_actor(locked_actor, locked_business)
+        _validate_actor(
+            locked_actor,
+            locked_business,
+            BusinessMemberPermission.Permission.INVITATION_REVOKE,
+        )
 
         effective_status = validate_invitation_state(locked_invitation)
         if effective_status == BusinessMemberInvitation.Status.EXPIRED:
@@ -475,7 +520,8 @@ def _accept_member_invitation(
                         permission=permission,
                     )
                     for permission in _validated_permissions(
-                        invitation.permissions
+                        invitation.permissions,
+                        persisted_invitation=True,
                     )
                 ]
             )

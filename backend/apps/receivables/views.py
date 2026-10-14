@@ -45,7 +45,7 @@ class ReceivableListView(ReceivableBaseView):
         business = self.get_authorized_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_RECEIVABLES,
+            BusinessMemberPermission.Permission.RECEIVABLE_VIEW,
         )
         if not business:
             return self.not_found()
@@ -68,7 +68,7 @@ class ReceivableDetailView(ReceivableListView):
         business = self.get_authorized_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_RECEIVABLES,
+            BusinessMemberPermission.Permission.RECEIVABLE_VIEW,
         )
         receivable = self.get_receivable(business, receivable_public_id) if business else None
         return Response(R(receivable).data) if receivable else self.not_found()
@@ -77,7 +77,7 @@ class ReceivableDetailView(ReceivableListView):
         business = self.get_authorized_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_RECEIVABLES,
+            BusinessMemberPermission.Permission.RECEIVABLE_UPDATE,
             write=True,
         )
         receivable = self.get_receivable(business, receivable_public_id) if business else None
@@ -95,7 +95,7 @@ class ReceivablePaymentsView(ReceivableDetailView):
         business = self.get_authorized_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_RECEIVABLES,
+            BusinessMemberPermission.Permission.RECEIVABLE_PAYMENT_VIEW,
         )
         receivable = self.get_receivable(business, receivable_public_id) if business else None
         return Response(P(receivable.payments.all(), many=True).data) if receivable else self.not_found()
@@ -104,7 +104,7 @@ class ReceivablePaymentsView(ReceivableDetailView):
         business = self.get_authorized_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_RECEIVABLES,
+            BusinessMemberPermission.Permission.RECEIVABLE_PAYMENT_CREATE,
             write=True,
         )
         receivable = self.get_receivable(business, receivable_public_id) if business else None

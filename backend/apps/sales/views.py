@@ -39,7 +39,7 @@ class Customers(M, APIView):
         b = self.authorized_business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_CUSTOMERS,
+            BusinessMemberPermission.Permission.CUSTOMER_VIEW,
             write=False,
         )
         if not b:
@@ -71,7 +71,7 @@ class Customers(M, APIView):
         b = self.authorized_business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_CUSTOMERS,
+            BusinessMemberPermission.Permission.CUSTOMER_CREATE,
         )
         if not b:
             return self.nf()
@@ -97,23 +97,28 @@ class CustomerDetail(M, APIView):
         business = self.authorized_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_CUSTOMERS,
+            BusinessMemberPermission.Permission.CUSTOMER_VIEW,
             write=False,
         )
         customer = self.customer(business, customer_public_id) if business else None
         return Response(CustomerSerializer(customer).data) if customer else self.nf()
 
     def patch(self, request, business_public_id, customer_public_id):
-        business = self.authorized_business(
-            request,
-            business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_CUSTOMERS,
-        )
+        business = Business.objects.filter(public_id=business_public_id).first()
         customer = self.customer(business, customer_public_id) if business else None
         if not customer:
             return self.nf()
         serializer = CustomerSerializer(customer, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
+        next_active = serializer.validated_data.get("is_active", customer.is_active)
+        permission = BusinessMemberPermission.Permission.CUSTOMER_UPDATE
+        if next_active != customer.is_active:
+            permission = (
+                BusinessMemberPermission.Permission.CUSTOMER_REACTIVATE
+                if next_active
+                else BusinessMemberPermission.Permission.CUSTOMER_DEACTIVATE
+            )
+        require_permission(request.user, business, permission, write=True)
         serializer.save()
         return Response(serializer.data)
 
@@ -125,7 +130,7 @@ class CustomerCommercialProfile(CustomerDetail):
         business = self.authorized_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_CUSTOMERS,
+            BusinessMemberPermission.Permission.CUSTOMER_VIEW,
             write=False,
         )
         customer = self.customer(business, customer_public_id) if business else None
@@ -133,12 +138,12 @@ class CustomerCommercialProfile(CustomerDetail):
             return self.nf()
 
         member = membership_for(request.user, business)
-        can_view_sales = has_permission(member, BusinessMemberPermission.Permission.VIEW_SALES)
+        can_view_sales = has_permission(member, BusinessMemberPermission.Permission.SALE_VIEW)
         can_view_financials = has_permission(
-            member, BusinessMemberPermission.Permission.VIEW_FINANCIAL_SUMMARY
+            member, BusinessMemberPermission.Permission.FINANCIAL_SUMMARY_VIEW
         )
         can_view_receivables = has_permission(
-            member, BusinessMemberPermission.Permission.VIEW_RECEIVABLES
+            member, BusinessMemberPermission.Permission.RECEIVABLE_VIEW
         )
         sales_data = None
         if can_view_sales:
@@ -218,7 +223,7 @@ class PosCustomerSearch(M, APIView):
         business = self.authorized_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.USE_POS,
+            BusinessMemberPermission.Permission.SALE_CREATE,
             write=False,
         )
         if not business:
@@ -248,7 +253,7 @@ class Sales(M, APIView):
         b = self.authorized_business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_SALES,
+            BusinessMemberPermission.Permission.SALE_VIEW,
             write=False,
         )
         return (
@@ -261,7 +266,7 @@ class Sales(M, APIView):
         b = self.authorized_business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.USE_POS,
+            BusinessMemberPermission.Permission.SALE_CREATE,
         )
         if not b:
             return self.nf()
@@ -279,7 +284,7 @@ class SD(Sales):
         b = self.authorized_business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_SALES,
+            BusinessMemberPermission.Permission.SALE_VIEW,
             write=False,
         )
         o = self.o(b, sale_public_id) if b else None
@@ -289,7 +294,7 @@ class SD(Sales):
         b = self.authorized_business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.USE_POS,
+            BusinessMemberPermission.Permission.SALE_UPDATE,
         )
         o = self.o(b, sale_public_id) if b else None
         if not o:
@@ -307,7 +312,7 @@ class Lines(SD):
         b = self.authorized_business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_SALES,
+            BusinessMemberPermission.Permission.SALE_LINE_VIEW,
             write=False,
         )
         s = self.o(b, sale_public_id) if b else None
@@ -319,7 +324,7 @@ class Lines(SD):
         b = self.authorized_business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.USE_POS,
+            BusinessMemberPermission.Permission.SALE_LINE_CREATE,
         )
         s = self.o(b, sale_public_id) if b else None
         if not s:
@@ -337,9 +342,9 @@ class Action(SD):
 
     def post(self, r, business_public_id, sale_public_id):
         permission = (
-            BusinessMemberPermission.Permission.USE_POS
+            BusinessMemberPermission.Permission.SALE_COMPLETE
             if self.fn == "complete"
-            else BusinessMemberPermission.Permission.MANAGE_SALES
+            else BusinessMemberPermission.Permission.SALE_CANCEL
         )
         b = self.authorized_business(
             r,
@@ -390,7 +395,11 @@ class SaleReturns(M, APIView):
         business = self.authorized_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_SALE_RETURNS,
+            (
+                BusinessMemberPermission.Permission.SALE_RETURN_VIEW
+                if request.method == "GET"
+                else BusinessMemberPermission.Permission.SALE_RETURN
+            ),
             write=request.method != "GET",
         )
         if not business:

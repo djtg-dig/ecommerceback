@@ -3,10 +3,24 @@ from rest_framework.exceptions import NotFound, PermissionDenied
 
 from .models import Business, BusinessMember, BusinessMemberPermission
 
+LEGACY_PERMISSION_VALUES = frozenset({
+    "VIEW_MEMBERS", "MANAGE_MEMBERS", "UPDATE_BUSINESS", "VIEW_PAYMENT_METHODS",
+    "MANAGE_PAYMENT_METHODS", "VIEW_CUSTOMERS", "MANAGE_CUSTOMERS", "VIEW_CATALOG",
+    "MANAGE_CATALOG", "VIEW_INVENTORY", "MANAGE_INVENTORY", "MANAGE_EXPENSE_CATEGORIES",
+    "CREATE_EXPENSES", "VIEW_EXPENSES", "MANAGE_EXPENSES", "VIEW_PURCHASES",
+    "MANAGE_PURCHASES", "USE_POS", "VIEW_SALES", "MANAGE_SALES",
+    "MANAGE_SALE_RETURNS", "VIEW_RECEIVABLES", "MANAGE_RECEIVABLES",
+    "VIEW_FINANCIAL_SUMMARY", "VIEW_DASHBOARD", "VIEW_PROFITABILITY", "VIEW_REPORTS",
+})
+
+
+def atomic_permission_values():
+    return [value for value in BusinessMemberPermission.Permission.values if value not in LEGACY_PERMISSION_VALUES]
+
 
 def validate_permission(permission):
     """Reject permission names that are not part of the server-side registry."""
-    if permission not in BusinessMemberPermission.Permission.values:
+    if permission not in atomic_permission_values():
         raise ValidationError({"permission": "Unknown Business permission."})
 
     return permission

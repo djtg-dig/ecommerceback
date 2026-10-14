@@ -19,7 +19,7 @@ class DashboardView(APIView):
         require_permission(
             request.user,
             business,
-            BusinessMemberPermission.Permission.VIEW_DASHBOARD,
+            BusinessMemberPermission.Permission.DASHBOARD_VIEW,
         )
         start, end = resolve_reporting_period(request.query_params)
         return Response(build_dashboard(business, start, end))

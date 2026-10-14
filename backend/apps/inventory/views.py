@@ -62,7 +62,7 @@ class InventoryListCreateView(BusinessInventoryMixin, APIView):
         business = self.get_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_INVENTORY,
+            BusinessMemberPermission.Permission.INVENTORY_VIEW,
         )
         if not business:
             return self.not_found()
@@ -101,7 +101,7 @@ class InventoryListCreateView(BusinessInventoryMixin, APIView):
         business = self.get_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_INVENTORY,
+            BusinessMemberPermission.Permission.INVENTORY_INITIALIZE,
             write=True,
         )
         if not business:
@@ -124,7 +124,7 @@ class InventoryDetailView(BusinessInventoryMixin, APIView):
         business = self.get_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_INVENTORY,
+            BusinessMemberPermission.Permission.INVENTORY_VIEW,
         )
         item = self.get_item(business, inventory_public_id) if business else None
         return Response(InventoryItemSerializer(item).data) if item else self.not_found()
@@ -137,7 +137,7 @@ class StockMovementListCreateView(BusinessInventoryMixin, APIView):
         business = self.get_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_INVENTORY,
+            BusinessMemberPermission.Permission.INVENTORY_MOVEMENT_VIEW,
         )
         item = self.get_item(business, inventory_public_id) if business else None
         if not item:
@@ -145,17 +145,22 @@ class StockMovementListCreateView(BusinessInventoryMixin, APIView):
         return Response(StockMovementSerializer(item.movements.all(), many=True).data)
 
     def post(self, request, business_public_id, inventory_public_id):
+        serializer = StockMovementCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        movement_permission = {
+            StockMovement.Type.IN: BusinessMemberPermission.Permission.INVENTORY_IN,
+            StockMovement.Type.OUT: BusinessMemberPermission.Permission.INVENTORY_OUT,
+            StockMovement.Type.ADJUSTMENT: BusinessMemberPermission.Permission.INVENTORY_ADJUST,
+        }[serializer.validated_data["type"]]
         business = self.get_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_INVENTORY,
+            movement_permission,
             write=True,
         )
         item = self.get_item(business, inventory_public_id) if business else None
         if not item:
             return self.not_found()
-        serializer = StockMovementCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
         idempotency_key = request.headers.get("Idempotency-Key", "").strip()
         if not idempotency_key:
             return Response(
@@ -184,7 +189,7 @@ class InventorySummaryView(BusinessInventoryMixin, APIView):
         business = self.get_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_INVENTORY,
+            BusinessMemberPermission.Permission.INVENTORY_VIEW,
         )
         if not business:
             return self.not_found()
@@ -219,7 +224,7 @@ class BusinessStockMovementHistoryView(BusinessInventoryMixin, APIView):
         business = self.get_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_INVENTORY,
+            BusinessMemberPermission.Permission.INVENTORY_MOVEMENT_VIEW,
         )
         if not business:
             return self.not_found()

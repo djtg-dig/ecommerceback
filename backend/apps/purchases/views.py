@@ -58,7 +58,7 @@ class Suppliers(Mixin, APIView):
         b = self.business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_PURCHASES,
+            BusinessMemberPermission.Permission.SUPPLIER_VIEW,
         )
         if not b:
             return self.nf()
@@ -89,7 +89,7 @@ class Suppliers(Mixin, APIView):
         b = self.business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_PURCHASES,
+            BusinessMemberPermission.Permission.SUPPLIER_CREATE,
             write=True,
         )
         if not b:
@@ -114,23 +114,27 @@ class SupplierDetail(Suppliers):
         b = self.business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_PURCHASES,
+            BusinessMemberPermission.Permission.SUPPLIER_VIEW,
         )
         o = self.obj(b, supplier_public_id) if b else None
         return Response(SupplierSerializer(o).data) if o else self.nf()
 
     def patch(self, r, business_public_id, supplier_public_id):
-        b = self.business(
-            r,
-            business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_PURCHASES,
-            write=True,
-        )
+        b = Business.objects.filter(public_id=business_public_id).first()
         o = self.obj(b, supplier_public_id) if b else None
         if not o:
             return self.nf()
         s = SupplierSerializer(o, data=r.data, partial=True)
         s.is_valid(raise_exception=True)
+        next_active = s.validated_data.get("is_active", o.is_active)
+        permission = BusinessMemberPermission.Permission.SUPPLIER_UPDATE
+        if next_active != o.is_active:
+            permission = (
+                BusinessMemberPermission.Permission.SUPPLIER_REACTIVATE
+                if next_active
+                else BusinessMemberPermission.Permission.SUPPLIER_DEACTIVATE
+            )
+        require_permission(r.user, b, permission, write=True)
         s.save()
         return Response(s.data)
 
@@ -142,7 +146,7 @@ class SupplierCommercialProfile(SupplierDetail):
         business = self.business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_PURCHASES,
+            BusinessMemberPermission.Permission.SUPPLIER_VIEW,
         )
         supplier = self.obj(business, supplier_public_id) if business else None
         if not supplier:
@@ -168,7 +172,7 @@ class SupplierCommercialProfile(SupplierDetail):
 
         member = membership_for(request.user, business)
         can_view_financials = has_permission(
-            member, BusinessMemberPermission.Permission.VIEW_FINANCIAL_SUMMARY
+            member, BusinessMemberPermission.Permission.FINANCIAL_SUMMARY_VIEW
         )
         financial_summary = None
         if can_view_financials:
@@ -203,7 +207,7 @@ class Purchases(Mixin, APIView):
         b = self.business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_PURCHASES,
+            BusinessMemberPermission.Permission.PURCHASE_VIEW,
         )
         return (
             Response(
@@ -217,7 +221,7 @@ class Purchases(Mixin, APIView):
         b = self.business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_PURCHASES,
+            BusinessMemberPermission.Permission.PURCHASE_CREATE,
             write=True,
         )
         if not b:
@@ -236,7 +240,7 @@ class PurchaseDetail(Purchases):
         b = self.business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_PURCHASES,
+            BusinessMemberPermission.Permission.PURCHASE_VIEW,
         )
         o = self.obj(b, purchase_public_id) if b else None
         return Response(PurchaseSerializer(o).data) if o else self.nf()
@@ -245,7 +249,7 @@ class PurchaseDetail(Purchases):
         b = self.business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_PURCHASES,
+            BusinessMemberPermission.Permission.PURCHASE_UPDATE,
             write=True,
         )
         o = self.obj(b, purchase_public_id) if b else None
@@ -266,7 +270,7 @@ class Lines(PurchaseDetail):
         b = self.business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_PURCHASES,
+            BusinessMemberPermission.Permission.PURCHASE_LINE_VIEW,
         )
         p = self.obj(b, purchase_public_id) if b else None
         return (
@@ -279,7 +283,7 @@ class Lines(PurchaseDetail):
         b = self.business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_PURCHASES,
+            BusinessMemberPermission.Permission.PURCHASE_LINE_CREATE,
             write=True,
         )
         p = self.obj(b, purchase_public_id) if b else None
@@ -301,7 +305,7 @@ class LineDetail(Lines):
         b = self.business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_PURCHASES,
+            BusinessMemberPermission.Permission.PURCHASE_LINE_VIEW,
         )
         p = self.obj(b, purchase_public_id) if b else None
         o = self.getobj(p, line_public_id) if p else None
@@ -321,7 +325,11 @@ class LineDetail(Lines):
         b = self.business(
             r,
             sh,
-            BusinessMemberPermission.Permission.MANAGE_PURCHASES,
+            (
+                BusinessMemberPermission.Permission.PURCHASE_LINE_DELETE
+                if delete
+                else BusinessMemberPermission.Permission.PURCHASE_LINE_UPDATE
+            ),
             write=True,
         )
         p = self.obj(b, pu) if b else None
@@ -344,10 +352,15 @@ class Action(PurchaseDetail):
     action = None
 
     def post(self, r, business_public_id, purchase_public_id):
+        permission = {
+            "confirm": BusinessMemberPermission.Permission.PURCHASE_CONFIRM,
+            "receive": BusinessMemberPermission.Permission.PURCHASE_RECEIVE,
+            "cancel": BusinessMemberPermission.Permission.PURCHASE_CANCEL,
+        }[self.action]
         b = self.business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_PURCHASES,
+            permission,
             write=True,
         )
         p = self.obj(b, purchase_public_id) if b else None
@@ -497,7 +510,7 @@ class PurchasePayments(PurchaseDetail):
         business = self.business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_PURCHASES,
+            BusinessMemberPermission.Permission.SUPPLIER_PAYMENT_VIEW,
         )
         purchase = self.obj(business, purchase_public_id) if business else None
         if not purchase:
@@ -510,7 +523,7 @@ class PurchasePayments(PurchaseDetail):
         business = self.business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_PURCHASES,
+            BusinessMemberPermission.Permission.SUPPLIER_PAYMENT_CREATE,
             write=True,
         )
         purchase = self.obj(business, purchase_public_id) if business else None
@@ -543,7 +556,7 @@ class SupplierPaymentReverse(PurchasePayments):
         business = self.business(
             r,
             business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_PURCHASES,
+            BusinessMemberPermission.Permission.SUPPLIER_PAYMENT_REVERSE,
             write=True,
         )
         purchase = self.obj(business, purchase_public_id) if business else None

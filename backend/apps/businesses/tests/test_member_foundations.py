@@ -53,7 +53,7 @@ def test_business_members_receive_unique_public_ids():
 
 def test_logical_removal_revokes_permissions_and_access_immediately():
     business, owner, _, member = member_context()
-    grant_permission(owner, member, Permission.USE_POS)
+    grant_permission(owner, member, Permission.SALE_CREATE)
 
     removed = remove_member(owner, member)
     removed.refresh_from_db()
@@ -62,7 +62,7 @@ def test_logical_removal_revokes_permissions_and_access_immediately():
     assert removed.removed_at is not None
     assert removed.removed_by == owner.identity
     assert not removed.permissions.exists()
-    assert not has_permission(removed, Permission.USE_POS)
+    assert not has_permission(removed, Permission.SALE_CREATE)
     assert membership_for(removed.identity, business) is None
     assert membership_for(
         removed.identity,
@@ -70,16 +70,16 @@ def test_logical_removal_revokes_permissions_and_access_immediately():
         include_suspended=True,
     ) is None
     with pytest.raises(NotFound):
-        require_permission(removed.identity, business, Permission.USE_POS)
+        require_permission(removed.identity, business, Permission.SALE_CREATE)
 
     client = APIClient()
     client.force_authenticate(user=removed.identity)
     assert client.get(f"/api/v1/businesses/{business.public_id}/").status_code == 404
 
 
-def test_manage_members_permission_allows_removing_another_member_only():
+def test_member_remove_permission_allows_removing_another_member_only():
     _, owner, manager, member = member_context()
-    grant_permission(owner, manager, Permission.MANAGE_MEMBERS)
+    grant_permission(owner, manager, Permission.MEMBER_REMOVE)
 
     remove_member(manager, member)
     member.refresh_from_db()

@@ -121,7 +121,7 @@ def replace_categories(business, codes, primary_category):
 
 
 def grant_permission(actor_member, member, permission):
-    """Let an active owner grant one explicit permission in their Business."""
+    """Grant one permission without permitting self or lateral escalation."""
     validate_permission(permission)
 
     with transaction.atomic():
@@ -129,17 +129,25 @@ def grant_permission(actor_member, member, permission):
         target = BusinessMember.objects.select_for_update().get(pk=member.pk)
         business = Business.objects.select_for_update().get(pk=actor.business_id)
         if (
-            not actor.is_owner
-            or actor.status != BusinessMember.Status.ACTIVE
+            actor.status != BusinessMember.Status.ACTIVE
             or actor.business_id != target.business_id
+            or not has_permission(
+                actor,
+                BusinessMemberPermission.Permission.MEMBER_PERMISSION_GRANT,
+                write=True,
+            )
         ):
-            raise ValidationError("Only the active Business owner can grant permissions.")
+            raise ValidationError("An authorized active member is required.")
         if business.status != Business.Status.ACTIVE:
             raise ValidationError("Permissions cannot be changed for an inactive Business.")
         if target.is_owner:
             raise ValidationError("Owners already have all permissions.")
+        if actor.pk == target.pk:
+            raise ValidationError("A member cannot grant permissions to themselves.")
         if target.status != BusinessMember.Status.ACTIVE:
             raise ValidationError("Only active members can receive permissions.")
+        if not actor.is_owner and not has_permission(actor, permission, write=False):
+            raise ValidationError("A member cannot grant a permission they do not hold.")
 
         permission_row, _ = BusinessMemberPermission.objects.get_or_create(
             member=target,
@@ -157,11 +165,15 @@ def revoke_permission(actor_member, member, permission):
         target = BusinessMember.objects.select_for_update().get(pk=member.pk)
         business = Business.objects.select_for_update().get(pk=actor.business_id)
         if (
-            not actor.is_owner
-            or actor.status != BusinessMember.Status.ACTIVE
+            actor.status != BusinessMember.Status.ACTIVE
             or actor.business_id != target.business_id
+            or not has_permission(
+                actor,
+                BusinessMemberPermission.Permission.MEMBER_PERMISSION_REVOKE,
+                write=True,
+            )
         ):
-            raise ValidationError("Only the active Business owner can revoke permissions.")
+            raise ValidationError("An authorized active member is required.")
         if business.status != Business.Status.ACTIVE:
             raise ValidationError("Permissions cannot be changed for an inactive Business.")
         if target.is_owner:
@@ -183,7 +195,7 @@ def remove_member(actor_member, member):
 
         if actor.business_id != target.business_id or not has_permission(
             actor,
-            BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+            BusinessMemberPermission.Permission.MEMBER_REMOVE,
             write=True,
         ):
             raise ValidationError("An authorized member manager is required.")
@@ -219,7 +231,7 @@ def update_member_title(actor_member, member, title):
 
         if actor.business_id != target.business_id or not has_permission(
             actor,
-            BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+            BusinessMemberPermission.Permission.MEMBER_UPDATE,
             write=True,
         ):
             raise ValidationError("An authorized member manager is required.")
@@ -241,7 +253,7 @@ def suspend_member(actor_member, member):
 
         if actor.business_id != target.business_id or not has_permission(
             actor,
-            BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+            BusinessMemberPermission.Permission.MEMBER_SUSPEND,
             write=True,
         ):
             raise ValidationError("An authorized member manager is required.")
@@ -278,7 +290,7 @@ def reactivate_member(actor_member, member):
 
         if actor.business_id != target.business_id or not has_permission(
             actor,
-            BusinessMemberPermission.Permission.MANAGE_MEMBERS,
+            BusinessMemberPermission.Permission.MEMBER_REACTIVATE,
             write=True,
         ):
             raise ValidationError("An authorized member manager is required.")

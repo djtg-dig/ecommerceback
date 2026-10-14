@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from decimal import Decimal
 
 from django.db import IntegrityError
+from django.db.models.deletion import ProtectedError
 from django.db.models import DecimalField, Exists, F, OuterRef, Subquery, Value
 from django.db.models.functions import Coalesce, Trim, Upper
 from rest_framework import generics, permissions, status
@@ -107,7 +108,7 @@ class ProductListCreateView(BusinessProductMixin, APIView):
         business = self.get_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_CATALOG,
+            BusinessMemberPermission.Permission.PRODUCT_VIEW,
         )
         if not business:
             return self.not_found()
@@ -124,7 +125,7 @@ class ProductListCreateView(BusinessProductMixin, APIView):
         business = self.get_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_CATALOG,
+            BusinessMemberPermission.Permission.PRODUCT_CREATE,
             write=True,
         )
         if not business:
@@ -236,7 +237,7 @@ class PosSearchView(BusinessProductMixin, APIView):
         business = self.get_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.USE_POS,
+            BusinessMemberPermission.Permission.SALE_CREATE,
         )
         if not business:
             return self.not_found()
@@ -274,7 +275,7 @@ class ProductDetailView(BusinessProductMixin, APIView):
         business = self.get_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_CATALOG,
+            BusinessMemberPermission.Permission.PRODUCT_VIEW,
         )
         product = self.get_product(business, product_public_id) if business else None
         return Response(ProductOutputSerializer(product).data) if product else self.not_found()
@@ -283,7 +284,7 @@ class ProductDetailView(BusinessProductMixin, APIView):
         business = self.get_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_CATALOG,
+            BusinessMemberPermission.Permission.PRODUCT_UPDATE,
             write=True,
         )
         product = self.get_product(business, product_public_id) if business else None
@@ -297,6 +298,25 @@ class ProductDetailView(BusinessProductMixin, APIView):
             return Response({"detail": "Conflit de référence interne."}, status=400)
         return Response(ProductOutputSerializer(product).data)
 
+    def delete(self, request, business_public_id, product_public_id):
+        business = self.get_business(
+            request,
+            business_public_id,
+            BusinessMemberPermission.Permission.PRODUCT_DELETE,
+            write=True,
+        )
+        product = self.get_product(business, product_public_id) if business else None
+        if not product:
+            return self.not_found()
+        try:
+            product.delete()
+        except ProtectedError:
+            return Response(
+                {"detail": "Ce produit est référencé et ne peut pas être supprimé."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class ProductArchiveView(BusinessProductMixin, APIView):
     """Archive instead of deleting a product, preserving future history."""
@@ -305,7 +325,7 @@ class ProductArchiveView(BusinessProductMixin, APIView):
         business = self.get_business(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_CATALOG,
+            BusinessMemberPermission.Permission.PRODUCT_DEACTIVATE,
             write=True,
         )
         product = self.get_product(business, product_public_id) if business else None
@@ -341,7 +361,7 @@ class ProductVariantListCreateView(BusinessProductMixin, APIView):
             request,
             business_public_id,
             product_public_id,
-            BusinessMemberPermission.Permission.VIEW_CATALOG,
+            BusinessMemberPermission.Permission.PRODUCT_VARIANT_VIEW,
         )
         return Response(ProductVariantOutputSerializer(product.variants.all(), many=True).data) if product else self.not_found()
 
@@ -350,7 +370,7 @@ class ProductVariantListCreateView(BusinessProductMixin, APIView):
             request,
             business_public_id,
             product_public_id,
-            BusinessMemberPermission.Permission.MANAGE_CATALOG,
+            BusinessMemberPermission.Permission.PRODUCT_VARIANT_CREATE,
             write=True,
         )
         if not product:
@@ -396,7 +416,7 @@ class ProductVariantDetailView(BusinessProductMixin, APIView):
             request,
             business_public_id,
             product_public_id,
-            BusinessMemberPermission.Permission.VIEW_CATALOG,
+            BusinessMemberPermission.Permission.PRODUCT_VARIANT_VIEW,
         )
         variant = self.get_variant(product, variant_public_id) if product else None
         return Response(ProductVariantOutputSerializer(variant).data) if variant else self.not_found()
@@ -406,7 +426,7 @@ class ProductVariantDetailView(BusinessProductMixin, APIView):
             request,
             business_public_id,
             product_public_id,
-            BusinessMemberPermission.Permission.MANAGE_CATALOG,
+            BusinessMemberPermission.Permission.PRODUCT_VARIANT_UPDATE,
             write=True,
         )
         variant = self.get_variant(product, variant_public_id) if product else None
@@ -445,6 +465,7 @@ PosSearchView.get = extend_schema(
 )(PosSearchView.get)
 ProductDetailView.get = extend_schema(tags=["Products"], operation_id="product_retrieve", parameters=[_business_public_id, _product_public_id], responses={200: ProductOutputSerializer, 403: None, 404: None})(ProductDetailView.get)
 ProductDetailView.patch = extend_schema(tags=["Products"], operation_id="product_update", parameters=[_business_public_id, _product_public_id], request=ProductWriteSerializer, responses={200: ProductOutputSerializer, 400: None, 403: None, 404: None})(ProductDetailView.patch)
+ProductDetailView.delete = extend_schema(tags=["Products"], operation_id="product_delete", parameters=[_business_public_id, _product_public_id], responses={204: None, 403: None, 404: None, 409: None})(ProductDetailView.delete)
 ProductArchiveView.post = extend_schema(tags=["Products"], operation_id="product_archive", parameters=[_business_public_id, _product_public_id], request=None, responses={200: ProductOutputSerializer, 403: None, 404: None})(ProductArchiveView.post)
 ProductVariantListCreateView.get = extend_schema(tags=["Product Variants"], operation_id="product_variant_list", parameters=[_business_public_id, _product_public_id], responses={200: ProductVariantOutputSerializer(many=True), 403: None, 404: None})(ProductVariantListCreateView.get)
 ProductVariantListCreateView.post = extend_schema(tags=["Product Variants"], operation_id="product_variant_create", parameters=[_business_public_id, _product_public_id], request=ProductVariantWriteSerializer, responses={201: ProductVariantOutputSerializer, 400: None, 403: None, 404: None})(ProductVariantListCreateView.post)

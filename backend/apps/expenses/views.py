@@ -97,7 +97,7 @@ class Categories(BusinessScopedView):
         business = self.business_for(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_EXPENSES,
+            BusinessMemberPermission.Permission.EXPENSE_CATEGORY_VIEW,
         )
         if not business:
             return self.not_found()
@@ -109,7 +109,7 @@ class Categories(BusinessScopedView):
         business = self.business_for(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.MANAGE_EXPENSE_CATEGORIES,
+            BusinessMemberPermission.Permission.EXPENSE_CATEGORY_CREATE,
             write=True,
         )
         if business is None:
@@ -166,7 +166,7 @@ class CategoryDetail(BusinessScopedView):
             request,
             business_public_id,
             category_public_id,
-            BusinessMemberPermission.Permission.VIEW_EXPENSES,
+            BusinessMemberPermission.Permission.EXPENSE_CATEGORY_VIEW,
         )
         if not business or not category:
             return self.not_found()
@@ -177,7 +177,7 @@ class CategoryDetail(BusinessScopedView):
             request,
             business_public_id,
             category_public_id,
-            BusinessMemberPermission.Permission.MANAGE_EXPENSE_CATEGORIES,
+            BusinessMemberPermission.Permission.EXPENSE_CATEGORY_UPDATE,
             write=True,
         )
         if not business or not category:
@@ -207,7 +207,7 @@ class Expenses(BusinessScopedView):
         business = self.business_for(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.VIEW_EXPENSES,
+            BusinessMemberPermission.Permission.EXPENSE_VIEW,
         )
         if not business:
             return self.not_found()
@@ -252,7 +252,7 @@ class Expenses(BusinessScopedView):
         business = self.business_for(
             request,
             business_public_id,
-            BusinessMemberPermission.Permission.CREATE_EXPENSES,
+            BusinessMemberPermission.Permission.EXPENSE_CREATE,
             write=True,
         )
         if business is None:
@@ -333,7 +333,7 @@ class ExpenseDetail(BusinessScopedView):
             request,
             business_public_id,
             expense_public_id,
-            BusinessMemberPermission.Permission.VIEW_EXPENSES,
+            BusinessMemberPermission.Permission.EXPENSE_VIEW,
         )
         if not business or not expense:
             return self.not_found()
@@ -344,7 +344,7 @@ class ExpenseDetail(BusinessScopedView):
             request,
             business_public_id,
             expense_public_id,
-            BusinessMemberPermission.Permission.MANAGE_EXPENSES,
+            BusinessMemberPermission.Permission.EXPENSE_UPDATE,
             write=True,
         )
         if not business or not expense:
@@ -416,7 +416,7 @@ class ExpenseCancel(BusinessScopedView):
             request,
             business_public_id,
             expense_public_id,
-            BusinessMemberPermission.Permission.MANAGE_EXPENSES,
+            BusinessMemberPermission.Permission.EXPENSE_CANCEL,
             write=True,
         )
         if not business or not expense:
@@ -475,7 +475,7 @@ class ExpensePayments(BusinessScopedView):
             request,
             business_public_id,
             expense_public_id,
-            BusinessMemberPermission.Permission.VIEW_EXPENSES,
+            BusinessMemberPermission.Permission.EXPENSE_PAYMENT_VIEW,
         )
         if not business or not expense:
             return self.not_found()
@@ -487,7 +487,7 @@ class ExpensePayments(BusinessScopedView):
             request,
             business_public_id,
             expense_public_id,
-            BusinessMemberPermission.Permission.MANAGE_EXPENSES,
+            BusinessMemberPermission.Permission.EXPENSE_PAYMENT_CREATE,
             write=True,
         )
         if not business or not expense:
@@ -523,7 +523,7 @@ class ExpensePaymentReverse(ExpensePayments):
             request,
             business_public_id,
             expense_public_id,
-            BusinessMemberPermission.Permission.MANAGE_EXPENSES,
+            BusinessMemberPermission.Permission.EXPENSE_PAYMENT_REVERSE,
             write=True,
         )
         payment = (

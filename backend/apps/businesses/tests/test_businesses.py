@@ -120,9 +120,9 @@ def test_owner_has_all_permissions_by_design():
         is_owner=True,
         title="Gérant",
     )
-    assert has_permission(member, BusinessMemberPermission.Permission.VIEW_MEMBERS)
-    assert has_permission(member, BusinessMemberPermission.Permission.MANAGE_INVENTORY)
-    assert has_permission(member, BusinessMemberPermission.Permission.CREATE_EXPENSES)
+    assert has_permission(member, BusinessMemberPermission.Permission.MEMBER_VIEW)
+    assert has_permission(member, BusinessMemberPermission.Permission.INVENTORY_ADJUST)
+    assert has_permission(member, BusinessMemberPermission.Permission.EXPENSE_CREATE)
 
 
 @pytest.mark.django_db
@@ -144,8 +144,8 @@ def test_non_owner_without_permission_cannot_manage():
         is_owner=False,
         title="Employé",
     )
-    assert not has_permission(emp_member, BusinessMemberPermission.Permission.UPDATE_BUSINESS)
-    assert not has_permission(emp_member, BusinessMemberPermission.Permission.MANAGE_MEMBERS)
+    assert not has_permission(emp_member, BusinessMemberPermission.Permission.BUSINESS_UPDATE)
+    assert not has_permission(emp_member, BusinessMemberPermission.Permission.MEMBER_UPDATE)
     assert auth(employee).patch(
         f"/api/v1/businesses/{business.public_id}/",
         {"name": "No"},
@@ -167,7 +167,7 @@ def test_professional_title_never_grants_permissions():
     assert not member.is_owner
     assert not has_permission(
         member,
-        BusinessMemberPermission.Permission.UPDATE_BUSINESS,
+        BusinessMemberPermission.Permission.BUSINESS_UPDATE,
     )
     assert not member.permissions.exists()
 
@@ -192,17 +192,17 @@ def test_suspension_blocks_permissions():
         title="Employé",
     )
     BusinessMemberPermission.objects.create(
-        member=emp, permission=BusinessMemberPermission.Permission.CREATE_EXPENSES
+        member=emp, permission=BusinessMemberPermission.Permission.EXPENSE_CREATE
     )
-    assert has_permission(emp, BusinessMemberPermission.Permission.CREATE_EXPENSES)
+    assert has_permission(emp, BusinessMemberPermission.Permission.EXPENSE_CREATE)
     emp.status = BusinessMember.Status.SUSPENDED
     emp.save()
     emp.refresh_from_db()
-    assert not has_permission(emp, BusinessMemberPermission.Permission.CREATE_EXPENSES)
+    assert not has_permission(emp, BusinessMemberPermission.Permission.EXPENSE_CREATE)
     assert auth(member).get(
         f"/api/v1/businesses/{business.public_id}/"
     ).status_code == 404
-    assert has_permission(owner_membership, BusinessMemberPermission.Permission.UPDATE_BUSINESS)
+    assert has_permission(owner_membership, BusinessMemberPermission.Permission.BUSINESS_UPDATE)
 
 
 @pytest.mark.django_db
@@ -263,7 +263,7 @@ def test_migration_preserves_old_roles_without_privilege_escalation():
     assert owner_m.title == "Gérant"
     assert manager_m.is_owner is False
     assert manager_m.title == "Gestionnaire"
-    assert not has_permission(manager_m, BusinessMemberPermission.Permission.UPDATE_BUSINESS)
+    assert not has_permission(manager_m, BusinessMemberPermission.Permission.BUSINESS_UPDATE)
     assert auth(old_manager).patch(
         f"/api/v1/businesses/{business.public_id}/",
         {"name": "Forbidden legacy manager update"},
@@ -299,7 +299,7 @@ def test_only_owner_can_grant_and_revoke_individual_permissions():
         is_owner=True,
         title="Gérant",
     )
-    permission = BusinessMemberPermission.Permission.USE_POS
+    permission = BusinessMemberPermission.Permission.SALE_CREATE
 
     permission_row = grant_permission(owner, member, permission)
     assert permission_row.member == member
