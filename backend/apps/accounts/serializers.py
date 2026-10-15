@@ -43,6 +43,8 @@ class EcommerceTokenRefreshSerializer(TokenRefreshSerializer):
 
         if not api_settings.USER_AUTHENTICATION_RULE(identity):
             raise AuthenticationFailed(self.error_messages["no_active_account"], "no_active_account")
+        if refresh.payload.get("session_version") != identity.session_version:
+            raise AuthenticationFailed("Ecommerce session has expired.", "session_expired")
 
         data = {"access": str(refresh.access_token)}
         if api_settings.ROTATE_REFRESH_TOKENS:

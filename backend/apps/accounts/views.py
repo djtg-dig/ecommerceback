@@ -4,7 +4,7 @@ import hashlib
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone as dt_timezone
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 def _pair(identity):
     refresh = RefreshToken.for_user(identity)
+    refresh["session_version"] = identity.session_version
     return {"access": str(refresh.access_token), "refresh": str(refresh)}
 
 
@@ -108,6 +109,30 @@ def _web_handoff_delivery_url():
     ):
         return None
     return raw_url
+
+
+def _frontend_callback_error(code, detail):
+    """Render callback failures in the configured frontend, never as raw DRF JSON.
+
+    The callback state is untrusted at this point, so the destination is derived
+    solely from the server-side handoff delivery URL.
+    """
+
+    delivery_url = _web_handoff_delivery_url()
+    if not delivery_url:
+        return _authentication_error(code, detail)
+    parsed = urlsplit(delivery_url)
+    location = urlunsplit((
+        parsed.scheme,
+        parsed.netloc,
+        "/connexion",
+        urlencode({"erreur": code}),
+        "",
+    ))
+    response = redirect(location)
+    response["Cache-Control"] = "no-store, max-age=0"
+    response["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 def _delivery_form_response(
@@ -260,7 +285,7 @@ class CarriLoginView(APIView):
             query = urlencode({
                 "response_type": "code", "client_id": settings.CARRI_ACCOUNT_CLIENT_ID,
                 "redirect_uri": settings.CARRI_ACCOUNT_REDIRECT_URI,
-                "scope": " ".join(scopes),
+                "scope": " ".join(scopes), "prompt": "login",
                 "state": state, "nonce": nonce, "code_challenge": _challenge(verifier),
                 "code_challenge_method": "S256",
             })
@@ -306,7 +331,7 @@ class CarriCallbackView(APIView):
                     if attempt.consumed_at is None:
                         attempt.consumed_at = timezone.now()
                         attempt.save(update_fields=["consumed_at"])
-                    return _authentication_error(
+                    return _frontend_callback_error(
                         "oauth_state_invalid_or_expired",
                         "L'état OAuth est invalide ou expiré.",
                     )
@@ -318,7 +343,7 @@ class CarriCallbackView(APIView):
                     if not browser_binding or not hmac.compare_digest(
                         _sha256(browser_binding), attempt.browser_binding_hash
                     ):
-                        return _authentication_error(
+                        return _frontend_callback_error(
                             "oauth_login_csrf_detected",
                             "La liaison de connexion OAuth est invalide.",
                         )
@@ -328,7 +353,7 @@ class CarriCallbackView(APIView):
                     if not separator or not hmac.compare_digest(
                         _sha256(delivery_binding), attempt.handoff_delivery_binding_hash
                     ):
-                        return _authentication_error(
+                        return _frontend_callback_error(
                             "handoff_delivery_binding_invalid",
                             "La liaison de livraison du handoff est invalide.",
                         )
@@ -352,7 +377,7 @@ class CarriCallbackView(APIView):
                     ))
                 code = request.query_params.get("code", "")
                 if not code:
-                    return _authentication_error(
+                    return _frontend_callback_error(
                         "oauth_callback_invalid",
                         "Le retour OAuth est invalide.",
                     )
@@ -415,19 +440,19 @@ class CarriCallbackView(APIView):
                 return response
             return _clear_browser_binding_cookie(Response({"handoff": handoff}, status=status.HTTP_200_OK))
         except OAuthLoginAttempt.DoesNotExist:
-            return _authentication_error(
+            return _frontend_callback_error(
                 "oauth_state_invalid_or_expired",
                 "L'état OAuth est invalide ou expiré.",
             )
         except OIDCUnavailable:
-            return _authentication_error(
+            return _frontend_callback_error(
                 "oauth_provider_unavailable",
                 "Le service d'authentification est temporairement indisponible.",
                 status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         except (OIDCError, InvalidOIDCToken, ValueError, TypeError):
             logger.warning("carri.web_callback.invalid_proof")
-            return _authentication_error(
+            return _frontend_callback_error(
                 "oauth_proof_invalid",
                 "La preuve d'authentification est invalide.",
             )
@@ -462,6 +487,16 @@ class CarriHandoffConsumeView(APIView):
             handoff.consumed_at = timezone.now()
             handoff.save(update_fields=["consumed_at"])
             return Response(_pair(handoff.identity), status=status.HTTP_200_OK)
+
+
+class EcommerceLogoutView(APIView):
+    """Revoke local E-commerce tokens without touching the OIDC provider."""
+
+    def post(self, request):
+        with transaction.atomic():
+            identity = CarriIdentity.objects.select_for_update().get(pk=request.user.pk)
+            identity.invalidate_sessions()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CurrentIdentityView(APIView):

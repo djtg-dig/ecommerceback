@@ -14,8 +14,10 @@ from apps.businesses.services import grant_permission, revoke_permission
 
 def auth(identity):
     client = APIClient()
+    refresh = RefreshToken.for_user(identity)
+    refresh["session_version"] = identity.session_version
     client.credentials(
-        HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(identity).access_token}"
+        HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}"
     )
 
     return client

@@ -87,7 +87,7 @@ def test_me_requires_ecommerce_jwt_and_returns_identity():
     identity = CarriIdentity.objects.create(carri_subject="sub-1")
     client = APIClient()
     assert client.get("/api/v1/auth/me/").status_code == 401
-    access = str(RefreshToken.for_user(identity).access_token)
+    access = _pair(identity)["access"]
     response = client.get("/api/v1/auth/me/", HTTP_AUTHORIZATION=f"Bearer {access}")
     assert response.status_code == 200
     assert response.json() == {"id": str(identity.id), "carri_subject": "sub-1"}
@@ -111,6 +111,22 @@ def test_ecommerce_token_pair_refreshes_and_authenticates_businesses():
         "/api/v1/businesses/",
         HTTP_AUTHORIZATION=f"Bearer {refreshed.json()['access']}",
     ).status_code == 200
+
+
+@pytest.mark.django_db
+def test_logout_revokes_existing_access_and_refresh_tokens():
+    identity = CarriIdentity.objects.create(carri_subject="logout-subject")
+    client = APIClient()
+    issued = _pair(identity)
+
+    assert client.get("/api/v1/auth/me/", HTTP_AUTHORIZATION=f"Bearer {issued['access']}").status_code == 200
+    assert client.post("/api/v1/auth/logout/", HTTP_AUTHORIZATION=f"Bearer {issued['access']}").status_code == 204
+    assert client.get("/api/v1/auth/me/", HTTP_AUTHORIZATION=f"Bearer {issued['access']}").status_code == 401
+    assert client.post("/api/v1/auth/token/refresh/", {"refresh": issued["refresh"]}, format="json").status_code == 401
+
+    identity.refresh_from_db()
+    fresh = _pair(identity)
+    assert client.get("/api/v1/auth/me/", HTTP_AUTHORIZATION=f"Bearer {fresh['access']}").status_code == 200
 
 
 @pytest.mark.django_db
@@ -175,7 +191,9 @@ def test_nextjs_access_denied_posts_only_safe_error_and_binding_then_rejects_rep
             {"delivery": "nextjs", "delivery_binding": delivery_binding},
         )
 
-    state = parse_qs(urlsplit(login["Location"]).query)["state"][0]
+    authorization_query = parse_qs(urlsplit(login["Location"]).query)
+    assert authorization_query["prompt"] == ["login"]
+    state = authorization_query["state"][0]
     attempt = OAuthLoginAttempt.objects.get(
         state_hash=hashlib.sha256(state.encode()).hexdigest()
     )
@@ -209,8 +227,8 @@ def test_nextjs_access_denied_posts_only_safe_error_and_binding_then_rejects_rep
         "/api/v1/auth/carri/callback/",
         {"state": state, "error": "access_denied"},
     )
-    assert replay.status_code == 400
-    assert replay.json()["code"] == "oauth_state_invalid_or_expired"
+    assert replay.status_code == 302
+    assert replay["Location"] == "https://web.example/connexion?erreur=oauth_state_invalid_or_expired"
     assert b"handoff-delivery" not in replay.content
     assert not OAuthHandoff.objects.exists()
 
@@ -242,8 +260,8 @@ def test_nextjs_access_denied_rejects_invalid_state_without_delivery():
         {"state": invalid_state, "error": "access_denied"},
     )
 
-    assert callback.status_code == 400
-    assert callback.json()["code"] == "oauth_state_invalid_or_expired"
+    assert callback.status_code == 302
+    assert callback["Location"] == "https://web.example/connexion?erreur=oauth_state_invalid_or_expired"
     assert b"handoff-delivery" not in callback.content
     assert not CarriIdentity.objects.exists()
     assert not OAuthHandoff.objects.exists()
@@ -281,8 +299,8 @@ def test_nextjs_access_denied_invalidates_expired_attempt_without_delivery():
         {"state": state, "error": "access_denied"},
     )
 
-    assert callback.status_code == 400
-    assert callback.json()["code"] == "oauth_state_invalid_or_expired"
+    assert callback.status_code == 302
+    assert callback["Location"] == "https://web.example/connexion?erreur=oauth_state_invalid_or_expired"
     assert b"handoff-delivery" not in callback.content
     attempt.refresh_from_db()
     assert attempt.consumed_at is not None
@@ -476,11 +494,8 @@ def test_callback_rejects_login_csrf_without_the_browser_binding_cookie():
         {"state": state, "error": "access_denied"},
     )
 
-    assert callback.status_code == 400
-    assert callback.json() == {
-        "code": "oauth_login_csrf_detected",
-        "detail": "La liaison de connexion OAuth est invalide.",
-    }
+    assert callback.status_code == 302
+    assert callback["Location"] == "https://web.example/connexion?erreur=oauth_login_csrf_detected"
 
 
 @pytest.mark.django_db
@@ -512,8 +527,8 @@ def test_callback_rejects_substituted_delivery_binding_in_oauth_state():
         {"state": substituted_state, "error": "access_denied"},
     )
 
-    assert callback.status_code == 400
-    assert callback.json()["code"] == "oauth_state_invalid_or_expired"
+    assert callback.status_code == 302
+    assert callback["Location"] == "https://web.example/connexion?erreur=oauth_state_invalid_or_expired"
     assert not CarriIdentity.objects.exists()
 
 
@@ -638,6 +653,7 @@ def test_me_rejects_missing_invalid_and_unknown_ecommerce_identity_claims():
     client = APIClient()
     identity = CarriIdentity.objects.create(carri_subject="sub-invalid-claims")
     valid_refresh = RefreshToken.for_user(identity)
+    valid_refresh["session_version"] = identity.session_version
 
     missing = RefreshToken()
     missing_access = str(missing.access_token)

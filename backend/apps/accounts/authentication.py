@@ -19,6 +19,9 @@ class EcommerceJWTAuthentication(JWTAuthentication):
         except (ValueError, TypeError, AttributeError) as exc:
             raise AuthenticationFailed("Ecommerce identity claim is invalid.", code="identity_invalid") from exc
         try:
-            return CarriIdentity.objects.get(pk=identity_uuid)
+            identity = CarriIdentity.objects.get(pk=identity_uuid)
         except CarriIdentity.DoesNotExist as exc:
             raise AuthenticationFailed("Ecommerce identity not found.", code="identity_not_found") from exc
+        if validated_token.get("session_version") != identity.session_version:
+            raise AuthenticationFailed("Ecommerce session has expired.", code="session_expired")
+        return identity

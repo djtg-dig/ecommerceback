@@ -9,7 +9,9 @@ from apps.businesses.permissions import atomic_permission_values, has_permission
 
 def client_for(identity):
     client = APIClient()
-    client.credentials(HTTP_AUTHORIZATION=f"Bearer {RefreshToken.for_user(identity).access_token}")
+    refresh = RefreshToken.for_user(identity)
+    refresh["session_version"] = identity.session_version
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
     return client
 
 

@@ -18,6 +18,7 @@ class CarriIdentity(models.Model):
     last_oidc_auth_at = models.DateTimeField(null=True, blank=True)
     linked_at = models.DateTimeField(auto_now_add=True)
     last_login_at = models.DateTimeField(null=True, blank=True)
+    session_version = models.PositiveBigIntegerField(default=1)
 
     class Meta:
         ordering = ["carri_subject"]
@@ -45,6 +46,13 @@ class CarriIdentity(models.Model):
             and cutoff <= self.email_verified_at <= now
             and cutoff <= self.last_oidc_auth_at <= now
         )
+
+    def invalidate_sessions(self):
+        """Invalidate all E-commerce JWTs issued before this logout."""
+        type(self).objects.filter(pk=self.pk).update(
+            session_version=models.F("session_version") + 1
+        )
+        self.refresh_from_db(fields=["session_version"])
 
     def save(self, *args, **kwargs):
         if not self._state.adding:
