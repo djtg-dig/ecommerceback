@@ -35,7 +35,7 @@ def invitation_delivery_settings(settings):
     settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
     settings.DEFAULT_FROM_EMAIL = "E-commerce <no-reply@example.com>"
     settings.BUSINESS_MEMBER_INVITATION_URL = (
-        "https://app.example.com/business-invitations"
+        "https://app.example.com/api/invitation/continue"
     )
 
 
@@ -80,7 +80,9 @@ def extract_link(message):
         for line in message.body.splitlines()
         if line.strip().startswith("https://")
     )
-    query = parse_qs(urlsplit(link).query)
+    parts = urlsplit(link)
+    assert parts.path == "/api/invitation/continue"
+    query = parse_qs(parts.query)
     return query["invitation"][0], query["token"][0]
 
 

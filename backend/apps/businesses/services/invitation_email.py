@@ -32,6 +32,15 @@ def invitation_base_url():
         raise InvitationDeliveryConfigurationError
     if not settings.DEFAULT_FROM_EMAIL.strip():
         raise InvitationDeliveryConfigurationError
+    if settings.EMAIL_BACKEND == "django.core.mail.backends.console.EmailBackend":
+        raise InvitationDeliveryConfigurationError
+    if settings.EMAIL_BACKEND == "django.core.mail.backends.smtp.EmailBackend":
+        if not (
+            settings.EMAIL_HOST.strip()
+            and settings.EMAIL_HOST_USER.strip()
+            and settings.EMAIL_HOST_PASSWORD.strip()
+        ):
+            raise InvitationDeliveryConfigurationError
     return value
 
 
@@ -112,4 +121,3 @@ def send_invitation_email(invitation_id, token):
         status=BusinessMemberInvitation.Status.PENDING,
         token_hash=hash_invitation_token(token),
     ).update(last_sent_at=timezone.now(), updated_at=timezone.now())
-

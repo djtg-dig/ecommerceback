@@ -160,7 +160,7 @@ configurée, sans supprimer ni réécrire les paramètres déjà présents :
 Exemple :
 
 ```text
-https://app.example.com/business-invitations?invitation=MI23456789AB&token=J_jWDcgm6ZcX3eN-xQA3wjHCYlAXYu35A8oIp8wNwYY
+https://app.example.com/api/invitation/continue?invitation=MI23456789AB&token=J_jWDcgm6ZcX3eN-xQA3wjHCYlAXYu35A8oIp8wNwYY
 ```
 
 Le jeton n'est écrit dans aucun journal et n'apparaît dans aucune réponse JSON.
@@ -168,9 +168,10 @@ La rotation du jeton lors d'un renvoi invalide immédiatement l'ancien lien.
 
 ### Parcours frontend attendu
 
-1. Le destinataire ouvre le lien ; le frontend lit `invitation` et `token` dans
-   la query string et les conserve en mémoire (ou en état de route), sans les
-   écrire dans un journal ni dans une URL partagée.
+1. Le destinataire ouvre le lien sur `GET /api/invitation/continue` ; le BFF
+   retire immédiatement les deux paramètres de l'URL et les conserve dans un
+   cookie chiffré, HttpOnly et de courte durée, sans les écrire dans un journal
+   applicatif ni les transmettre à OAuth.
 2. S'il n'a pas de session E-commerce valide, il déclenche l'authentification
    Carri Account (`GET /api/v1/auth/carri/login/` puis
    `GET /api/v1/auth/carri/callback/` et `POST /api/v1/auth/carri/handoff/consume/`).
@@ -199,7 +200,7 @@ Variables :
 ```text
 EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
 DEFAULT_FROM_EMAIL=E-commerce <no-reply@example.com>
-BUSINESS_MEMBER_INVITATION_URL=https://app.example.com/business-invitations
+BUSINESS_MEMBER_INVITATION_URL=https://app.example.com/api/invitation/continue
 BUSINESS_MEMBER_INVITATION_EXPIRY_HOURS=168
 ```
 

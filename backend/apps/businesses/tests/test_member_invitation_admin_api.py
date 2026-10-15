@@ -27,7 +27,7 @@ def invitation_delivery_settings(settings):
     settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
     settings.DEFAULT_FROM_EMAIL = "E-commerce <no-reply@example.com>"
     settings.BUSINESS_MEMBER_INVITATION_URL = (
-        "https://app.example.com/business-invitations"
+        "https://app.example.com/api/invitation/continue"
     )
 
 
@@ -418,6 +418,24 @@ def test_missing_delivery_configuration_refuses_before_persistence(settings):
     assert not BusinessMemberInvitation.objects.filter(
         business=business,
     ).exists()
+
+
+def test_smtp_without_credentials_refuses_before_persistence(settings):
+    business, identity, owner = create_business_with_owner("smtp-missing")
+    settings.EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+    settings.EMAIL_HOST = "smtp-relay.brevo.com"
+    settings.EMAIL_HOST_USER = ""
+    settings.EMAIL_HOST_PASSWORD = ""
+
+    response = client_for(identity).post(
+        collection_url(business),
+        {"email": "smtp-missing@example.com"},
+        format="json",
+    )
+
+    assert response.status_code == 503
+    assert response.data["code"] == "invitation_delivery_unavailable"
+    assert not BusinessMemberInvitation.objects.filter(business=business).exists()
 
 
 def test_delivery_failure_keeps_unsent_invitation_for_explicit_resend():
