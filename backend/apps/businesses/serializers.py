@@ -113,11 +113,16 @@ class BusinessMemberSerializer(serializers.ModelSerializer):
     """Compact administrative projection of one Business membership."""
 
     permissions = serializers.SerializerMethodField()
+    identity_email = serializers.EmailField(
+        source="identity.verified_email",
+        read_only=True,
+    )
 
     class Meta:
         model = BusinessMember
         fields = (
             "public_id",
+            "identity_email",
             "title",
             "is_owner",
             "status",
@@ -288,6 +293,20 @@ class BusinessMemberInvitationRecipientSerializer(serializers.ModelSerializer):
         source="business.name",
         read_only=True,
     )
+    business_description = serializers.CharField(
+        source="business.description",
+        read_only=True,
+    )
+    business_address = serializers.CharField(
+        source="business.address",
+        read_only=True,
+    )
+    business_zone = serializers.CharField(
+        source="business.zone",
+        read_only=True,
+    )
+    business_primary_category = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField()
 
     class Meta:
         model = BusinessMemberInvitation
@@ -295,6 +314,10 @@ class BusinessMemberInvitationRecipientSerializer(serializers.ModelSerializer):
             "public_id",
             "business_public_id",
             "business_name",
+            "business_description",
+            "business_address",
+            "business_zone",
+            "business_primary_category",
             "title",
             "permissions",
             "status",
@@ -302,6 +325,26 @@ class BusinessMemberInvitationRecipientSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = fields
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_business_primary_category(self, invitation):
+        membership = next(
+            (
+                item
+                for item in invitation.business.category_memberships.all()
+                if item.is_primary
+            ),
+            None,
+        )
+        return membership.category.name if membership else None
+
+    @extend_schema_field(
+        serializers.ChoiceField(
+            choices=BusinessMemberInvitation.Status.choices,
+        )
+    )
+    def get_status(self, invitation):
+        return validate_invitation_state(invitation)
 
 
 class BusinessPermissionCatalogSerializer(serializers.Serializer):

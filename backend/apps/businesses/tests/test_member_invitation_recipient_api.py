@@ -181,6 +181,36 @@ def test_recipient_inbox_lists_only_matching_pending_invitations():
     assert isolated.data == []
 
 
+def test_recipient_can_reopen_own_processed_invitation_with_safe_business_details():
+    business, owner, recipient, invitation, token = invitation_context("reopen")
+    business.description = "Commerce de proximité"
+    business.address = "12 avenue du Marché"
+    business.zone = "Gombe"
+    business.save(update_fields=["description", "address", "zone"])
+
+    accepted = client_for(recipient).post(
+        action_url(invitation, "accept"), {"token": token}, format="json"
+    )
+    assert accepted.status_code == 200
+
+    response = client_for(recipient).get(
+        "/api/v1/me/business-invitations/",
+        {"invitation": invitation.public_id},
+    )
+
+    assert response.status_code == 200
+    assert len(response.data) == 1
+    assert response.data[0]["status"] == BusinessMemberInvitation.Status.ACCEPTED
+    assert response.data[0]["business_description"] == "Commerce de proximité"
+    assert response.data[0]["business_address"] == "12 avenue du Marché"
+    assert response.data[0]["business_zone"] == "Gombe"
+
+    assert client_for(identity("different-recipient")).get(
+        "/api/v1/me/business-invitations/",
+        {"invitation": invitation.public_id},
+    ).data == []
+
+
 def test_recipient_can_accept_or_decline_from_authenticated_inbox():
     business, owner, recipient, invitation, token = invitation_context(
         "account-accept",

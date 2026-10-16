@@ -1,3 +1,5 @@
+import re
+
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Prefetch
 from django.utils import timezone
@@ -200,7 +202,7 @@ def member_queryset(business):
             business=business,
         )
         .exclude(status=BusinessMember.Status.REMOVED)
-        .select_related("business")
+        .select_related("business", "identity")
         .prefetch_related(
             Prefetch(
                 "permissions",
@@ -886,16 +888,26 @@ class BusinessInvitationRecipientListView(APIView):
                 "Votre adresse e-mail Carri doit être vérifiée pour consulter vos invitations.",
                 status.HTTP_403_FORBIDDEN,
             )
-        invitations = (
-            BusinessMemberInvitation.objects.select_related("business")
-            .filter(
-                normalized_email=normalize_email(identity.verified_email),
+        invitations = BusinessMemberInvitation.objects.select_related("business").prefetch_related(
+            "business__category_memberships__category"
+        ).filter(normalized_email=normalize_email(identity.verified_email))
+        invitation_public_id = request.query_params.get("invitation", "")
+        if invitation_public_id:
+            # A BFF-protected link may ask for its own invitation again after a
+            # terminal action.  Keep this recipient-specific: it never turns the
+            # normal inbox into an invitation history and remains scoped to the
+            # verified recipient email.
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", invitation_public_id):
+                invitations = invitations.none()
+            else:
+                invitations = invitations.filter(public_id=invitation_public_id)
+        else:
+            invitations = invitations.filter(
                 status=BusinessMemberInvitation.Status.PENDING,
                 expires_at__gt=timezone.now(),
                 business__status=Business.Status.ACTIVE,
             )
-            .order_by("-created_at", "-id")
-        )
+        invitations = invitations.order_by("-created_at", "-id")
         return Response(
             BusinessMemberInvitationRecipientSerializer(
                 invitations,
