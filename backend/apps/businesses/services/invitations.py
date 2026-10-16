@@ -516,10 +516,63 @@ def _accept_member_invitation(
                         409,
                     )
                 else:
-                    raise InvitationActionError(
-                        "business_member_removed",
-                        "Votre ancienne adhésion a été retirée. Contactez un administrateur de l’entreprise.",
-                        409,
+                    # A removed membership can only be restored by a genuinely
+                    # new invitation.  Resending an earlier invitation changes
+                    # neither its created_at timestamp nor this ordering check.
+                    if existing.removed_at is None:
+                        raise InvitationActionError(
+                            "business_member_removal_date_unknown",
+                            "La date de votre retrait est inconnue. Demandez à un administrateur de vous envoyer une nouvelle invitation.",
+                            409,
+                        )
+                    if invitation.created_at <= existing.removed_at:
+                        raise InvitationActionError(
+                            "invitation_precedes_member_removal",
+                            "Cette invitation a été envoyée avant votre retrait de l’entreprise. Demandez à un administrateur de vous envoyer une nouvelle invitation.",
+                            409,
+                        )
+
+                    # ``BusinessMember.clean`` intentionally prohibits generic
+                    # reactivation of removed members.  This is the single
+                    # controlled path: it is transactionally bound to a valid
+                    # recipient invitation and retains removal audit fields.
+                    BusinessMemberPermission.objects.filter(member=existing).delete()
+                    BusinessMember.objects.filter(
+                        pk=existing.pk,
+                        status=BusinessMember.Status.REMOVED,
+                    ).update(
+                        status=BusinessMember.Status.ACTIVE,
+                        title=invitation.title,
+                        suspended_at=None,
+                        suspended_by=None,
+                        updated_at=timezone.now(),
+                    )
+                    existing.refresh_from_db()
+                    member = existing
+                    BusinessMemberPermission.objects.bulk_create(
+                        [
+                            BusinessMemberPermission(
+                                member=member,
+                                permission=permission,
+                            )
+                            for permission in _validated_permissions(
+                                invitation.permissions,
+                                persisted_invitation=True,
+                            )
+                        ]
+                    )
+                    invitation.status = BusinessMemberInvitation.Status.ACCEPTED
+                    invitation.accepted_by = recipient
+                    invitation.member = member
+                    invitation.acted_at = timezone.now()
+                    invitation.save(
+                        update_fields=(
+                            "status",
+                            "accepted_by",
+                            "member",
+                            "acted_at",
+                            "updated_at",
+                        )
                     )
 
             if existing is None:

@@ -23,6 +23,7 @@ from apps.businesses.services.invitations import (
     hash_invitation_token,
     invite_member,
 )
+from apps.businesses.services import remove_member
 
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -466,7 +467,61 @@ def test_pending_invitation_for_existing_active_member_is_closed_and_member_is_l
     assert member.public_id in [row["public_id"] for row in listed.data["results"]]
 
 
-def test_existing_removed_membership_is_not_silently_reactivated():
+def test_removed_member_is_reintegrated_only_by_an_invitation_created_after_removal():
+    business = Business.objects.create(name="Commerce reintegration")
+    owner_identity = identity("owner-reintegration")
+    owner = BusinessMember.objects.create(
+        business=business,
+        identity=owner_identity,
+        role=BusinessMember.Role.OWNER,
+    )
+    recipient = identity("invitee-reintegration")
+    member = BusinessMember.objects.create(
+        business=business,
+        identity=recipient,
+        title="Ancien titre",
+    )
+    old_permission = BusinessMemberPermission.Permission.PRODUCT_UPDATE
+    new_permission = BusinessMemberPermission.Permission.PRODUCT_VIEW
+    BusinessMemberPermission.objects.create(member=member, permission=old_permission)
+    remove_member(owner, member)
+    member.refresh_from_db()
+    removed_at = member.removed_at
+    invitation, token = invite_member(
+        owner,
+        business,
+        recipient.verified_email,
+        title="Nouveau titre",
+        permissions=[new_permission],
+    )
+
+    response = client_for(recipient).post(
+        action_url(invitation, "accept"),
+        {"token": token},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    member.refresh_from_db()
+    invitation.refresh_from_db()
+    assert member.status == BusinessMember.Status.ACTIVE
+    assert member.title == "Nouveau titre"
+    assert member.removed_at == removed_at
+    assert member.removed_by == owner.identity
+    assert list(member.permissions.values_list("permission", flat=True)) == [new_permission]
+    assert old_permission != new_permission
+    assert invitation.status == BusinessMemberInvitation.Status.ACCEPTED
+    assert invitation.member == member
+    listed = client_for(owner.identity).get(
+        f"/api/v1/businesses/{business.public_id}/members/"
+    )
+    assert member.public_id in [row["public_id"] for row in listed.data["results"]]
+    received = client_for(recipient).get("/api/v1/me/business-invitations/")
+    assert received.status_code == 200
+    assert invitation.public_id not in [row["public_id"] for row in received.data]
+
+
+def test_invitation_created_before_removal_cannot_reintegrate_member():
     business, owner, recipient, invitation, token = invitation_context("existing")
     member = BusinessMember.objects.create(
         business=business,
@@ -483,11 +538,32 @@ def test_existing_removed_membership_is_not_silently_reactivated():
     )
 
     assert response.status_code == 409
-    assert response.data["code"] == "business_member_removed"
+    assert response.data["code"] == "invitation_precedes_member_removal"
     member.refresh_from_db()
     invitation.refresh_from_db()
     assert member.status == BusinessMember.Status.REMOVED
     assert invitation.status == BusinessMemberInvitation.Status.PENDING
+
+
+def test_removed_member_without_a_removal_date_requires_administrator_intervention():
+    business, owner, recipient, invitation, token = invitation_context("removed-unknown")
+    member = BusinessMember.objects.create(
+        business=business,
+        identity=recipient,
+        title="Ancien membre",
+        status=BusinessMember.Status.REMOVED,
+    )
+
+    response = client_for(recipient).post(
+        action_url(invitation, "accept"),
+        {"token": token},
+        format="json",
+    )
+
+    assert response.status_code == 409
+    assert response.data["code"] == "business_member_removal_date_unknown"
+    member.refresh_from_db()
+    assert member.status == BusinessMember.Status.REMOVED
 
 
 def test_existing_suspended_membership_requires_administrator_intervention():
