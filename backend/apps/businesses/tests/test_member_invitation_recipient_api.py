@@ -433,7 +433,40 @@ def test_public_id_and_token_must_belong_to_same_invitation():
     ).exists()
 
 
-def test_existing_or_removed_membership_is_not_silently_reactivated():
+def test_pending_invitation_for_existing_active_member_is_closed_and_member_is_listed():
+    business, owner, recipient, invitation, token = invitation_context(
+        "existing-active",
+        permissions=[BusinessMemberPermission.Permission.PRODUCT_VIEW],
+    )
+    member = BusinessMember.objects.create(
+        business=business,
+        identity=recipient,
+        title="Membre existant",
+        status=BusinessMember.Status.ACTIVE,
+    )
+
+    response = client_for(recipient).post(
+        action_url(invitation, "accept"),
+        {"token": token},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.data["status"] == BusinessMemberInvitation.Status.ACCEPTED
+    assert response.data["member_public_id"] == member.public_id
+    invitation.refresh_from_db()
+    assert invitation.status == BusinessMemberInvitation.Status.ACCEPTED
+    assert invitation.member == member
+    assert not member.permissions.exists()
+
+    listed = client_for(owner.identity).get(
+        f"/api/v1/businesses/{business.public_id}/members/"
+    )
+    assert listed.status_code == 200
+    assert member.public_id in [row["public_id"] for row in listed.data["results"]]
+
+
+def test_existing_removed_membership_is_not_silently_reactivated():
     business, owner, recipient, invitation, token = invitation_context("existing")
     member = BusinessMember.objects.create(
         business=business,
@@ -450,10 +483,35 @@ def test_existing_or_removed_membership_is_not_silently_reactivated():
     )
 
     assert response.status_code == 409
-    assert response.data["code"] == "business_member_already_exists"
+    assert response.data["code"] == "business_member_removed"
     member.refresh_from_db()
     invitation.refresh_from_db()
     assert member.status == BusinessMember.Status.REMOVED
+    assert invitation.status == BusinessMemberInvitation.Status.PENDING
+
+
+def test_existing_suspended_membership_requires_administrator_intervention():
+    business, owner, recipient, invitation, token = invitation_context("suspended")
+    member = BusinessMember.objects.create(
+        business=business,
+        identity=recipient,
+        title="Membre suspendu",
+        status=BusinessMember.Status.SUSPENDED,
+        suspended_at=timezone.now(),
+        suspended_by=owner.identity,
+    )
+
+    response = client_for(recipient).post(
+        action_url(invitation, "accept"),
+        {"token": token},
+        format="json",
+    )
+
+    assert response.status_code == 409
+    assert response.data["code"] == "business_member_suspended"
+    member.refresh_from_db()
+    invitation.refresh_from_db()
+    assert member.status == BusinessMember.Status.SUSPENDED
     assert invitation.status == BusinessMemberInvitation.Status.PENDING
 
 

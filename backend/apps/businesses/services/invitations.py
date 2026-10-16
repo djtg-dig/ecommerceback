@@ -491,54 +491,80 @@ def _accept_member_invitation(
                 identity=recipient,
             ).first()
             if existing is not None:
-                raise InvitationActionError(
-                    "business_member_already_exists",
-                    "Vous êtes déjà membre de cette entreprise.",
-                    409,
-                )
-
-            try:
-                member = BusinessMember.objects.create(
-                    business=invitation.business,
-                    identity=recipient,
-                    role=BusinessMember.Role.EMPLOYEE,
-                    is_owner=False,
-                    title=invitation.title,
-                    status=BusinessMember.Status.ACTIVE,
-                )
-            except IntegrityError as exc:
-                raise InvitationActionError(
-                    "business_member_already_exists",
-                    "Vous êtes déjà membre de cette entreprise.",
-                    409,
-                ) from exc
-
-            BusinessMemberPermission.objects.bulk_create(
-                [
-                    BusinessMemberPermission(
-                        member=member,
-                        permission=permission,
+                if existing.status == BusinessMember.Status.ACTIVE:
+                    # The membership already satisfies this pending invitation.
+                    # Close the invitation atomically, but never copy its planned
+                    # permissions onto an existing member implicitly.
+                    member = existing
+                    invitation.status = BusinessMemberInvitation.Status.ACCEPTED
+                    invitation.accepted_by = recipient
+                    invitation.member = member
+                    invitation.acted_at = timezone.now()
+                    invitation.save(
+                        update_fields=(
+                            "status",
+                            "accepted_by",
+                            "member",
+                            "acted_at",
+                            "updated_at",
+                        )
                     )
-                    for permission in _validated_permissions(
-                        invitation.permissions,
-                        persisted_invitation=True,
+                elif existing.status == BusinessMember.Status.SUSPENDED:
+                    raise InvitationActionError(
+                        "business_member_suspended",
+                        "Votre adhésion est suspendue. Contactez un administrateur de l’entreprise.",
+                        409,
                     )
-                ]
-            )
+                else:
+                    raise InvitationActionError(
+                        "business_member_removed",
+                        "Votre ancienne adhésion a été retirée. Contactez un administrateur de l’entreprise.",
+                        409,
+                    )
 
-            invitation.status = BusinessMemberInvitation.Status.ACCEPTED
-            invitation.accepted_by = recipient
-            invitation.member = member
-            invitation.acted_at = timezone.now()
-            invitation.save(
-                update_fields=(
-                    "status",
-                    "accepted_by",
-                    "member",
-                    "acted_at",
-                    "updated_at",
+            if existing is None:
+                try:
+                    member = BusinessMember.objects.create(
+                        business=invitation.business,
+                        identity=recipient,
+                        role=BusinessMember.Role.EMPLOYEE,
+                        is_owner=False,
+                        title=invitation.title,
+                        status=BusinessMember.Status.ACTIVE,
+                    )
+                except IntegrityError as exc:
+                    raise InvitationActionError(
+                        "business_member_already_exists",
+                        "Vous êtes déjà membre de cette entreprise.",
+                        409,
+                    ) from exc
+
+                BusinessMemberPermission.objects.bulk_create(
+                    [
+                        BusinessMemberPermission(
+                            member=member,
+                            permission=permission,
+                        )
+                        for permission in _validated_permissions(
+                            invitation.permissions,
+                            persisted_invitation=True,
+                        )
+                    ]
                 )
-            )
+
+                invitation.status = BusinessMemberInvitation.Status.ACCEPTED
+                invitation.accepted_by = recipient
+                invitation.member = member
+                invitation.acted_at = timezone.now()
+                invitation.save(
+                    update_fields=(
+                        "status",
+                        "accepted_by",
+                        "member",
+                        "acted_at",
+                        "updated_at",
+                    )
+                )
 
     if deferred_error is not None:
         raise deferred_error
