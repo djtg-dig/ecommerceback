@@ -3,6 +3,7 @@
 from decimal import Decimal
 
 import pytest
+from django.db import IntegrityError, transaction
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
@@ -215,3 +216,128 @@ def test_all_dynamic_attribute_types_are_checked_and_public_ids_immutable(catalo
         product.save()
     invalid = {"brand": "Nike", "count": "2", "weight": "broken", "organic": "true", "released": "tomorrow"}
     assert client.post(f"/api/v1/businesses/{business.public_id}/products/", payload(category, attributes=invalid), format="json").status_code == 400
+
+
+def test_registry_product_creation_read_filter_and_update_do_not_copy_taxonomy(actors):
+    business, _, owner, _, _, _ = actors
+    client = api(owner)
+    url = f"/api/v1/businesses/{business.public_id}/products/"
+    category_count = ProductCategory.objects.count()
+    definition_count = AttributeDefinition.objects.count()
+    option_count = AttributeOption.objects.count()
+
+    created = client.post(
+        url,
+        {
+            "name": "Téléviseur salon",
+            "category_code": "televisions",
+            "selling_price": "1200.00",
+            "attributes": {
+                "screen_size": 55,
+                "display_technology": "OLED",
+                "smart_tv": True,
+            },
+        },
+        format="json",
+    )
+
+    assert created.status_code == 201, created.data
+    assert created.data["category"] == "televisions"
+    assert created.data["category_code"] == "televisions"
+    assert created.data["category_name"] == "Téléviseurs"
+    assert created.data["category_source"] == "registry"
+    product = Product.objects.get(public_id=created.data["public_id"])
+    assert product.category_id is None
+    assert product.attributes["screen_size"] == "55"
+    assert ProductCategory.objects.count() == category_count
+    assert AttributeDefinition.objects.count() == definition_count
+    assert AttributeOption.objects.count() == option_count
+
+    filtered = client.get(url, {"category": "televisions"})
+    assert [item["public_id"] for item in filtered.data] == [product.public_id]
+    detail_url = f"{url}{product.public_id}/"
+    updated = client.patch(
+        detail_url,
+        {"attributes": {"screen_size": "65", "wifi": True}},
+        format="json",
+    )
+    assert updated.status_code == 200, updated.data
+    assert updated.data["attributes"] == {"screen_size": "65", "wifi": True}
+
+
+def test_registry_product_rejects_unknown_category_attributes_and_double_source(
+    catalog_category,
+    actors,
+):
+    _, legacy_category = catalog_category
+    business, _, owner, _, _, _ = actors
+    client = api(owner)
+    url = f"/api/v1/businesses/{business.public_id}/products/"
+    base = {"name": "Produit", "selling_price": "10.00", "attributes": {}}
+
+    assert client.post(url, {**base, "category_code": "missing"}, format="json").status_code == 400
+    invalid = {**base, "category_code": "televisions", "attributes": {"screen_size": 55, "x": 1}}
+    assert client.post(url, invalid, format="json").status_code == 400
+    double = {
+        **base,
+        "category": legacy_category.code,
+        "category_code": "other_products",
+    }
+    assert client.post(url, double, format="json").status_code == 400
+
+
+def test_registry_product_variants_use_registry_axes(actors):
+    business, _, owner, _, _, _ = actors
+    client = api(owner)
+    product_response = client.post(
+        f"/api/v1/businesses/{business.public_id}/products/",
+        {
+            "name": "Téléphone",
+            "category_code": "smartphones",
+            "selling_price": "500.00",
+            "attributes": {"brand": "Acme"},
+        },
+        format="json",
+    )
+    assert product_response.status_code == 201, product_response.data
+    endpoint = (
+        f"/api/v1/businesses/{business.public_id}/products/"
+        f"{product_response.data['public_id']}/variants/"
+    )
+
+    created = client.post(endpoint, {"attributes": {"storage": 256}}, format="json")
+    assert created.status_code == 201, created.data
+    assert created.data["attributes"] == {"storage": 256}
+    assert client.post(endpoint, {"attributes": {"ram": 8}}, format="json").status_code == 400
+
+
+def test_legacy_product_output_explicitly_marks_legacy_source(catalog_category, actors):
+    _, category = catalog_category
+    business, _, owner, _, _, _ = actors
+
+    product = create_product(api(owner), business, category)
+
+    assert product["category"] == category.code
+    assert product["category_code"] is None
+    assert product["category_source"] == "legacy"
+
+
+def test_database_requires_exactly_one_category_source(catalog_category, actors):
+    _, category = catalog_category
+    business, _, _, _, _, _ = actors
+    values = {
+        "business": business,
+        "name": "Source invalide",
+        "selling_price": "1.00",
+        "currency": "USD",
+        "attributes": {},
+    }
+
+    with pytest.raises(IntegrityError), transaction.atomic():
+        Product.objects.create(**values)
+    with pytest.raises(IntegrityError), transaction.atomic():
+        Product.objects.create(
+            **values,
+            category=category,
+            category_code="other_products",
+        )

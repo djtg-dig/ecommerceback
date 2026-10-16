@@ -35,10 +35,25 @@ from .models import Product, ProductVariant
 class ProductAdmin(admin.ModelAdmin):
     """Read-oriented management of tenant products without exposing UUIDs."""
 
-    list_display = ("public_id", "name", "business", "category", "selling_price", "currency", "status")
-    list_filter = ("status", "currency", "category")
+    list_display = (
+        "public_id",
+        "name",
+        "business",
+        "resolved_category",
+        "selling_price",
+        "currency",
+        "status",
+    )
+    list_filter = ("status", "currency", "category", "category_code")
     search_fields = ("public_id", "name", "internal_reference", "barcode")
     readonly_fields = ("id", "public_id", "created_at", "updated_at")
+
+    @admin.display(description="Catégorie")
+    def resolved_category(self, product):
+        from .services import resolve_product_category
+
+        category = resolve_product_category(product)
+        return f"{category.name} ({category.source})"
 
 
 @admin.register(ProductVariant)

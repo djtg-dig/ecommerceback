@@ -5,7 +5,10 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from .models import Product, ProductCategory, ProductVariant
+from .registry import get_category as get_registry_category
+from .registry import validate_attributes as validate_registry_attributes
 from .services import ensure_business_sku_available, validate_leaf_category, validate_product_attributes
+from .services import resolve_product_category
 
 
 class ProductCategorySerializer(serializers.ModelSerializer):
@@ -48,14 +51,34 @@ class EffectiveAttributeSerializer(serializers.Serializer):
 class ProductOutputSerializer(serializers.ModelSerializer):
     """Safe product representation that exposes category codes, never UUIDs."""
 
-    category = serializers.CharField(source="category.code", read_only=True)
-    category_name = serializers.CharField(source="category.name", read_only=True)
-    product_type_key = serializers.CharField(source="category.product_type_key", read_only=True, allow_null=True)
+    category = serializers.SerializerMethodField()
+    category_name = serializers.SerializerMethodField()
+    category_source = serializers.SerializerMethodField()
+    product_type_key = serializers.SerializerMethodField()
+
+    def _resolved_category(self, product):
+        cache_name = "_resolved_category_for_serialization"
+        if not hasattr(product, cache_name):
+            setattr(product, cache_name, resolve_product_category(product))
+        return getattr(product, cache_name)
+
+    def get_category(self, product):
+        return self._resolved_category(product).code
+
+    def get_category_name(self, product):
+        return self._resolved_category(product).name
+
+    def get_category_source(self, product):
+        return self._resolved_category(product).source
+
+    def get_product_type_key(self, product):
+        return self._resolved_category(product).product_type_key
 
     class Meta:
         model = Product
         fields = (
-            "public_id", "name", "description", "category", "category_name", "product_type_key",
+            "public_id", "name", "description", "category", "category_code", "category_name",
+            "category_source", "product_type_key",
             "internal_reference", "barcode", "selling_price", "cost_price", "currency", "attributes",
             "status", "created_at", "updated_at",
         )
@@ -64,14 +87,20 @@ class ProductOutputSerializer(serializers.ModelSerializer):
 class ProductWriteSerializer(serializers.ModelSerializer):
     """Validate writes using active leaf categories and their inherited schema."""
 
-    category = serializers.SlugRelatedField(slug_field="code", queryset=ProductCategory.objects.all())
+    category = serializers.SlugRelatedField(
+        slug_field="code",
+        queryset=ProductCategory.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    category_code = serializers.CharField(required=False, allow_null=True, allow_blank=False)
     currency = serializers.ChoiceField(choices=("CDF", "USD"), required=False)
     attributes = serializers.JSONField(required=False)
 
     class Meta:
         model = Product
         fields = (
-            "name", "description", "category", "internal_reference", "barcode", "selling_price",
+            "name", "description", "category", "category_code", "internal_reference", "barcode", "selling_price",
             "cost_price", "currency", "attributes", "status",
         )
         extra_kwargs = {
@@ -81,18 +110,54 @@ class ProductWriteSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         instance = self.instance
+        category_supplied = "category" in attrs
+        registry_supplied = "category_code" in attrs
         category = attrs.get("category", instance.category if instance else None)
+        category_code = attrs.get("category_code", instance.category_code if instance else None)
+        if category_supplied and registry_supplied and category is not None and category_code:
+            raise serializers.ValidationError(
+                {"category": "Indiquez une seule source de catégorie."}
+            )
+        if category_supplied and category is not None:
+            category_code = None
+            attrs["category_code"] = None
+        elif registry_supplied and category_code:
+            category = None
+            attrs["category"] = None
         attributes = attrs.get("attributes", instance.attributes if instance else {})
         try:
             for field in ("selling_price", "cost_price"):
                 value = attrs.get(field)
                 if value is not None and value < 0:
                     raise serializers.ValidationError({field: "Le prix ne peut pas être négatif."})
-            validate_leaf_category(category)
-            attrs["attributes"] = validate_product_attributes(category, attributes, variant_attributes=False)
-            if instance and category != instance.category:
+            if bool(category) == bool(category_code):
+                raise DjangoValidationError(
+                    {"category": "Indiquez exactement une catégorie historique ou category_code."}
+                )
+            if category is not None:
+                validate_leaf_category(category)
+                attrs["attributes"] = validate_product_attributes(
+                    category,
+                    attributes,
+                    variant_attributes=False,
+                )
+            else:
+                if get_registry_category(category_code) is None:
+                    raise DjangoValidationError({"category_code": "Catégorie Python inconnue."})
+                attrs["attributes"] = validate_registry_attributes(
+                    category_code,
+                    attributes,
+                    variant=False,
+                )
+            source_changed = instance and (
+                category != instance.category or category_code != instance.category_code
+            )
+            if source_changed:
                 for variant in instance.variants.all():
-                    validate_product_attributes(category, variant.attributes, variant_attributes=True)
+                    if category is not None:
+                        validate_product_attributes(category, variant.attributes, variant_attributes=True)
+                    else:
+                        validate_registry_attributes(category_code, variant.attributes, variant=True)
             business = self.context["business"]
             ensure_business_sku_available(business, attrs.get("internal_reference", instance.internal_reference if instance else None), product=instance)
         except DjangoValidationError as exc:
@@ -136,7 +201,18 @@ class ProductVariantWriteSerializer(serializers.ModelSerializer):
                 value = attrs.get(field)
                 if value is not None and value < 0:
                     raise serializers.ValidationError({field: "Le prix ne peut pas être négatif."})
-            attrs["attributes"] = validate_product_attributes(product.category, attributes, variant_attributes=True)
+            if product.category_id is not None:
+                attrs["attributes"] = validate_product_attributes(
+                    product.category,
+                    attributes,
+                    variant_attributes=True,
+                )
+            else:
+                attrs["attributes"] = validate_registry_attributes(
+                    product.category_code,
+                    attributes,
+                    variant=True,
+                )
             ensure_business_sku_available(
                 product.business,
                 attrs.get("internal_reference", instance.internal_reference if instance else None),

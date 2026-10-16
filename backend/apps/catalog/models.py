@@ -158,7 +158,14 @@ class Product(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     public_id = models.CharField(max_length=12, unique=True, editable=False, db_index=True)
     business = models.ForeignKey("businesses.Business", on_delete=models.PROTECT, related_name="products")
-    category = models.ForeignKey(ProductCategory, on_delete=models.PROTECT, related_name="products")
+    category = models.ForeignKey(
+        ProductCategory,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="products",
+    )
+    category_code = models.CharField(max_length=64, null=True, blank=True, db_index=True)
     name = models.CharField(max_length=240)
     description = models.TextField(blank=True)
     internal_reference = models.CharField(max_length=100, null=True, blank=True)
@@ -184,6 +191,16 @@ class Product(models.Model):
                 condition=models.Q(cost_price__isnull=True) | models.Q(cost_price__gte=0),
                 name="catalog_product_cost_price_nonnegative",
             ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(category__isnull=False, category_code__isnull=True)
+                    | (
+                        models.Q(category__isnull=True, category_code__isnull=False)
+                        & ~models.Q(category_code="")
+                    )
+                ),
+                name="catalog_product_exactly_one_category_source",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -191,8 +208,10 @@ class Product(models.Model):
 
     @property
     def product_type_key(self):
-        """Expose the category-derived type without duplicating it in this table."""
-        return self.category.product_type_key
+        """Expose the resolved type without duplicating registry definitions."""
+        from .services import resolve_product_category
+
+        return resolve_product_category(self).product_type_key
 
     def save(self, *args, **kwargs):
         from apps.businesses.identifiers import generate_product_public_id
@@ -205,6 +224,8 @@ class Product(models.Model):
             self.internal_reference = None
         if self.barcode == "":
             self.barcode = None
+        if self.category_code == "":
+            self.category_code = None
         if not self.currency and self.business_id:
             self.currency = self.business.primary_currency
         return super().save(*args, **kwargs)

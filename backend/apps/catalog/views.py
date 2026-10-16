@@ -3,9 +3,9 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from decimal import Decimal
 
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError
-from django.db.models import DecimalField, Exists, F, OuterRef, Subquery, Value
+from django.db.models import DecimalField, Exists, F, OuterRef, Q, Subquery, Value
 from django.db.models.functions import Coalesce, Trim, Upper
 from rest_framework import generics, permissions, status
 from rest_framework.pagination import PageNumberPagination
@@ -16,6 +16,8 @@ from apps.businesses.models import Business, BusinessMemberPermission
 from apps.businesses.permissions import require_permission
 
 from .models import Product, ProductCategory, ProductVariant
+from .registry import get_category as get_registry_category
+from .registry import list_categories as list_registry_categories
 from .serializers import (
     EffectiveAttributeSerializer,
     ProductCategorySerializer,
@@ -64,6 +66,31 @@ class ProductCategoryAttributesView(generics.GenericAPIView):
     def get(self, request, code: str):
         category = generics.get_object_or_404(ProductCategory.objects.select_related("parent__parent"), code=code, is_active=True)
         return Response(self.get_serializer(effective_attributes(category), many=True).data)
+
+
+class ProductCategoryRegistryListView(APIView):
+    """Expose code-defined categories without reading or populating taxonomy tables."""
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        return Response(
+            [category.public(include_attributes=False) for category in list_registry_categories()]
+        )
+
+
+class ProductCategoryRegistryDetailView(APIView):
+    """Expose attributes, options and constraints for one code-defined category."""
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+    def get(self, request, code: str):
+        category = get_registry_category(code)
+        if category is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(category.public(include_attributes=True))
 
 
 class BusinessProductMixin:
@@ -116,7 +143,7 @@ class ProductListCreateView(BusinessProductMixin, APIView):
         if value := request.query_params.get("status"):
             products = products.filter(status=value)
         if value := request.query_params.get("category"):
-            products = products.filter(category__code=value)
+            products = products.filter(Q(category__code=value) | Q(category_code=value))
         if value := request.query_params.get("search"):
             products = products.filter(name__icontains=value)
         return Response(ProductOutputSerializer(products, many=True).data)
@@ -293,7 +320,8 @@ class ProductDetailView(BusinessProductMixin, APIView):
         serializer = ProductWriteSerializer(product, data=request.data, partial=True, context={"business": business})
         serializer.is_valid(raise_exception=True)
         try:
-            serializer.save()
+            with transaction.atomic():
+                serializer.save()
         except IntegrityError:
             return Response({"detail": "Conflit de référence interne."}, status=400)
         return Response(ProductOutputSerializer(product).data)
@@ -435,7 +463,8 @@ class ProductVariantDetailView(BusinessProductMixin, APIView):
         serializer = ProductVariantWriteSerializer(variant, data=request.data, partial=True, context={"product": product})
         serializer.is_valid(raise_exception=True)
         try:
-            serializer.save()
+            with transaction.atomic():
+                serializer.save()
         except IntegrityError:
             return Response({"detail": "Combinaison de variante ou référence interne déjà utilisée."}, status=400)
         return Response(ProductVariantOutputSerializer(variant).data)
@@ -449,6 +478,8 @@ _category_code = OpenApiParameter("code", str, OpenApiParameter.PATH, descriptio
 
 ProductCategoryListView.get = extend_schema(tags=["Product Categories"], operation_id="product_category_list", auth=[], responses={200: ProductCategorySerializer(many=True)})(ProductCategoryListView.get)
 ProductCategoryAttributesView.get = extend_schema(tags=["Product Categories"], operation_id="product_category_effective_attributes", auth=[], parameters=[_category_code], responses={200: EffectiveAttributeSerializer(many=True), 404: None})(ProductCategoryAttributesView.get)
+ProductCategoryRegistryListView.get = extend_schema(tags=["Product Categories"], operation_id="product_category_registry_list", auth=[], responses={200: dict})(ProductCategoryRegistryListView.get)
+ProductCategoryRegistryDetailView.get = extend_schema(tags=["Product Categories"], operation_id="product_category_registry_retrieve", auth=[], parameters=[_category_code], responses={200: dict, 404: None})(ProductCategoryRegistryDetailView.get)
 ProductListCreateView.get = extend_schema(tags=["Products"], operation_id="product_list", parameters=[_business_public_id, OpenApiParameter("status", str, OpenApiParameter.QUERY), OpenApiParameter("category", str, OpenApiParameter.QUERY), OpenApiParameter("search", str, OpenApiParameter.QUERY)], responses={200: ProductOutputSerializer(many=True), 403: None, 404: None})(ProductListCreateView.get)
 ProductListCreateView.post = extend_schema(tags=["Products"], operation_id="product_create", parameters=[_business_public_id], request=ProductWriteSerializer, responses={201: ProductOutputSerializer, 400: None, 403: None, 404: None})(ProductListCreateView.post)
 PosSearchView.get = extend_schema(

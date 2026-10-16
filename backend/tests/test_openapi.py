@@ -32,6 +32,8 @@ def test_schema_lists_real_routes_and_ecommerce_bearer_security(client):
         "/api/v1/businesses/{public_id}/",
         "/api/v1/business-categories/",
         "/api/v1/product-categories/",
+        "/api/v1/product-categories/registry/",
+        "/api/v1/product-categories/registry/{code}/",
         "/api/v1/product-categories/{code}/attributes/",
         "/api/v1/businesses/{business_public_id}/products/",
         "/api/v1/businesses/{business_public_id}/inventory/",

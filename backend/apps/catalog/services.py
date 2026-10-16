@@ -12,6 +12,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 
 from .models import AttributeDefinition, ProductCategory
+from .registry import get_category as get_registry_category
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,36 @@ class EffectiveAttribute:
 
     definition: AttributeDefinition
     inherited_from: ProductCategory
+
+
+@dataclass(frozen=True)
+class ResolvedProductCategory:
+    """Stable category projection for either legacy rows or the Python registry."""
+
+    code: str
+    name: str
+    source: str
+    product_type_key: str | None
+
+
+def resolve_product_category(product) -> ResolvedProductCategory:
+    """Resolve the single category source enforced by the Product constraint."""
+    if product.category_id is not None:
+        return ResolvedProductCategory(
+            code=product.category.code,
+            name=product.category.name,
+            source="legacy",
+            product_type_key=product.category.product_type_key,
+        )
+    category = get_registry_category(product.category_code)
+    if category is None:
+        raise ValidationError({"category_code": "Catégorie Python inconnue."})
+    return ResolvedProductCategory(
+        code=category.code,
+        name=category.label,
+        source="registry",
+        product_type_key=category.code,
+    )
 
 
 def category_lineage(category: ProductCategory) -> list[ProductCategory]:
