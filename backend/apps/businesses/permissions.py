@@ -18,6 +18,25 @@ def atomic_permission_values():
     return [value for value in BusinessMemberPermission.Permission.values if value not in LEGACY_PERMISSION_VALUES]
 
 
+def effective_permissions(member):
+    """Return the current member's effective atomic permissions in registry order.
+
+    This is intentionally a UI projection, not an authorization bypass: every
+    protected endpoint still calls ``require_permission`` independently.
+    """
+    permissions = atomic_permission_values()
+    if not member or member.status != BusinessMember.Status.ACTIVE:
+        return []
+    if member.is_owner:
+        return permissions
+    granted = set(
+        member.permissions.filter(permission__in=permissions).values_list(
+            "permission", flat=True
+        )
+    )
+    return [permission for permission in permissions if permission in granted]
+
+
 def validate_permission(permission):
     """Reject permission names that are not part of the server-side registry."""
     if permission not in atomic_permission_values():

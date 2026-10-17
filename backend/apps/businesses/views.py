@@ -26,6 +26,7 @@ from .models import (
 )
 from .permissions import (
     atomic_permission_values,
+    effective_permissions,
     has_permission,
     membership_for,
     require_any_permission,
@@ -278,11 +279,12 @@ class BusinessMyPermissionsView(APIView):
             raise NotFound("Not found.")
         if member.status != BusinessMember.Status.ACTIVE:
             raise PermissionDenied("Forbidden.")
-        permissions = [
-            permission for permission in atomic_permission_values()
-            if has_permission(member, permission, write=False)
-        ]
-        return Response({"member_status": member.status, "permissions": permissions})
+        permissions = effective_permissions(member)
+        return Response({
+            "user_id": str(request.user.pk),
+            "member_status": member.status,
+            "permissions": permissions,
+        })
 
 class BusinessMembersView(APIView):
     def get(self, request, public_id):

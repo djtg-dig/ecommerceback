@@ -32,8 +32,27 @@ def test_my_permissions_matches_existing_authorization_rules():
     for current in (owner, limited, empty):
         response = client_for(current.identity).get(url)
         assert response.status_code == 200
+        assert response.data["user_id"] == str(current.identity.pk)
         assert response.data["member_status"] == "ACTIVE"
         assert response.data["permissions"] == [p for p in all_permissions if has_permission(current, p)]
+
+
+@pytest.mark.django_db
+def test_my_permissions_reads_non_owner_permissions_in_one_grouped_query(django_assert_num_queries):
+    business = Business.objects.create(name="Grouped permissions")
+    limited = member(business, "grouped")
+    BusinessMemberPermission.objects.create(member=limited, permission="PRODUCT_VIEW")
+    BusinessMemberPermission.objects.create(member=limited, permission="INVENTORY_VIEW")
+
+    # JWT identity, Business, membership (with Business) and the grouped
+    # explicit-permission query. This guards against one .exists() per code.
+    with django_assert_num_queries(4):
+        response = client_for(limited.identity).get(
+            f"/api/v1/businesses/{business.public_id}/my-permissions/"
+        )
+
+    assert response.status_code == 200
+    assert response.data["permissions"] == ["PRODUCT_VIEW", "INVENTORY_VIEW"]
 
 
 @pytest.mark.django_db
