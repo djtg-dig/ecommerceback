@@ -4,6 +4,8 @@ from decimal import Decimal
 
 import pytest
 from django.db import IntegrityError, transaction
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
@@ -70,6 +72,75 @@ def create_product(client, business, category, **kwargs):
     response = client.post(f"/api/v1/businesses/{business.public_id}/products/", payload(category, **kwargs), format="json")
     assert response.status_code == 201, response.data
     return response.data
+
+
+@pytest.mark.parametrize("product_count", [0, 9, 10, 11, 100])
+def test_product_list_paginates_ten_items_with_stable_order(catalog_category, actors, product_count):
+    """La page applique les filtres avant sa tranche et garde un ordre partageable."""
+    _, category = catalog_category
+    business, other, owner, _, _, _ = actors
+    for index in range(product_count):
+        Product.objects.create(
+            business=business,
+            category=category,
+            name=f"Produit {index:03d}",
+            selling_price=Decimal("1.00"),
+            currency=business.primary_currency,
+        )
+    Product.objects.create(
+        business=other,
+        category=category,
+        name="Produit étranger",
+        selling_price=Decimal("1.00"),
+        currency=other.primary_currency,
+    )
+
+    endpoint = f"/api/v1/businesses/{business.public_id}/products/"
+    first = api(owner).get(endpoint)
+    assert first.status_code == 200
+    assert first.data["count"] == product_count
+    assert len(first.data["results"]) == min(product_count, 10)
+    assert [item["name"] for item in first.data["results"]] == sorted(item["name"] for item in first.data["results"])
+    assert first.data["previous"] is None
+    assert bool(first.data["next"]) is (product_count > 10)
+
+    second = api(owner).get(endpoint, {"page": 2})
+    if product_count > 10:
+        assert second.status_code == 200
+        assert len(second.data["results"]) == min(10, product_count - 10)
+        assert all(item["name"] != "Produit étranger" for item in second.data["results"])
+    else:
+        assert second.status_code == 404
+
+
+def test_product_list_paginates_filtered_results_without_n_plus_one(catalog_category, actors):
+    _, category = catalog_category
+    business, _, owner, _, _, _ = actors
+    for index in range(12):
+        Product.objects.create(
+            business=business,
+            category=category,
+            name=f"Produit filtré {index:03d}",
+            selling_price=Decimal("1.00"),
+            currency=business.primary_currency,
+            status=Product.Status.ACTIVE if index < 11 else Product.Status.ARCHIVED,
+        )
+    endpoint = f"/api/v1/businesses/{business.public_id}/products/"
+    with CaptureQueriesContext(connection) as queries:
+        response = api(owner).get(endpoint, {"status": "ACTIVE", "search": "filtré", "page": 2})
+        assert response.status_code == 200
+        assert response.data["count"] == 11
+        assert len(response.data["results"]) == 1
+    # Autorisation + COUNT + page SQL + Prefetch des photos : aucun coût par produit.
+    assert len(queries) <= 5
+
+
+def test_product_list_rejects_non_positive_or_out_of_range_pages(catalog_category, actors):
+    _, category = catalog_category
+    business, _, owner, _, _, _ = actors
+    endpoint = f"/api/v1/businesses/{business.public_id}/products/"
+    for page in ("0", "-1", "2"):
+        assert api(owner).get(endpoint, {"page": page}).status_code == 404
 
 
 def test_owner_and_manager_create_products_with_pr_and_default_currency(catalog_category, actors):
@@ -254,7 +325,7 @@ def test_registry_product_creation_read_filter_and_update_do_not_copy_taxonomy(a
     assert AttributeOption.objects.count() == option_count
 
     filtered = client.get(url, {"category": "televisions"})
-    assert [item["public_id"] for item in filtered.data] == [product.public_id]
+    assert [item["public_id"] for item in filtered.data["results"]] == [product.public_id]
     detail_url = f"{url}{product.public_id}/"
     updated = client.patch(
         detail_url,

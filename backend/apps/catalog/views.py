@@ -23,6 +23,7 @@ from .registry import list_categories as list_registry_categories
 from .serializers import (
     EffectiveAttributeSerializer,
     ProductCategorySerializer,
+    ProductPageSerializer,
     ProductOutputSerializer,
     ProductVariantOutputSerializer,
     ProductVariantWriteSerializer,
@@ -36,6 +37,13 @@ class PosPagination(PageNumberPagination):
     page_size = 20
     page_size_query_param = "page_size"
     max_page_size = 50
+
+
+class ProductPagination(PageNumberPagination):
+    """Paginer le catalogue à dix produits, sans laisser le client élargir la page."""
+
+    page_size = 10
+    page_size_query_param = None
 
 
 def _variant_label(attributes):
@@ -163,7 +171,10 @@ class ProductListCreateView(BusinessProductMixin, APIView):
             products = products.filter(Q(category__code=value) | Q(category_code=value))
         if value := request.query_params.get("search"):
             products = products.filter(name__icontains=value)
-        return Response(ProductOutputSerializer(products, many=True).data)
+        products = products.order_by("name", "public_id")
+        paginator = ProductPagination()
+        page = paginator.paginate_queryset(products, request)
+        return paginator.get_paginated_response(ProductOutputSerializer(page, many=True).data)
 
     def post(self, request, business_public_id):
         business = self.get_business(
@@ -560,7 +571,7 @@ ProductCategoryListView.get = extend_schema(tags=["Product Categories"], operati
 ProductCategoryAttributesView.get = extend_schema(tags=["Product Categories"], operation_id="product_category_effective_attributes", auth=[], parameters=[_category_code], responses={200: EffectiveAttributeSerializer(many=True), 404: None})(ProductCategoryAttributesView.get)
 ProductCategoryRegistryListView.get = extend_schema(tags=["Product Categories"], operation_id="product_category_registry_list", auth=[], responses={200: dict})(ProductCategoryRegistryListView.get)
 ProductCategoryRegistryDetailView.get = extend_schema(tags=["Product Categories"], operation_id="product_category_registry_retrieve", auth=[], parameters=[_category_code], responses={200: dict, 404: None})(ProductCategoryRegistryDetailView.get)
-ProductListCreateView.get = extend_schema(tags=["Products"], operation_id="product_list", parameters=[_business_public_id, OpenApiParameter("status", str, OpenApiParameter.QUERY), OpenApiParameter("category", str, OpenApiParameter.QUERY), OpenApiParameter("search", str, OpenApiParameter.QUERY)], responses={200: ProductOutputSerializer(many=True), 403: None, 404: None})(ProductListCreateView.get)
+ProductListCreateView.get = extend_schema(tags=["Products"], operation_id="product_list", parameters=[_business_public_id, OpenApiParameter("status", str, OpenApiParameter.QUERY), OpenApiParameter("category", str, OpenApiParameter.QUERY), OpenApiParameter("search", str, OpenApiParameter.QUERY), OpenApiParameter("page", int, OpenApiParameter.QUERY, description="Page positive, 10 produits par page.")], responses={200: ProductPageSerializer, 403: None, 404: None})(ProductListCreateView.get)
 ProductListCreateView.post = extend_schema(tags=["Products"], operation_id="product_create", parameters=[_business_public_id], request=ProductWriteSerializer, responses={201: ProductOutputSerializer, 400: None, 403: None, 404: None})(ProductListCreateView.post)
 PosSearchView.get = extend_schema(
     tags=["Products"],

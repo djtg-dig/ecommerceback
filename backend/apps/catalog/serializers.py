@@ -93,6 +93,15 @@ class ProductOutputSerializer(serializers.ModelSerializer):
         )
 
 
+class ProductPageSerializer(serializers.Serializer):
+    """Contrat paginé de la collection de produits d'une entreprise."""
+
+    count = serializers.IntegerField()
+    next = serializers.URLField(allow_null=True)
+    previous = serializers.URLField(allow_null=True)
+    results = ProductOutputSerializer(many=True)
+
+
 class ProductWriteSerializer(serializers.ModelSerializer):
     """Validate writes using active leaf categories and their inherited schema."""
 
