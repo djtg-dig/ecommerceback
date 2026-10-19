@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -74,6 +75,66 @@ class Business(models.Model):
             self.public_id = generate_business_public_id()
 
         super().save(*args, **kwargs)
+
+
+class Currency(models.Model):
+    """Platform currency reference data. Amounts always retain their own code."""
+
+    code = models.CharField(max_length=3, primary_key=True)
+    name = models.CharField(max_length=80)
+    symbol = models.CharField(max_length=12)
+    decimal_places = models.PositiveSmallIntegerField(default=2)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("code",)
+        constraints = [models.CheckConstraint(condition=models.Q(decimal_places__lte=6), name="currency_decimal_places_lte_six")]
+
+    def clean(self):
+        super().clean()
+        self.code = self.code.upper()
+
+
+class BusinessCurrency(models.Model):
+    """A currency enabled by one tenant; only one row can be primary."""
+
+    business = models.ForeignKey(Business, on_delete=models.PROTECT, related_name="currencies")
+    currency = models.ForeignKey(Currency, on_delete=models.PROTECT, related_name="businesses")
+    is_primary = models.BooleanField(default=False)
+    is_enabled = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-is_primary", "currency__code")
+        constraints = [
+            models.UniqueConstraint(fields=("business", "currency"), name="business_currency_unique"),
+            models.UniqueConstraint(fields=("business",), condition=models.Q(is_primary=True), name="business_currency_one_primary"),
+            models.CheckConstraint(condition=models.Q(is_primary=False) | models.Q(is_enabled=True), name="business_currency_primary_enabled"),
+        ]
+
+
+class BusinessExchangeRate(models.Model):
+    """Manual, tenant-scoped rate: one unit of ``from_currency`` equals ``rate`` units of ``to_currency``."""
+
+    business = models.ForeignKey(Business, on_delete=models.PROTECT, related_name="exchange_rates")
+    from_currency = models.ForeignKey(Currency, on_delete=models.PROTECT, related_name="exchange_rates_from")
+    to_currency = models.ForeignKey(Currency, on_delete=models.PROTECT, related_name="exchange_rates_to")
+    rate = models.DecimalField(max_digits=24, decimal_places=12)
+    effective_at = models.DateTimeField()
+    expires_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-effective_at", "-created_at")
+        indexes = [models.Index(fields=("business", "from_currency", "to_currency", "is_active", "effective_at"), name="business_rate_lookup_idx")]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(rate__gt=Decimal("0")), name="business_exchange_rate_positive"),
+            models.CheckConstraint(condition=~models.Q(from_currency=models.F("to_currency")), name="business_exchange_rate_distinct_currencies"),
+            models.CheckConstraint(condition=models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=models.F("effective_at")), name="business_exchange_rate_expiry_after_effective"),
+        ]
 
 
 class BusinessCategory(models.Model):

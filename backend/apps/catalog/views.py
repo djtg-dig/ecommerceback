@@ -160,7 +160,7 @@ class ProductListCreateView(BusinessProductMixin, APIView):
         serializer = ProductWriteSerializer(data=request.data, context={"business": business})
         serializer.is_valid(raise_exception=True)
         values = dict(serializer.validated_data)
-        values.setdefault("currency", business.primary_currency)
+        values["currency"] = business.primary_currency
         try:
             product = create_product(business=business, values=values)
         except IntegrityError:

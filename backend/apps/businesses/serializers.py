@@ -3,11 +3,14 @@ from rest_framework import serializers
 
 from .models import (
     Business,
+    BusinessCurrency,
+    BusinessExchangeRate,
     BusinessCategory,
     BusinessMember,
     BusinessMemberInvitation,
     BusinessMemberPermission,
     BusinessPaymentMethod,
+    Currency,
 )
 from .services.invitations import validate_invitation_state
 from .permissions import atomic_permission_values
@@ -107,6 +110,52 @@ class BusinessSerializer(serializers.ModelSerializer):
         ).first()
 
         return CategorySerializer(membership.category).data if membership else None
+
+
+class CurrencySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Currency
+        fields = ("code", "name", "symbol", "decimal_places", "is_active")
+
+
+class BusinessCurrencySerializer(serializers.ModelSerializer):
+    currency = CurrencySerializer(read_only=True)
+    code = serializers.CharField(source="currency.code", read_only=True)
+
+    class Meta:
+        model = BusinessCurrency
+        fields = ("code", "currency", "is_primary", "is_enabled", "created_at", "updated_at")
+
+
+class BusinessCurrencyWriteSerializer(serializers.Serializer):
+    code = serializers.CharField(max_length=3)
+
+    def validate_code(self, value):
+        code = value.upper()
+        if not Currency.objects.filter(code=code, is_active=True).exists():
+            raise serializers.ValidationError("Devise inactive ou inconnue.")
+        return code
+
+
+class BusinessExchangeRateSerializer(serializers.ModelSerializer):
+    from_currency = serializers.SlugRelatedField(slug_field="code", queryset=Currency.objects.all())
+    to_currency = serializers.SlugRelatedField(slug_field="code", queryset=Currency.objects.all())
+
+    class Meta:
+        model = BusinessExchangeRate
+        fields = ("id", "from_currency", "to_currency", "rate", "effective_at", "expires_at", "is_active", "created_at", "updated_at")
+        read_only_fields = ("id", "created_at", "updated_at")
+
+    def validate(self, attrs):
+        business = self.context["business"]
+        from_currency = attrs.get("from_currency", getattr(self.instance, "from_currency", None))
+        to_currency = attrs.get("to_currency", getattr(self.instance, "to_currency", None))
+        if from_currency == to_currency:
+            raise serializers.ValidationError({"to_currency": "Les devises doivent être différentes."})
+        codes = [from_currency.code, to_currency.code]
+        if business.currencies.filter(currency_id__in=codes, is_enabled=True).count() != 2:
+            raise serializers.ValidationError("Les deux devises doivent être acceptées par l’entreprise.")
+        return attrs
 
 
 class BusinessMemberSerializer(serializers.ModelSerializer):

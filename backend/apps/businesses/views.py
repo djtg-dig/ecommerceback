@@ -19,10 +19,13 @@ from rest_framework.views import APIView
 from .models import (
     Business,
     BusinessCategory,
+    BusinessCurrency,
+    BusinessExchangeRate,
     BusinessMember,
     BusinessMemberInvitation,
     BusinessMemberPermission,
     BusinessPaymentMethod,
+    Currency,
 )
 from .permissions import (
     atomic_permission_values,
@@ -49,9 +52,14 @@ from .serializers import (
     BusinessUpdateSerializer,
     CategorySerializer,
     BusinessPaymentMethodSerializer,
+    BusinessCurrencySerializer,
+    BusinessCurrencyWriteSerializer,
+    BusinessExchangeRateSerializer,
+    CurrencySerializer,
 )
 from .services import (
     create_business,
+    ensure_currency_reference_data,
     grant_permission,
     reactivate_member,
     remove_member,
@@ -83,6 +91,70 @@ def accessible(identity):
         members__identity=identity,
         members__status="ACTIVE",
     ).distinct()
+
+
+class CurrencyListView(APIView):
+    """Global, active ISO references. It exposes no tenant configuration."""
+    def get(self, request):
+        ensure_currency_reference_data()
+        return Response(CurrencySerializer(Currency.objects.filter(is_active=True), many=True).data)
+
+
+class BusinessCurrenciesView(APIView):
+    def get_business(self, request, public_id, *, write=False):
+        business = Business.objects.filter(public_id=public_id).first()
+        if business is None:
+            raise NotFound("Not found.")
+        require_permission(request.user, business, BusinessMemberPermission.Permission.BUSINESS_UPDATE, write=write)
+        return business
+
+    def get(self, request, public_id):
+        business = self.get_business(request, public_id)
+        ensure_currency_reference_data()
+        return Response(BusinessCurrencySerializer(business.currencies.select_related("currency"), many=True).data)
+
+    def post(self, request, public_id):
+        business = self.get_business(request, public_id, write=True)
+        ensure_currency_reference_data()
+        serializer = BusinessCurrencyWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        currency = Currency.objects.get(code=serializer.validated_data["code"])
+        row, created = BusinessCurrency.objects.get_or_create(business=business, currency=currency, defaults={"is_enabled": True})
+        if not created and not row.is_enabled:
+            row.is_enabled = True
+            row.save(update_fields=("is_enabled", "updated_at"))
+        return Response(BusinessCurrencySerializer(row).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+class BusinessCurrencyDetailView(BusinessCurrenciesView):
+    def patch(self, request, public_id, code):
+        business = self.get_business(request, public_id, write=True)
+        row = business.currencies.select_related("currency").filter(currency_id=code.upper()).first()
+        if row is None:
+            raise NotFound("Not found.")
+        if "is_primary" in request.data and request.data["is_primary"]:
+            # Moving the accounting currency is intentionally not silently supported.
+            if row.currency_id != business.primary_currency:
+                raise serializers.ValidationError({"is_primary": "Le changement de devise principale exige une migration comptable explicite."})
+        if request.data.get("is_enabled") is False and row.is_primary:
+            raise serializers.ValidationError({"is_enabled": "La devise principale ne peut pas être désactivée."})
+        if "is_enabled" in request.data:
+            row.is_enabled = bool(request.data["is_enabled"])
+            row.save(update_fields=("is_enabled", "updated_at"))
+        return Response(BusinessCurrencySerializer(row).data)
+
+
+class BusinessExchangeRatesView(BusinessCurrenciesView):
+    def get(self, request, public_id):
+        business = self.get_business(request, public_id)
+        rates = business.exchange_rates.select_related("from_currency", "to_currency")
+        return Response(BusinessExchangeRateSerializer(rates, many=True, context={"business": business}).data)
+
+    def post(self, request, public_id):
+        business = self.get_business(request, public_id, write=True)
+        serializer = BusinessExchangeRateSerializer(data=request.data, context={"business": business})
+        serializer.is_valid(raise_exception=True)
+        return Response(BusinessExchangeRateSerializer(serializer.save(business=business), context={"business": business}).data, status=status.HTTP_201_CREATED)
 
 
 class MemberPagination(PageNumberPagination):

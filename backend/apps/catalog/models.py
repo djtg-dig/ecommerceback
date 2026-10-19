@@ -171,6 +171,9 @@ class Product(models.Model):
     internal_reference = models.CharField(max_length=100, null=True, blank=True)
     barcode = models.CharField(max_length=128, null=True, blank=True)
     selling_price = models.DecimalField(max_digits=14, decimal_places=2)
+    min_price = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    max_price = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    is_negotiable = models.BooleanField(default=False)
     cost_price = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     currency = models.CharField(max_length=3, choices=(("CDF", "CDF"), ("USD", "USD")))
     attributes = models.JSONField(default=dict, blank=True)
@@ -187,6 +190,9 @@ class Product(models.Model):
                 name="catalog_product_business_internal_reference_unique",
             ),
             models.CheckConstraint(condition=models.Q(selling_price__gte=0), name="catalog_product_selling_price_nonnegative"),
+            models.CheckConstraint(condition=models.Q(min_price__isnull=True) | models.Q(min_price__gte=0), name="catalog_product_min_price_nonnegative"),
+            models.CheckConstraint(condition=models.Q(max_price__isnull=True) | models.Q(max_price__gte=0), name="catalog_product_max_price_nonnegative"),
+            models.CheckConstraint(condition=models.Q(min_price__isnull=True) | models.Q(max_price__isnull=True) | models.Q(max_price__gte=models.F("min_price")), name="catalog_product_price_range_valid"),
             models.CheckConstraint(
                 condition=models.Q(cost_price__isnull=True) | models.Q(cost_price__gte=0),
                 name="catalog_product_cost_price_nonnegative",
@@ -228,6 +234,12 @@ class Product(models.Model):
             self.category_code = None
         if not self.currency and self.business_id:
             self.currency = self.business.primary_currency
+        if self.min_price is None:
+            self.min_price = self.selling_price
+        if self.max_price is None:
+            self.max_price = self.selling_price
+        # ``selling_price`` remains a compatibility snapshot for existing sales flows.
+        self.selling_price = self.max_price
         return super().save(*args, **kwargs)
 
 

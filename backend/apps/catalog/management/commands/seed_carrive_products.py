@@ -40,7 +40,8 @@ class Command(BaseCommand):
   return users[0],rows[0].business
  def payload(self,c,i):
   ref=f"{PREFIX}{c.upper()}-{i:03d}"
-  return {"name":f"{NAMES[c][(i-1)%2]} Démo {i}","description":"Donnée de démonstration ; caractéristiques et prix non contractuels.","category_code":c,"internal_reference":ref,"selling_price":Decimal(25+i*17),"cost_price":Decimal(15+i*10),"currency":"USD","attributes":attrs(c,i),"status":"ACTIVE"}
+  minimum=Decimal(25+i*17)
+  return {"name":f"{NAMES[c][(i-1)%2]} Démo {i}","description":"Donnée de démonstration ; caractéristiques et prix non contractuels.","category_code":c,"internal_reference":ref,"min_price":minimum,"max_price":minimum+Decimal("10.00"),"is_negotiable":True,"cost_price":Decimal(15+i*10),"attributes":attrs(c,i),"status":"ACTIVE"}
  def run(self,owner,business,plan,dry):
   made=skipped=0
   for c,i in plan:

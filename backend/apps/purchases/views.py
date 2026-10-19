@@ -228,7 +228,7 @@ class Purchases(Mixin, APIView):
             return self.nf()
         s = PurchaseWriteSerializer(data=r.data, context={"business": b})
         s.is_valid(raise_exception=True)
-        o = s.save(business=b, created_by=r.user, currency=b.primary_currency)
+        o = s.save(business=b, created_by=r.user, currency=s.validated_data.get("currency", b.primary_currency))
         return Response(PurchaseSerializer(o).data, 201)
 
 

@@ -24,11 +24,11 @@ class PurchaseSerializer(serializers.ModelSerializer):
  supplier=serializers.CharField(source='supplier.public_id',read_only=True,allow_null=True);subtotal=serializers.DecimalField(max_digits=16,decimal_places=2,read_only=True);total=serializers.DecimalField(max_digits=16,decimal_places=2,read_only=True)
  class Meta:model=Purchase;fields=('public_id','supplier','status','currency','reference','notes','subtotal','total','paid_amount','balance','payment_status','created_at','confirmed_at','received_at','cancelled_at','updated_at')
 class PurchaseWriteSerializer(serializers.ModelSerializer):
- supplier=serializers.SlugRelatedField(slug_field='public_id',queryset=Supplier.objects.all(),required=False,allow_null=True);currency=serializers.ChoiceField(choices=('CDF','USD'),required=False)
+ supplier=serializers.SlugRelatedField(slug_field='public_id',queryset=Supplier.objects.all(),required=False,allow_null=True);currency=serializers.CharField(required=False)
  class Meta:model=Purchase;fields=('supplier','currency','reference','notes')
  def validate_currency(self,value):
   business=self.context['business']
-  if value!=business.primary_currency:raise serializers.ValidationError('Currency must match the Business primary currency.')
+  if not business.currencies.filter(currency_id=value, is_enabled=True).exists():raise serializers.ValidationError('Cette devise n’est pas acceptée par l’entreprise.')
   return value
  def validate_supplier(self,x):
   if x and x.business_id!=self.context['business'].id:raise serializers.ValidationError('Supplier externe.')

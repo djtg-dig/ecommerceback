@@ -4,6 +4,9 @@ from django.urls import path
 
 from .views import (
     BusinessDetailView,
+    BusinessCurrenciesView,
+    BusinessCurrencyDetailView,
+    BusinessExchangeRatesView,
     BusinessInvitationResendView,
     BusinessInvitationRevokeView,
     BusinessInvitationsView,
@@ -18,12 +21,17 @@ from .views import (
     BusinessPermissionCatalogView,
     BusinessMyPermissionsView,
     BusinessesView,
+    CurrencyListView,
 )
 
 urlpatterns = [
+    path("currencies/", CurrencyListView.as_view()),
     path("", BusinessesView.as_view()),
     path("<str:public_id>/my-permissions/", BusinessMyPermissionsView.as_view()),
     path("<str:public_id>/", BusinessDetailView.as_view()),
+    path("<str:public_id>/currencies/", BusinessCurrenciesView.as_view()),
+    path("<str:public_id>/currencies/<str:code>/", BusinessCurrencyDetailView.as_view()),
+    path("<str:public_id>/exchange-rates/", BusinessExchangeRatesView.as_view()),
     path("<str:public_id>/members/", BusinessMembersView.as_view()),
     path("<str:public_id>/invitations/", BusinessInvitationsView.as_view()),
     path(

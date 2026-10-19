@@ -9,11 +9,13 @@ from apps.common.choices import PaymentMethod
 from ..identifiers import generate_business_public_id
 from ..models import (
     Business,
+    BusinessCurrency,
     BusinessCategory,
     BusinessCategoryMembership,
     BusinessMember,
     BusinessMemberPermission,
     BusinessPaymentMethod,
+    Currency,
 )
 from ..permissions import has_permission, validate_permission
 
@@ -25,6 +27,29 @@ DEFAULT_PAYMENT_METHODS = (
     ("Carte", PaymentMethod.CARD),
     ("Autre", PaymentMethod.OTHER),
 )
+
+DEFAULT_CURRENCIES = (
+    ("USD", "Dollar américain", "$", 2),
+    ("CDF", "Franc congolais", "FC", 2),
+    ("EUR", "Euro", "€", 2),
+)
+
+
+def ensure_currency_reference_data():
+    """Install the minimal ISO data without changing historic business amounts."""
+    for code, name, symbol, decimal_places in DEFAULT_CURRENCIES:
+        Currency.objects.get_or_create(code=code, defaults={"name": name, "symbol": symbol, "decimal_places": decimal_places})
+
+
+def ensure_primary_currency(business):
+    """Keep the transitional legacy code and the scoped currency row consistent."""
+    ensure_currency_reference_data()
+    currency = Currency.objects.get(code=business.primary_currency)
+    BusinessCurrency.objects.update_or_create(
+        business=business,
+        currency=currency,
+        defaults={"is_primary": True, "is_enabled": True},
+    )
 
 
 def ensure_default_payment_methods(business):
@@ -66,6 +91,7 @@ def create_business(identity, validated_data):
                     public_id=generate_business_public_id(),
                     **validated_data,
                 )
+                ensure_primary_currency(business)
 
                 BusinessMember.objects.create(
                     business=business,

@@ -79,7 +79,7 @@ class ProductOutputSerializer(serializers.ModelSerializer):
         fields = (
             "public_id", "name", "description", "category", "category_code", "category_name",
             "category_source", "product_type_key",
-            "internal_reference", "barcode", "selling_price", "cost_price", "currency", "attributes",
+            "internal_reference", "barcode", "selling_price", "min_price", "max_price", "is_negotiable", "cost_price", "currency", "attributes",
             "status", "created_at", "updated_at",
         )
 
@@ -94,22 +94,40 @@ class ProductWriteSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     category_code = serializers.CharField(required=False, allow_null=True, allow_blank=False)
-    currency = serializers.ChoiceField(choices=("CDF", "USD"), required=False)
+    # Currency is business-owned. The legacy field remains output-only so old
+    # products retain their historic code without accepting client overrides.
+    currency = serializers.CharField(read_only=True)
+    min_price = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0, required=False)
+    max_price = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0, required=False)
     attributes = serializers.JSONField(required=False)
 
     class Meta:
         model = Product
         fields = (
             "name", "description", "category", "category_code", "internal_reference", "barcode", "selling_price",
-            "cost_price", "currency", "attributes", "status",
+            "cost_price", "min_price", "max_price", "is_negotiable", "currency", "attributes", "status",
         )
         extra_kwargs = {
             "description": {"required": False}, "internal_reference": {"required": False},
             "barcode": {"required": False}, "cost_price": {"required": False}, "status": {"required": False},
+            "selling_price": {"required": False},
         }
 
     def validate(self, attrs):
         instance = self.instance
+        # A legacy client can still send selling_price while deployments roll out.
+        legacy_price = attrs.get("selling_price")
+        if legacy_price is not None and "min_price" not in attrs and "max_price" not in attrs:
+            attrs["min_price"] = legacy_price
+            attrs["max_price"] = legacy_price
+        if not instance and ("min_price" not in attrs or "max_price" not in attrs):
+            raise serializers.ValidationError({"min_price": "Indiquez les prix minimum et maximum."})
+        minimum = attrs.get("min_price", instance.min_price if instance else None)
+        maximum = attrs.get("max_price", instance.max_price if instance else None)
+        if minimum is not None and maximum is not None and maximum < minimum:
+            raise serializers.ValidationError({"max_price": "Le prix maximum doit être supérieur ou égal au prix minimum."})
+        if maximum is not None:
+            attrs["selling_price"] = maximum
         category_supplied = "category" in attrs
         registry_supplied = "category_code" in attrs
         category = attrs.get("category", instance.category if instance else None)
