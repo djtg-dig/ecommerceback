@@ -11,6 +11,7 @@ from apps.businesses.views import (
     BusinessInvitationAccountDeclineView,
     BusinessInvitationDeclineView,
     BusinessInvitationRecipientListView,
+    CurrencyListView,
 )
 from apps.dashboard_views import DashboardView
 from apps.profitability_views import ProfitabilitySummaryView
@@ -19,6 +20,7 @@ from apps.expense_receivable_report_views import ExpensesReportView, Receivables
 from apps.purchase_report_views import PurchasesReportView, SupplierDebtsReportView
 
 urlpatterns = [
+    path("currencies/", CurrencyListView.as_view(), name="currency-list"),
     path(
         "me/business-invitations/",
         BusinessInvitationRecipientListView.as_view(),
