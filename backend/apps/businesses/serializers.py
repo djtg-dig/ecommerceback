@@ -98,18 +98,26 @@ class BusinessSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(CategorySerializer(many=True))
     def get_categories(self, business):
-        memberships = business.category_memberships.select_related("category").all()
+        memberships = self._category_memberships(business)
         categories = [membership.category for membership in memberships]
 
         return CategorySerializer(categories, many=True).data
 
     @extend_schema_field(CategorySerializer(allow_null=True))
     def get_primary_category(self, business):
-        membership = business.category_memberships.select_related("category").filter(
-            is_primary=True
-        ).first()
+        membership = next(
+            (item for item in self._category_memberships(business) if item.is_primary),
+            None,
+        )
 
         return CategorySerializer(membership.category).data if membership else None
+
+    @staticmethod
+    def _category_memberships(business):
+        prefetched = getattr(business, "_prefetched_category_memberships", None)
+        if prefetched is not None:
+            return prefetched
+        return business.category_memberships.select_related("category").all()
 
 
 class CurrencySerializer(serializers.ModelSerializer):

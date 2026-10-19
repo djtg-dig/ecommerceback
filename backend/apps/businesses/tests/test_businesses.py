@@ -3,13 +3,23 @@ from importlib import import_module
 import pytest
 from django.apps import apps as django_apps
 from django.core.exceptions import ValidationError
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.accounts.models import CarriIdentity
-from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
+from apps.businesses.models import (
+    Business,
+    BusinessCategory,
+    BusinessCategoryMembership,
+    BusinessMember,
+    BusinessMemberPermission,
+)
 from apps.businesses.permissions import has_permission
+from apps.businesses.serializers import BusinessSerializer
 from apps.businesses.services import grant_permission, revoke_permission
+from apps.businesses.views import accessible_with_categories
 
 
 def auth(identity):
@@ -47,6 +57,31 @@ def test_create_business_creates_owner_and_is_scoped():
         f"/api/v1/businesses/{business.public_id}/"
     )
     assert other_response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_business_list_prefetches_categories_without_serializer_n_plus_one_queries():
+    identity = CarriIdentity.objects.create(carri_subject="business-list-owner")
+    business = Business.objects.create(name="Shop")
+    BusinessMember.objects.create(
+        business=business,
+        identity=identity,
+        is_owner=True,
+        title="Gérant",
+    )
+    first = BusinessCategory.objects.create(code="FIRST", name="First", slug="first")
+    second = BusinessCategory.objects.create(code="SECOND", name="Second", slug="second")
+    BusinessCategoryMembership.objects.create(business=business, category=first, is_primary=True)
+    BusinessCategoryMembership.objects.create(business=business, category=second)
+
+    with CaptureQueriesContext(connection) as queries:
+        data = BusinessSerializer(accessible_with_categories(identity), many=True).data
+
+    assert len(data) == 1
+    assert data[0]["primary_category"]["code"] == "FIRST"
+    # One business query and one membership/category prefetch, regardless of
+    # how many categories are displayed.
+    assert len(queries) == 2
 
 
 @pytest.mark.django_db

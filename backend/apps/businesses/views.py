@@ -20,6 +20,7 @@ from .models import (
     Business,
     BusinessMedia,
     BusinessCategory,
+    BusinessCategoryMembership,
     BusinessCurrency,
     BusinessExchangeRate,
     BusinessMember,
@@ -94,6 +95,17 @@ def accessible(identity):
         members__identity=identity,
         members__status="ACTIVE",
     ).distinct()
+
+
+def accessible_with_categories(identity):
+    """Load the category projection once for the business list/detail serializer."""
+    return accessible(identity).prefetch_related(
+        Prefetch(
+            "category_memberships",
+            queryset=BusinessCategoryMembership.objects.select_related("category"),
+            to_attr="_prefetched_category_memberships",
+        )
+    )
 
 
 class CurrencyListView(APIView):
@@ -342,7 +354,7 @@ def member_queryset(business):
 
 class BusinessesView(APIView):
     def get(self, request):
-        businesses = accessible(request.user)
+        businesses = accessible_with_categories(request.user)
 
         return Response(BusinessSerializer(businesses, many=True).data)
 
@@ -360,7 +372,7 @@ class BusinessesView(APIView):
 
 class BusinessDetailView(APIView):
     def get_object(self, request, public_id):
-        return accessible(request.user).filter(public_id=public_id).first()
+        return accessible_with_categories(request.user).filter(public_id=public_id).first()
 
     def get(self, request, public_id):
         business = self.get_object(request, public_id)
