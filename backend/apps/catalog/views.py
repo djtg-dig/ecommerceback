@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 
 from apps.businesses.models import Business, BusinessMemberPermission
 from apps.businesses.permissions import require_permission
+from apps.common.media import MediaStorageError
 
 from .models import Product, ProductCategory, ProductVariant, ProductMedia
 from .media import ProductMediaSerializer, create_product_media, delete_product_media, update_product_media
@@ -127,6 +128,14 @@ class BusinessProductMixin:
     @staticmethod
     def forbidden():
         return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+
+def media_error_response(error):
+    """Translate storage failures without exposing the provider's internals."""
+    return Response(
+        {"code": error.code, "detail": error.detail, "message": error.detail},
+        status=error.status_code,
+    )
 
 
 class ProductListCreateView(BusinessProductMixin, APIView):
@@ -371,7 +380,15 @@ class ProductMediaListCreateView(BusinessProductMixin, APIView):
         upload = request.FILES.get("file")
         if upload is None:
             return Response({"file": "Un fichier est requis."}, status=status.HTTP_400_BAD_REQUEST)
-        item = create_product_media(product=product, upload=upload, media_type=media_type)
+        try:
+            item = create_product_media(product=product, upload=upload, media_type=media_type)
+        except DjangoValidationError as exc:
+            return Response(
+                exc.message_dict if hasattr(exc, "message_dict") else {"detail": exc.messages},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except MediaStorageError as exc:
+            return media_error_response(exc)
         return Response(ProductMediaSerializer(item).data, status=status.HTTP_201_CREATED)
 
 

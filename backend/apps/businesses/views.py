@@ -29,6 +29,7 @@ from .models import (
     Currency,
 )
 from .media import BusinessMediaSerializer, delete_business_media, replace_business_media
+from apps.common.media import MediaStorageError
 from .permissions import (
     atomic_permission_values,
     effective_permissions,
@@ -129,7 +130,18 @@ class BusinessMediaView(APIView):
         upload = request.FILES.get("file")
         if upload is None:
             raise serializers.ValidationError({"file": "Un fichier est requis."})
-        item = replace_business_media(business=business, media_type=self.media_type(media_type), upload=upload)
+        try:
+            item = replace_business_media(business=business, media_type=self.media_type(media_type), upload=upload)
+        except DjangoValidationError as exc:
+            return Response(
+                exc.message_dict if hasattr(exc, "message_dict") else {"detail": exc.messages},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except MediaStorageError as exc:
+            return Response(
+                {"code": exc.code, "detail": exc.detail, "message": exc.detail},
+                status=exc.status_code,
+            )
         return Response(BusinessMediaSerializer(item).data)
 
     def delete(self, request, public_id, media_type):

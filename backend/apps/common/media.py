@@ -7,6 +7,7 @@ development can start normally until a user actually attempts an upload.
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import subprocess
 import tempfile
@@ -19,8 +20,25 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 
 
+logger = logging.getLogger(__name__)
+
+
 IMAGE_FORMATS = {"JPEG": "jpg", "PNG": "png", "WEBP": "webp"}
 VIDEO_FORMATS = {"mov", "mp4", "webm"}
+
+
+class MediaStorageError(Exception):
+    """A safe, API-facing Cloudinary failure that contains no provider secret."""
+
+    code = "media_storage_unavailable"
+    detail = "Le service de stockage des médias est temporairement indisponible."
+    status_code = 503
+
+
+class MediaStoragePermissionError(MediaStorageError):
+    code = "media_storage_permission_denied"
+    detail = "Le service de stockage n’autorise pas la création de ce média."
+    status_code = 502
 
 
 @dataclass(frozen=True)
@@ -131,10 +149,11 @@ def validate_video(upload: BinaryIO) -> MediaMetadata:
 
 def upload_to_cloudinary(upload: BinaryIO, *, folder: str, resource_type: str, metadata: MediaMetadata) -> dict:
     if not settings.CLOUDINARY_ENABLED:
-        raise ValidationError({"file": "Le stockage média n’est pas configuré sur cet environnement."})
+        raise MediaStorageError("Cloudinary is not configured.")
     try:
         import cloudinary
         import cloudinary.uploader
+        from cloudinary.exceptions import AuthorizationRequired, NotAllowed, RateLimited
 
         cloudinary.config(
             cloud_name=settings.CLOUDINARY_CLOUD_NAME,
@@ -144,8 +163,15 @@ def upload_to_cloudinary(upload: BinaryIO, *, folder: str, resource_type: str, m
         )
         _rewind(upload)
         return cloudinary.uploader.upload(upload, folder=folder, resource_type=resource_type, use_filename=False, unique_filename=True)
+    except (NotAllowed, AuthorizationRequired) as exc:
+        logger.warning("Cloudinary refused media creation for resource_type=%s", resource_type, exc_info=True)
+        raise MediaStoragePermissionError("Cloudinary denied create permission.") from exc
+    except RateLimited as exc:
+        logger.warning("Cloudinary rate limit reached for resource_type=%s", resource_type, exc_info=True)
+        raise MediaStorageError("Cloudinary rate limit reached.") from exc
     except Exception as exc:  # SDK exceptions vary by release and network transport.
-        raise ValidationError({"file": "Le téléversement du média a échoué."}) from exc
+        logger.exception("Cloudinary media upload failed for resource_type=%s", resource_type)
+        raise MediaStorageError("Cloudinary media upload failed.") from exc
 
 
 def destroy_cloudinary(public_id: str, *, resource_type: str, required_prefix: str) -> None:
