@@ -8,6 +8,7 @@ from django.core.exceptions import ValidationError
 from apps.catalog.models import ProductMedia
 from apps.catalog.models import Product, ProductCategory
 from apps.catalog.media import delete_product_media, update_product_media
+from apps.catalog.serializers import ProductOutputSerializer
 from apps.catalog.views import media_error_response
 from apps.businesses.models import Business
 from apps.common.media import MediaStorageError, MediaStoragePermissionError, upload_to_cloudinary, validate_image, validate_video
@@ -40,6 +41,18 @@ def test_video_cannot_be_primary_even_before_database_constraints():
     media = ProductMedia(media_type=ProductMedia.MediaType.VIDEO, resource_type="video", is_primary=True)
     with pytest.raises(ValidationError):
         media.clean()
+
+
+def test_primary_image_serializer_prefers_primary_then_first_prefetched_photo():
+    class Media:
+        def __init__(self, url, primary=False): self.secure_url, self.is_primary = url, primary
+    class ProductStub:
+        def __init__(self, media): self._prefetched_objects_cache = {"media": media}
+
+    serializer = ProductOutputSerializer()
+    assert serializer.get_primary_image_url(ProductStub([Media("https://example.test/first.jpg"), Media("https://example.test/primary.jpg", True)])) == "https://example.test/primary.jpg"
+    assert serializer.get_primary_image_url(ProductStub([Media("https://example.test/first.jpg"), Media("https://example.test/second.jpg")])) == "https://example.test/first.jpg"
+    assert serializer.get_primary_image_url(ProductStub([])) is None
 
 
 @pytest.mark.django_db

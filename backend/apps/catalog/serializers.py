@@ -79,8 +79,8 @@ class ProductOutputSerializer(serializers.ModelSerializer):
         prefetched = getattr(product, "_prefetched_objects_cache", {}).get("media")
         if prefetched is not None:
             primary = next((item for item in prefetched if item.is_primary), None)
-            return primary.secure_url if primary else None
-        item = product.media.filter(is_primary=True).only("secure_url").first()
+            return (primary or next(iter(prefetched), None)).secure_url if prefetched else None
+        item = product.media.filter(media_type="IMAGE").only("secure_url").order_by("-is_primary", "position", "created_at", "id").first()
         return item.secure_url if item else None
 
     class Meta:

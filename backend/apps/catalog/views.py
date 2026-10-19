@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError
-from django.db.models import DecimalField, Exists, F, OuterRef, Q, Subquery, Value
+from django.db.models import DecimalField, Exists, F, OuterRef, Prefetch, Q, Subquery, Value
 from django.db.models.functions import Coalesce, Trim, Upper
 from rest_framework import generics, permissions, status
 from rest_framework.pagination import PageNumberPagination
@@ -149,7 +149,14 @@ class ProductListCreateView(BusinessProductMixin, APIView):
         )
         if not business:
             return self.not_found()
-        products = Product.objects.filter(business=business).select_related("category").prefetch_related("media")
+        products = Product.objects.filter(business=business).select_related("category").prefetch_related(
+            Prefetch(
+                "media",
+                queryset=ProductMedia.objects.filter(media_type=ProductMedia.MediaType.IMAGE)
+                .only("id", "product_id", "secure_url", "is_primary", "position", "created_at")
+                .order_by("position", "created_at", "id"),
+            ),
+        )
         if value := request.query_params.get("status"):
             products = products.filter(status=value)
         if value := request.query_params.get("category"):
