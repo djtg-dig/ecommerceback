@@ -66,7 +66,22 @@ def update_product_media(*, product, media, is_primary=None, position=None):
         elif is_primary is False:
             item.is_primary = False
         if position is not None:
-            item.position = position
+            # Positions are gallery indexes, not independent values. Lock the
+            # whole product gallery so concurrent moves cannot create ties.
+            ordered = list(
+                ProductMedia.objects.select_for_update()
+                .filter(product=product)
+                .order_by("position", "created_at", "id")
+            )
+            current_index = next(index for index, candidate in enumerate(ordered) if candidate.pk == item.pk)
+            target_index = min(position, len(ordered) - 1)
+            moved = ordered.pop(current_index)
+            ordered.insert(target_index, moved)
+            for index, candidate in enumerate(ordered):
+                if candidate.position != index:
+                    ProductMedia.objects.filter(pk=candidate.pk).update(position=index)
+                candidate.position = index
+            item.position = target_index
         item.full_clean()
         item.save(update_fields=("is_primary", "position", "updated_at"))
     return item
@@ -84,4 +99,10 @@ def delete_product_media(*, product, media) -> None:
             if next_image:
                 next_image.is_primary = True
                 next_image.save(update_fields=("is_primary", "updated_at"))
+        # Keep future inserts and all gallery reads deterministic after a delete.
+        for index, remaining in enumerate(
+            ProductMedia.objects.select_for_update().filter(product=product).order_by("position", "created_at", "id")
+        ):
+            if remaining.position != index:
+                ProductMedia.objects.filter(pk=remaining.pk).update(position=index)
         transaction.on_commit(lambda: destroy_cloudinary(public_id, resource_type=resource_type, required_prefix=prefix))

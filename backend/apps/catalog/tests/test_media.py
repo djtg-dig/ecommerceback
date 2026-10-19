@@ -1,11 +1,15 @@
 from io import BytesIO
+from decimal import Decimal
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.exceptions import ValidationError
 
 from apps.catalog.models import ProductMedia
+from apps.catalog.models import Product, ProductCategory
+from apps.catalog.media import delete_product_media, update_product_media
 from apps.catalog.views import media_error_response
+from apps.businesses.models import Business
 from apps.common.media import MediaStorageError, MediaStoragePermissionError, upload_to_cloudinary, validate_image, validate_video
 
 
@@ -36,6 +40,29 @@ def test_video_cannot_be_primary_even_before_database_constraints():
     media = ProductMedia(media_type=ProductMedia.MediaType.VIDEO, resource_type="video", is_primary=True)
     with pytest.raises(ValidationError):
         media.clean()
+
+
+@pytest.mark.django_db
+def test_reordering_normalizes_the_whole_gallery_and_preserves_the_primary_image():
+    business = Business.objects.create(name="Media shop")
+    category = ProductCategory.objects.create(code="MEDIA_TEST", name="Media", slug="media-test")
+    product = Product.objects.create(business=business, category=category, name="Product", selling_price=Decimal("1.00"), currency="CDF")
+    first = ProductMedia.objects.create(product=product, public_id="ecommerce/products/test/first", secure_url="https://example.test/first.jpg", media_type="IMAGE", resource_type="image", is_primary=True, position=0, width=800, height=800, format="jpg", size_bytes=1)
+    video = ProductMedia.objects.create(product=product, public_id="ecommerce/products/test/video", secure_url="https://example.test/video.mp4", media_type="VIDEO", resource_type="video", is_primary=False, position=1, width=144, height=144, duration_seconds="1.000", format="mp4", size_bytes=1)
+    last = ProductMedia.objects.create(product=product, public_id="ecommerce/products/test/last", secure_url="https://example.test/last.jpg", media_type="IMAGE", resource_type="image", is_primary=False, position=2, width=800, height=800, format="jpg", size_bytes=1)
+
+    update_product_media(product=product, media=video, position=0)
+    ordered = list(product.media.order_by("position", "created_at", "id"))
+    assert [item.pk for item in ordered] == [video.pk, first.pk, last.pk]
+    assert [item.position for item in ordered] == [0, 1, 2]
+    first.refresh_from_db()
+    assert first.is_primary is True
+
+    update_product_media(product=product, media=video, position=2)
+    assert [item.pk for item in product.media.order_by("position", "created_at", "id")] == [first.pk, last.pk, video.pk]
+
+    delete_product_media(product=product, media=last)
+    assert [item.position for item in product.media.order_by("position", "created_at", "id")] == [0, 1]
 
 
 @pytest.mark.parametrize("width,height", [(256, 144), (426, 240), (640, 360), (854, 480), (1280, 720), (1920, 1080), (3840, 2160)])
