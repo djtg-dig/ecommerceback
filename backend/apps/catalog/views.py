@@ -15,7 +15,8 @@ from rest_framework.views import APIView
 from apps.businesses.models import Business, BusinessMemberPermission
 from apps.businesses.permissions import require_permission
 
-from .models import Product, ProductCategory, ProductVariant
+from .models import Product, ProductCategory, ProductVariant, ProductMedia
+from .media import ProductMediaSerializer, create_product_media, delete_product_media, update_product_media
 from .registry import get_category as get_registry_category
 from .registry import list_categories as list_registry_categories
 from .serializers import (
@@ -139,7 +140,7 @@ class ProductListCreateView(BusinessProductMixin, APIView):
         )
         if not business:
             return self.not_found()
-        products = Product.objects.filter(business=business).select_related("category")
+        products = Product.objects.filter(business=business).select_related("category").prefetch_related("media")
         if value := request.query_params.get("status"):
             products = products.filter(status=value)
         if value := request.query_params.get("category"):
@@ -343,6 +344,61 @@ class ProductDetailView(BusinessProductMixin, APIView):
                 {"detail": "Ce produit est référencé et ne peut pas être supprimé."},
                 status=status.HTTP_409_CONFLICT,
             )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ProductMediaListCreateView(BusinessProductMixin, APIView):
+    """Tenant-scoped product gallery; files are validated by the media service."""
+
+    def _product(self, request, business_public_id, product_public_id, permission, *, write=False):
+        business = self.get_business(request, business_public_id, permission, write=write)
+        product = self.get_product(business, product_public_id) if business else None
+        return business, product
+
+    def get(self, request, business_public_id, product_public_id):
+        _, product = self._product(request, business_public_id, product_public_id, BusinessMemberPermission.Permission.PRODUCT_VIEW)
+        if not product:
+            return self.not_found()
+        return Response(ProductMediaSerializer(product.media.all(), many=True).data)
+
+    def post(self, request, business_public_id, product_public_id):
+        _, product = self._product(request, business_public_id, product_public_id, BusinessMemberPermission.Permission.PRODUCT_UPDATE, write=True)
+        if not product:
+            return self.not_found()
+        media_type = str(request.data.get("media_type", "")).upper()
+        if media_type not in ProductMedia.MediaType.values:
+            return Response({"media_type": "Choisissez IMAGE ou VIDEO."}, status=status.HTTP_400_BAD_REQUEST)
+        upload = request.FILES.get("file")
+        if upload is None:
+            return Response({"file": "Un fichier est requis."}, status=status.HTTP_400_BAD_REQUEST)
+        item = create_product_media(product=product, upload=upload, media_type=media_type)
+        return Response(ProductMediaSerializer(item).data, status=status.HTTP_201_CREATED)
+
+
+class ProductMediaDetailView(ProductMediaListCreateView):
+    def item(self, product, media_id):
+        return ProductMedia.objects.filter(product=product, id=media_id).first()
+
+    def patch(self, request, business_public_id, product_public_id, media_id):
+        _, product = self._product(request, business_public_id, product_public_id, BusinessMemberPermission.Permission.PRODUCT_UPDATE, write=True)
+        media = self.item(product, media_id) if product else None
+        if not media:
+            return self.not_found()
+        is_primary = request.data.get("is_primary") if "is_primary" in request.data else None
+        position = request.data.get("position") if "position" in request.data else None
+        if is_primary is not None and not isinstance(is_primary, bool):
+            return Response({"is_primary": "Boolean attendu."}, status=status.HTTP_400_BAD_REQUEST)
+        if position is not None and (not isinstance(position, int) or position < 0):
+            return Response({"position": "Entier positif attendu."}, status=status.HTTP_400_BAD_REQUEST)
+        item = update_product_media(product=product, media=media, is_primary=is_primary, position=position)
+        return Response(ProductMediaSerializer(item).data)
+
+    def delete(self, request, business_public_id, product_public_id, media_id):
+        _, product = self._product(request, business_public_id, product_public_id, BusinessMemberPermission.Permission.PRODUCT_UPDATE, write=True)
+        media = self.item(product, media_id) if product else None
+        if not media:
+            return self.not_found()
+        delete_product_media(product=product, media=media)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

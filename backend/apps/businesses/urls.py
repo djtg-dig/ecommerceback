@@ -4,6 +4,7 @@ from django.urls import path
 
 from .views import (
     BusinessDetailView,
+    BusinessMediaView,
     BusinessCurrenciesView,
     BusinessCurrencyDetailView,
     BusinessExchangeRatesView,
@@ -29,6 +30,7 @@ urlpatterns = [
     path("", BusinessesView.as_view()),
     path("<str:public_id>/my-permissions/", BusinessMyPermissionsView.as_view()),
     path("<str:public_id>/", BusinessDetailView.as_view()),
+    path("<str:public_id>/media/<str:media_type>/", BusinessMediaView.as_view()),
     path("<str:public_id>/currencies/", BusinessCurrenciesView.as_view()),
     path("<str:public_id>/currencies/<str:code>/", BusinessCurrencyDetailView.as_view()),
     path("<str:public_id>/exchange-rates/", BusinessExchangeRatesView.as_view()),

@@ -1,6 +1,7 @@
 """Shared Django settings for all environments."""
 
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -97,6 +98,26 @@ USE_I18N = True
 USE_TZ = True
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Cloudinary is deliberately configured from the environment only.  Media
+# records keep secure URLs and public ids, rather than Django FileFields, so
+# database transactions remain independent from the remote storage service.
+CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME", "")
+CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY", "")
+CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET", "")
+CLOUDINARY_SECURE = True
+# A test process must never upload to a real tenant, even when a developer's
+# shell happens to contain Cloudinary credentials.
+CLOUDINARY_ENABLED = (
+    "test" not in sys.argv
+    and "pytest" not in sys.modules
+    and all((CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET))
+)
+ECOMMERCE_MEDIA_IMAGE_MAX_BYTES = int(os.getenv("ECOMMERCE_MEDIA_IMAGE_MAX_BYTES", str(8 * 1024 * 1024)))
+ECOMMERCE_MEDIA_VIDEO_MAX_BYTES = int(os.getenv("ECOMMERCE_MEDIA_VIDEO_MAX_BYTES", str(50 * 1024 * 1024)))
+ECOMMERCE_PRODUCT_IMAGE_LIMIT = int(os.getenv("ECOMMERCE_PRODUCT_IMAGE_LIMIT", "10"))
+ECOMMERCE_PRODUCT_VIDEO_LIMIT = int(os.getenv("ECOMMERCE_PRODUCT_VIDEO_LIMIT", "3"))
+ECOMMERCE_PRODUCT_MEDIA_LIMIT = int(os.getenv("ECOMMERCE_PRODUCT_MEDIA_LIMIT", "13"))
 
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
 CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS")

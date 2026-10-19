@@ -18,6 +18,7 @@ from rest_framework.views import APIView
 
 from .models import (
     Business,
+    BusinessMedia,
     BusinessCategory,
     BusinessCurrency,
     BusinessExchangeRate,
@@ -27,6 +28,7 @@ from .models import (
     BusinessPaymentMethod,
     Currency,
 )
+from .media import BusinessMediaSerializer, delete_business_media, replace_business_media
 from .permissions import (
     atomic_permission_values,
     effective_permissions,
@@ -98,6 +100,43 @@ class CurrencyListView(APIView):
     def get(self, request):
         ensure_currency_reference_data()
         return Response(CurrencySerializer(Currency.objects.filter(is_active=True), many=True).data)
+
+
+class BusinessMediaView(APIView):
+    """Read, replace or remove one branding slot without exposing storage secrets."""
+
+    def get_business(self, request, public_id, *, write=False):
+        business = Business.objects.filter(public_id=public_id).first()
+        if business is None:
+            raise NotFound("Not found.")
+        require_permission(request.user, business, BusinessMemberPermission.Permission.BUSINESS_UPDATE, write=write)
+        return business
+
+    @staticmethod
+    def media_type(value):
+        normalized = value.upper()
+        if normalized not in BusinessMedia.MediaType.values:
+            raise NotFound("Not found.")
+        return normalized
+
+    def get(self, request, public_id, media_type):
+        business = self.get_business(request, public_id)
+        item = BusinessMedia.objects.filter(business=business, media_type=self.media_type(media_type)).first()
+        return Response(BusinessMediaSerializer(item).data if item else None)
+
+    def patch(self, request, public_id, media_type):
+        business = self.get_business(request, public_id, write=True)
+        upload = request.FILES.get("file")
+        if upload is None:
+            raise serializers.ValidationError({"file": "Un fichier est requis."})
+        item = replace_business_media(business=business, media_type=self.media_type(media_type), upload=upload)
+        return Response(BusinessMediaSerializer(item).data)
+
+    def delete(self, request, public_id, media_type):
+        business = self.get_business(request, public_id, write=True)
+        if not delete_business_media(business=business, media_type=self.media_type(media_type)):
+            raise NotFound("Not found.")
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class BusinessCurrenciesView(APIView):

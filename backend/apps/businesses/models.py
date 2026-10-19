@@ -77,6 +77,32 @@ class Business(models.Model):
         super().save(*args, **kwargs)
 
 
+class BusinessMedia(models.Model):
+    """One securely hosted branding image for each supported business slot."""
+
+    class MediaType(models.TextChoices):
+        LOGO = "LOGO", "Logo"
+        BANNER = "BANNER", "Banner"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name="media")
+    media_type = models.CharField(max_length=10, choices=MediaType.choices)
+    public_id = models.CharField(max_length=512, unique=True)
+    secure_url = models.URLField(max_length=1200)
+    width = models.PositiveIntegerField()
+    height = models.PositiveIntegerField()
+    format = models.CharField(max_length=16)
+    size_bytes = models.PositiveBigIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("media_type",)
+        constraints = [
+            models.UniqueConstraint(fields=("business", "media_type"), name="business_media_one_per_slot"),
+        ]
+
+
 class Currency(models.Model):
     """Platform currency reference data. Amounts always retain their own code."""
 

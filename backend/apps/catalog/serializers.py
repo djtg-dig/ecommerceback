@@ -55,6 +55,7 @@ class ProductOutputSerializer(serializers.ModelSerializer):
     category_name = serializers.SerializerMethodField()
     category_source = serializers.SerializerMethodField()
     product_type_key = serializers.SerializerMethodField()
+    primary_image_url = serializers.SerializerMethodField()
 
     def _resolved_category(self, product):
         cache_name = "_resolved_category_for_serialization"
@@ -74,13 +75,21 @@ class ProductOutputSerializer(serializers.ModelSerializer):
     def get_product_type_key(self, product):
         return self._resolved_category(product).product_type_key
 
+    def get_primary_image_url(self, product):
+        prefetched = getattr(product, "_prefetched_objects_cache", {}).get("media")
+        if prefetched is not None:
+            primary = next((item for item in prefetched if item.is_primary), None)
+            return primary.secure_url if primary else None
+        item = product.media.filter(is_primary=True).only("secure_url").first()
+        return item.secure_url if item else None
+
     class Meta:
         model = Product
         fields = (
             "public_id", "name", "description", "category", "category_code", "category_name",
             "category_source", "product_type_key",
             "internal_reference", "barcode", "selling_price", "min_price", "max_price", "is_negotiable", "cost_price", "currency", "attributes",
-            "status", "created_at", "updated_at",
+            "status", "primary_image_url", "created_at", "updated_at",
         )
 
 

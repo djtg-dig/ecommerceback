@@ -243,6 +243,43 @@ class Product(models.Model):
         return super().save(*args, **kwargs)
 
 
+class ProductMedia(models.Model):
+    """Cloudinary metadata for a product image or video; no binary lives in PostgreSQL."""
+
+    class MediaType(models.TextChoices):
+        IMAGE = "IMAGE", "Image"
+        VIDEO = "VIDEO", "Video"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    public_id = models.CharField(max_length=512, unique=True)
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="media")
+    media_type = models.CharField(max_length=8, choices=MediaType.choices)
+    resource_type = models.CharField(max_length=10, choices=(("image", "image"), ("video", "video")))
+    secure_url = models.URLField(max_length=1200)
+    is_primary = models.BooleanField(default=False)
+    position = models.PositiveIntegerField(default=0)
+    width = models.PositiveIntegerField()
+    height = models.PositiveIntegerField()
+    duration_seconds = models.DecimalField(max_digits=8, decimal_places=3, null=True, blank=True)
+    format = models.CharField(max_length=16)
+    size_bytes = models.PositiveBigIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("position", "created_at", "id")
+        constraints = [
+            models.UniqueConstraint(fields=("product",), condition=models.Q(is_primary=True), name="catalog_product_media_one_primary"),
+            models.CheckConstraint(condition=models.Q(is_primary=False) | models.Q(media_type="IMAGE"), name="catalog_primary_media_is_image"),
+            models.CheckConstraint(condition=models.Q(media_type="IMAGE", resource_type="image") | models.Q(media_type="VIDEO", resource_type="video"), name="catalog_product_media_resource_matches_type"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.is_primary and self.media_type != self.MediaType.IMAGE:
+            raise ValidationError({"is_primary": "Seule une image peut être principale."})
+
+
 class ProductVariant(models.Model):
     """A sellable option combination whose prices optionally override its product."""
 
