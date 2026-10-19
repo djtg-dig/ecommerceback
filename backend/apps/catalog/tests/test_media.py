@@ -6,7 +6,7 @@ from django.core.exceptions import ValidationError
 
 from apps.catalog.models import ProductMedia
 from apps.catalog.views import media_error_response
-from apps.common.media import MediaStorageError, MediaStoragePermissionError, upload_to_cloudinary, validate_image
+from apps.common.media import MediaStorageError, MediaStoragePermissionError, upload_to_cloudinary, validate_image, validate_video
 
 
 def image_file(width, height, image_format="PNG"):
@@ -36,6 +36,51 @@ def test_video_cannot_be_primary_even_before_database_constraints():
     media = ProductMedia(media_type=ProductMedia.MediaType.VIDEO, resource_type="video", is_primary=True)
     with pytest.raises(ValidationError):
         media.clean()
+
+
+@pytest.mark.parametrize("width,height", [(256, 144), (426, 240), (640, 360), (854, 480), (1280, 720), (1920, 1080), (3840, 2160)])
+def test_valid_video_is_accepted_at_any_resolution(monkeypatch, width, height):
+    upload = SimpleUploadedFile("video.mp4", b"video", content_type="video/mp4")
+    monkeypatch.setattr("apps.common.media.shutil.which", lambda _: "ffprobe")
+    monkeypatch.setattr("apps.common.media.subprocess.run", lambda *args, **kwargs: type("Result", (), {"returncode": 0, "stdout": '{"format":{"format_name":"mp4","duration":"1"},"streams":[{"codec_type":"video","width":%d,"height":%d}]}' % (width, height)})())
+
+    metadata = validate_video(upload)
+
+    assert (metadata.width, metadata.height) == (width, height)
+    assert metadata.resource_type == "video"
+
+
+def _ffprobe(monkeypatch, payload, returncode=0):
+    monkeypatch.setattr("apps.common.media.shutil.which", lambda _: "ffprobe")
+    monkeypatch.setattr("apps.common.media.subprocess.run", lambda *args, **kwargs: type("Result", (), {"returncode": returncode, "stdout": payload})())
+
+
+def test_video_larger_than_50_mb_is_rejected():
+    upload = SimpleUploadedFile("large.mp4", b"x", content_type="video/mp4")
+    upload.size = 50 * 1024 * 1024 + 1
+    with pytest.raises(ValidationError, match="50 Mo"):
+        validate_video(upload)
+
+
+def test_video_longer_than_60_seconds_is_rejected(monkeypatch):
+    _ffprobe(monkeypatch, '{"format":{"format_name":"mp4","duration":"60.001"},"streams":[{"codec_type":"video","width":3840,"height":2160}]}')
+    with pytest.raises(ValidationError, match="60 secondes"):
+        validate_video(SimpleUploadedFile("long.mp4", b"video", content_type="video/mp4"))
+
+
+def test_file_without_video_stream_is_rejected(monkeypatch):
+    _ffprobe(monkeypatch, '{"format":{"format_name":"mp4","duration":"1"},"streams":[{"codec_type":"audio"}]}')
+    with pytest.raises(ValidationError, match="piste vidéo"):
+        validate_video(SimpleUploadedFile("audio.mp4", b"audio", content_type="video/mp4"))
+
+
+def test_corrupt_or_unsupported_video_is_rejected(monkeypatch):
+    _ffprobe(monkeypatch, "", returncode=1)
+    with pytest.raises(ValidationError, match="vidéo valide"):
+        validate_video(SimpleUploadedFile("corrupt.mp4", b"bad", content_type="video/mp4"))
+    _ffprobe(monkeypatch, '{"format":{"format_name":"avi","duration":"1"},"streams":[{"codec_type":"video","width":144,"height":144}]}')
+    with pytest.raises(ValidationError, match="Formats vidéo"):
+        validate_video(SimpleUploadedFile("unsupported.avi", b"video", content_type="video/avi"))
 
 
 def test_cloudinary_not_allowed_is_safe_storage_permission_error(monkeypatch, settings):

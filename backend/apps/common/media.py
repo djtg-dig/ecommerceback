@@ -141,8 +141,6 @@ def validate_video(upload: BinaryIO) -> MediaMetadata:
         raise ValidationError({"file": "Formats vidéo acceptés : MP4, WebM ou MOV."})
     if duration <= 0 or duration > Decimal("60"):
         raise ValidationError({"file": "La durée de la vidéo ne peut pas dépasser 60 secondes."})
-    if min(width, height) < 480 or max(width, height) > 1920:
-        raise ValidationError({"file": "La résolution vidéo doit être comprise entre 480p et 1080p."})
     format_name = "webm" if "webm" in formats else "mov" if "mov" in formats else "mp4"
     return MediaMetadata("VIDEO", "video", width, height, format_name, size, duration.quantize(Decimal("0.001")))
 
