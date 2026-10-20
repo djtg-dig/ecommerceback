@@ -5,7 +5,7 @@ from datetime import datetime, time
 from decimal import Decimal
 
 from django.db import IntegrityError
-from django.db.models import Max, Q
+from django.db.models import BooleanField, Case, F, Max, Q, Value, When
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import status
@@ -66,7 +66,14 @@ class InventoryListCreateView(BusinessInventoryMixin, APIView):
         )
         if not business:
             return self.not_found()
-        items = InventoryItem.objects.filter(business=business).select_related("product", "variant__product").annotate(last_movement_at=Max("movements__created_at"))
+        items = InventoryItem.objects.filter(business=business).select_related("product", "variant__product").annotate(
+            last_movement_at=Max("movements__created_at"),
+            available_db=F("quantity") - F("reserved_quantity"),
+            low_stock_db=Case(
+                When(low_stock_threshold__isnull=False, quantity__lte=F("reserved_quantity") + F("low_stock_threshold"), then=Value(True)),
+                default=Value(False), output_field=BooleanField(),
+            ),
+        )
         if product := request.query_params.get("product"):
             items = items.filter(product__public_id=product)
         if variant := request.query_params.get("variant"):
@@ -78,24 +85,26 @@ class InventoryListCreateView(BusinessInventoryMixin, APIView):
                 | Q(variant__product__name__icontains=query)
                 | Q(variant__internal_reference__icontains=query)
             )
-        values = list(items)
         if request.query_params.get("low_stock", "").lower() == "true":
-            values = [item for item in values if item.is_low_stock]
+            items = items.filter(low_stock_db=True)
         stock_status = request.query_params.get("status")
         if stock_status:
             valid_statuses = {"AVAILABLE", "LOW_STOCK", "OUT_OF_STOCK"}
             if stock_status not in valid_statuses:
                 return Response({"status": ["État de stock invalide."]}, status=400)
-            values = [
-                item for item in values
-                if InventoryItemSerializer().get_stock_status(item) == stock_status
-            ]
+            if stock_status == "OUT_OF_STOCK": items = items.filter(available_db=0)
+            elif stock_status == "LOW_STOCK": items = items.filter(available_db__gt=0, low_stock_db=True)
+            else: items = items.filter(available_db__gt=0, low_stock_db=False)
         ordering = request.query_params.get("ordering", "")
         if ordering:
             if ordering not in {"quantity", "-quantity"}:
                 return Response({"ordering": ["Tri d’inventaire invalide."]}, status=400)
-            values.sort(key=lambda item: item.available_quantity, reverse=ordering.startswith("-"))
-        return Response(InventoryItemSerializer(values, many=True).data)
+            items = items.order_by("-available_db" if ordering.startswith("-") else "available_db", "public_id")
+        else:
+            items = items.order_by("public_id")
+        paginator = InventoryPagination()
+        page = paginator.paginate_queryset(items, request)
+        return paginator.get_paginated_response(InventoryItemSerializer(page, many=True).data)
 
     def post(self, request, business_public_id):
         business = self.get_business(
@@ -212,9 +221,14 @@ class InventorySummaryView(BusinessInventoryMixin, APIView):
 
 
 class MovementPagination(PageNumberPagination):
-    page_size = 20
-    page_size_query_param = "page_size"
-    max_page_size = 100
+    page_size = 10
+    page_size_query_param = None
+    ordering = ("-created_at", "-public_id")
+
+
+class InventoryPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = None
 
 
 class BusinessStockMovementHistoryView(BusinessInventoryMixin, APIView):
@@ -255,7 +269,7 @@ class BusinessStockMovementHistoryView(BusinessInventoryMixin, APIView):
                 moment = timezone.make_aware(datetime.combine(value, boundary))
                 movements = movements.filter(**{lookup: moment})
         paginator = MovementPagination()
-        page = paginator.paginate_queryset(movements, request)
+        page = paginator.paginate_queryset(movements.order_by("-created_at", "-public_id"), request)
         return paginator.get_paginated_response(
             StockMovementSerializer(page, many=True).data
         )

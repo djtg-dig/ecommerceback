@@ -73,8 +73,10 @@ def validate_image(upload: BinaryIO, *, kind: str) -> MediaMetadata:
     from PIL import Image, UnidentifiedImageError
 
     limits = {
-        "logo": (2 * 1024 * 1024, 256, 256, 3000, 3000),
-        "banner": (5 * 1024 * 1024, 1200, 400, 6000, 3000),
+        # Les images d'identité sont normalisées par le client avant envoi.
+        # Une faible définition peut être floue, mais n'est pas un risque de sécurité.
+        "logo": (2 * 1024 * 1024, 1, 1, 3000, 3000),
+        "banner": (5 * 1024 * 1024, 1, 1, 6000, 3000),
         "product": (settings.ECOMMERCE_MEDIA_IMAGE_MAX_BYTES, 800, 800, 6000, 6000),
     }
     maximum, min_width, min_height, max_width, max_height = limits[kind]
