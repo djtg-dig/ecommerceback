@@ -1,11 +1,26 @@
 import uuid
 
 from django.conf import settings
+from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.settings import api_settings
 
 from .models import CarriIdentity
+
+
+class UserPreferencesSerializer(serializers.ModelSerializer):
+    """Expose exclusivement les préférences propres à l'identité connectée."""
+
+    preferred_language = serializers.ChoiceField(
+        choices=CarriIdentity.PreferredLanguage.choices,
+        allow_blank=True,
+        required=False,
+    )
+
+    class Meta:
+        model = CarriIdentity
+        fields = ("preferred_language",)
 
 
 class EcommerceTokenRefreshSerializer(TokenRefreshSerializer):

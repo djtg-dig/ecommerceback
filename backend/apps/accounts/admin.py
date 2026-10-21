@@ -10,6 +10,7 @@ class CarriIdentityAdmin(admin.ModelAdmin):
         "carri_subject",
         "verified_email",
         "email_verified",
+        "preferred_language",
         "linked_at",
         "last_login_at",
     )

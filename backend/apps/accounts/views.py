@@ -18,6 +18,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from apps.api_clients.openapi import HMAC_ONLY, described
 
 from .models import CarriIdentity, IDTokenReplay, OAuthHandoff, OAuthLoginAttempt
+from .serializers import UserPreferencesSerializer
 from .services.oidc import (
     InvalidOIDCToken,
     OIDCError,
@@ -503,6 +504,23 @@ class CurrentIdentityView(APIView):
     def get(self, request):
         return Response({"id": str(request.user.id), "carri_subject": request.user.carri_subject})
 
+
+class UserPreferencesView(APIView):
+    """Lit ou modifie la préférence de langue de l'identité authentifiée.
+
+    L'URL n'accepte aucun identifiant : elle ne peut donc jamais viser les
+    préférences d'une autre identité, même dans un contexte multi-entreprises.
+    """
+
+    def get(self, request):
+        return Response(UserPreferencesSerializer(request.user).data)
+
+    def patch(self, request):
+        serializer = UserPreferencesSerializer(request.user, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
 # Explicit APIView annotations keep authentication flows visible without exposing
 # provider secrets, authorization codes or PKCE verifier values.
 from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
@@ -590,3 +608,14 @@ CurrentIdentityView.get = extend_schema(
     tags=["Authentication"], operation_id="current_ecommerce_identity",
     responses={200: inline_serializer("CurrentIdentity", {"id": serializers.UUIDField(), "carri_subject": serializers.CharField()}), 401: _error_schema},
 )(CurrentIdentityView.get)
+UserPreferencesView.get = extend_schema(
+    tags=["User preferences"], operation_id="get_user_preferences",
+    responses={200: UserPreferencesSerializer, 401: _error_schema},
+    description="Retourne les préférences de l'identité E-commerce authentifiée.",
+)(UserPreferencesView.get)
+UserPreferencesView.patch = extend_schema(
+    tags=["User preferences"], operation_id="update_user_preferences",
+    request=UserPreferencesSerializer,
+    responses={200: UserPreferencesSerializer, 400: _error_schema, 401: _error_schema},
+    description="Met à jour les préférences de l'identité E-commerce authentifiée.",
+)(UserPreferencesView.patch)

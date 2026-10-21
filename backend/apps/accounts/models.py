@@ -10,6 +10,10 @@ from django.utils import timezone
 
 
 class CarriIdentity(models.Model):
+    class PreferredLanguage(models.TextChoices):
+        FRENCH = "fr", "Français"
+        ENGLISH = "en", "English"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     carri_subject = models.CharField(max_length=255, unique=True)
     verified_email = models.EmailField(blank=True, default="", db_index=True)
@@ -19,6 +23,14 @@ class CarriIdentity(models.Model):
     linked_at = models.DateTimeField(auto_now_add=True)
     last_login_at = models.DateTimeField(null=True, blank=True)
     session_version = models.PositiveBigIntegerField(default=1)
+    # La valeur vide distingue les comptes existants non initialisés d'un choix
+    # explicite du français. Elle est résolue une seule fois lors de la connexion.
+    preferred_language = models.CharField(
+        max_length=2,
+        choices=PreferredLanguage.choices,
+        blank=True,
+        default="",
+    )
 
     class Meta:
         ordering = ["carri_subject"]

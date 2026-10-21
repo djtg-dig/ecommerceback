@@ -16,7 +16,7 @@ class EcommerceTokenRefreshView(TokenRefreshView):
     )(TokenRefreshView.post)
 
 
-from .views import CarriCallbackView, CarriHandoffConsumeView, CarriLoginView, CarriMobileExchangeView, CurrentIdentityView, EcommerceLogoutView
+from .views import CarriCallbackView, CarriHandoffConsumeView, CarriLoginView, CarriMobileExchangeView, CurrentIdentityView, EcommerceLogoutView, UserPreferencesView
 
 urlpatterns = [
     path("carri/mobile/exchange/", CarriMobileExchangeView.as_view(), name="carri-mobile-exchange"),
@@ -25,5 +25,6 @@ urlpatterns = [
     path("carri/handoff/consume/", CarriHandoffConsumeView.as_view(), name="carri-handoff-consume"),
     path("logout/", EcommerceLogoutView.as_view(), name="ecommerce-logout"),
     path("me/", CurrentIdentityView.as_view(), name="current-identity"),
+    path("me/preferences/", UserPreferencesView.as_view(), name="user-preferences"),
     path("token/refresh/", EcommerceTokenRefreshView.as_view(), name="token-refresh"),
 ]
