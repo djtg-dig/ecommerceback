@@ -147,6 +147,24 @@ class AttributeOption(models.Model):
         return self.label
 
 
+class UnitOfMeasure(models.Model):
+    """Global, code-based unit used only to describe a product's listed price."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    code = models.CharField(max_length=30, unique=True)
+    name = models.CharField(max_length=100)
+    symbol = models.CharField(max_length=20)
+    category = models.CharField(max_length=30)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("category", "code")
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.symbol})"
+
+
 class Product(models.Model):
     """A business-owned catalog item; it deliberately contains no stock balance."""
 
@@ -170,6 +188,7 @@ class Product(models.Model):
     description = models.TextField(blank=True)
     internal_reference = models.CharField(max_length=100, null=True, blank=True)
     barcode = models.CharField(max_length=128, null=True, blank=True)
+    unit_of_measure = models.ForeignKey(UnitOfMeasure, on_delete=models.PROTECT, related_name="products")
     selling_price = models.DecimalField(max_digits=14, decimal_places=2)
     min_price = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     max_price = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
@@ -234,6 +253,10 @@ class Product(models.Model):
             self.category_code = None
         if not self.currency and self.business_id:
             self.currency = self.business.primary_currency
+        if not self.unit_of_measure_id:
+            # Keeps direct model construction and legacy callers compatible after
+            # the reference-data migration has supplied the mandatory PCS row.
+            self.unit_of_measure = UnitOfMeasure.objects.get(code="PCS")
         if self.min_price is None:
             self.min_price = self.selling_price
         if self.max_price is None:

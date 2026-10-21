@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from .models import Product, ProductCategory, ProductVariant
+from .models import Product, ProductCategory, ProductVariant, UnitOfMeasure
 from .registry import get_category as get_registry_category
 from .registry import validate_attributes as validate_registry_attributes
 from .services import ensure_business_sku_available, validate_leaf_category, validate_product_attributes
@@ -56,6 +56,8 @@ class ProductOutputSerializer(serializers.ModelSerializer):
     category_source = serializers.SerializerMethodField()
     product_type_key = serializers.SerializerMethodField()
     primary_image_url = serializers.SerializerMethodField()
+    unit_of_measure = serializers.SlugRelatedField(slug_field="code", read_only=True)
+    unit_symbol = serializers.CharField(source="unit_of_measure.symbol", read_only=True)
 
     def _resolved_category(self, product):
         cache_name = "_resolved_category_for_serialization"
@@ -88,7 +90,7 @@ class ProductOutputSerializer(serializers.ModelSerializer):
         fields = (
             "public_id", "name", "description", "category", "category_code", "category_name",
             "category_source", "product_type_key",
-            "internal_reference", "barcode", "selling_price", "min_price", "max_price", "is_negotiable", "cost_price", "currency", "attributes",
+            "internal_reference", "barcode", "unit_of_measure", "unit_symbol", "selling_price", "min_price", "max_price", "is_negotiable", "cost_price", "currency", "attributes",
             "status", "primary_image_url", "created_at", "updated_at",
         )
 
@@ -118,11 +120,12 @@ class ProductWriteSerializer(serializers.ModelSerializer):
     min_price = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0, required=False)
     max_price = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0, required=False)
     attributes = serializers.JSONField(required=False)
+    unit_of_measure = serializers.SlugRelatedField(slug_field="code", queryset=UnitOfMeasure.objects.all(), required=False)
 
     class Meta:
         model = Product
         fields = (
-            "name", "description", "category", "category_code", "internal_reference", "barcode", "selling_price",
+            "name", "description", "category", "category_code", "internal_reference", "barcode", "unit_of_measure", "selling_price",
             "cost_price", "min_price", "max_price", "is_negotiable", "currency", "attributes", "status",
         )
         extra_kwargs = {

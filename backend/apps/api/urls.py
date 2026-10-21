@@ -18,9 +18,11 @@ from apps.profitability_views import ProfitabilitySummaryView
 from apps.sales_report_views import ProductReportView, SalesReportView
 from apps.expense_receivable_report_views import ExpensesReportView, ReceivablesReportView
 from apps.purchase_report_views import PurchasesReportView, SupplierDebtsReportView
+from apps.catalog.views import UnitOfMeasureListView
 
 urlpatterns = [
     path("currencies/", CurrencyListView.as_view(), name="currency-list"),
+    path("units-of-measure/", UnitOfMeasureListView.as_view(), name="unit-of-measure-list"),
     path(
         "me/business-invitations/",
         BusinessInvitationRecipientListView.as_view(),

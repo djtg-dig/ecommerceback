@@ -16,7 +16,7 @@ from apps.businesses.models import Business, BusinessMemberPermission
 from apps.businesses.permissions import require_permission
 from apps.common.media import MediaStorageError
 
-from .models import Product, ProductCategory, ProductVariant, ProductMedia
+from .models import Product, ProductCategory, ProductVariant, ProductMedia, UnitOfMeasure
 from .media import ProductMediaSerializer, create_product_media, delete_product_media, update_product_media
 from .registry import get_category as get_registry_category
 from .registry import list_categories as list_registry_categories
@@ -101,6 +101,27 @@ class ProductCategoryRegistryDetailView(APIView):
         if category is None:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(category.public(include_attributes=True))
+
+
+class UnitOfMeasureListView(generics.ListAPIView):
+    """Expose the shared read-only unit reference data to product forms."""
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+    pagination_class = None
+
+    def get_queryset(self):
+        return UnitOfMeasure.objects.all()
+
+    def get_serializer_class(self):
+        from rest_framework import serializers
+
+        class UnitSerializer(serializers.ModelSerializer):
+            class Meta:
+                model = UnitOfMeasure
+                fields = ("code", "name", "symbol", "category")
+
+        return UnitSerializer
 
 
 class BusinessProductMixin:
