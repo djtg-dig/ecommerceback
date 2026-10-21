@@ -30,6 +30,7 @@ class CustomerSaleHistorySerializer(serializers.ModelSerializer):
 
     total = serializers.DecimalField(max_digits=16, decimal_places=2, read_only=True)
     payment_status = serializers.SerializerMethodField()
+    receivable = serializers.SerializerMethodField()
 
     class Meta:
         model = Sale
@@ -67,12 +68,16 @@ class SaleSerializer(serializers.ModelSerializer):
         source="customer.public_id", read_only=True, allow_null=True
     )
     total = serializers.DecimalField(max_digits=16, decimal_places=2, read_only=True)
+    paid_amount = serializers.SerializerMethodField()
+    balance = serializers.SerializerMethodField()
+    payment_status = serializers.SerializerMethodField()
 
     class Meta:
         model = Sale
         fields = (
             "public_id",
             "customer",
+            "customer_name_snapshot", "operation_type", "invoice_number", "issued_at", "due_date", "stock_deducted", "receivable",
             "status",
             "currency",
             "reference",
@@ -81,6 +86,18 @@ class SaleSerializer(serializers.ModelSerializer):
             "created_at",
             "completed_at",
         )
+    def get_paid_amount(self, sale):
+        try: return sale.receivable.paid_amount
+        except ObjectDoesNotExist: return sale.total if sale.status == Sale.Status.COMPLETED else Decimal("0.00")
+    def get_balance(self, sale):
+        try: return sale.receivable.balance
+        except ObjectDoesNotExist: return Decimal("0.00")
+    def get_payment_status(self, sale):
+        try: return sale.receivable.status
+        except ObjectDoesNotExist: return "PAID" if sale.status == Sale.Status.COMPLETED else "NOT_APPLICABLE"
+    def get_receivable(self, sale):
+        try: return sale.receivable.public_id
+        except ObjectDoesNotExist: return None
 
 
 class SaleWrite(serializers.ModelSerializer):
@@ -94,7 +111,7 @@ class SaleWrite(serializers.ModelSerializer):
 
     class Meta:
         model = Sale
-        fields = ("customer", "currency", "reference", "notes")
+        fields = ("customer", "customer_name_snapshot", "operation_type", "currency", "reference", "notes", "due_date")
 
     def validate_currency(self, value):
         business = self.context["business"]
@@ -108,6 +125,11 @@ class SaleWrite(serializers.ModelSerializer):
         if x and x.business_id != self.context["business"].id:
             raise serializers.ValidationError("External customer")
         return x
+    def validate(self, attrs):
+        customer = attrs.get("customer", getattr(self.instance, "customer", None))
+        name = attrs.get("customer_name_snapshot", getattr(self.instance, "customer_name_snapshot", ""))
+        if customer and not name: attrs["customer_name_snapshot"] = customer.name
+        return attrs
 
 
 class LineSerializer(serializers.ModelSerializer):
@@ -124,6 +146,7 @@ class LineSerializer(serializers.ModelSerializer):
             "public_id",
             "product",
             "variant",
+            "item_name_snapshot", "sku_snapshot", "unit_symbol_snapshot",
             "quantity",
             "unit_price",
             "unit_cost_snapshot",
@@ -149,12 +172,14 @@ class LineWrite(serializers.Serializer):
         from .services import target
 
         target(self.context["sale"], a.get("product"), a.get("variant"))
+        target_value = a.get("variant") or a.get("product")
+        product = a["variant"].product if a.get("variant") else a["product"]
         if "unit_price" not in a:
-            a["unit_price"] = (
-                a["variant"].effective_selling_price
-                if a.get("variant")
-                else a["product"].selling_price
-            )
+            a["unit_price"] = target_value.effective_selling_price if a.get("variant") else product.selling_price
+        elif not product.is_negotiable and a["unit_price"] != (target_value.effective_selling_price if a.get("variant") else product.selling_price):
+            raise serializers.ValidationError({"unit_price": "This product price is not negotiable."})
+        elif product.is_negotiable and (a["unit_price"] < product.min_price or a["unit_price"] > product.max_price):
+            raise serializers.ValidationError({"unit_price": "Price is outside the allowed range."})
         return a
 
 

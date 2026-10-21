@@ -67,6 +67,13 @@ def add_payment(
         if receivable.status == Receivable.Status.PAID or amount > receivable.balance:
             raise ValidationError("Invalid payment.")
 
+        # An invoice reserves no stock at issuance. Its first real collection
+        # atomically validates and posts the delivery exactly once.
+        sale = receivable.sale
+        if sale.operation_type == sale.OperationType.INVOICE and not sale.stock_deducted:
+            from apps.sales.services import deduct_sale_stock
+            deduct_sale_stock(sale, actor)
+
         payment = ReceivablePayment.objects.create(
             business=receivable.business,
             receivable=receivable,

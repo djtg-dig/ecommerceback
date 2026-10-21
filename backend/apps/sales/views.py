@@ -337,6 +337,32 @@ class Lines(SD):
         return Response(LineSerializer(o).data, 201)
 
 
+class LineDetail(Lines):
+    def get_object(self, sale, line_public_id):
+        return sale.lines.filter(public_id=line_public_id).first()
+
+    def patch(self, request, business_public_id, sale_public_id, line_public_id):
+        business = self.authorized_business(request, business_public_id, BusinessMemberPermission.Permission.SALE_UPDATE)
+        sale = self.o(business, sale_public_id) if business else None
+        line = self.get_object(sale, line_public_id) if sale else None
+        if not line: return self.nf()
+        if sale.status != Sale.Status.DRAFT: return Response({"detail": "immutable"}, 400)
+        serializer = LineWrite(data=request.data, context={"sale": sale})
+        serializer.is_valid(raise_exception=True)
+        for key, value in serializer.validated_data.items(): setattr(line, key, value)
+        line.save()
+        return Response(LineSerializer(line).data)
+
+    def delete(self, request, business_public_id, sale_public_id, line_public_id):
+        business = self.authorized_business(request, business_public_id, BusinessMemberPermission.Permission.SALE_UPDATE)
+        sale = self.o(business, sale_public_id) if business else None
+        line = self.get_object(sale, line_public_id) if sale else None
+        if not line: return self.nf()
+        if sale.status != Sale.Status.DRAFT: return Response({"detail": "immutable"}, 400)
+        line.delete()
+        return Response(status=204)
+
+
 class Action(SD):
     fn = None
 
@@ -496,6 +522,7 @@ Cancel.serializer_class = SaleSerializer
 SaleReturns.serializer_class = SaleReturnSerializer
 SD.http_method_names = ["get", "patch", "head", "options"]
 Lines.http_method_names = ["get", "post", "head", "options"]
+LineDetail.http_method_names = ["patch", "delete", "head", "options"]
 Complete.http_method_names = ["post", "options"]
 Cancel.http_method_names = ["post", "options"]
 

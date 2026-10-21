@@ -218,6 +218,28 @@ def target(sale, product=None, variant=None):
     validate_inventory_target(business=sale.business, product=product, variant=variant)
 
 
+def deduct_sale_stock(sale, actor):
+    """Deduct every line once, under the sale lock, when delivery is triggered."""
+    locked_sale = Sale.objects.select_for_update().get(pk=sale.pk)
+    if locked_sale.stock_deducted:
+        return locked_sale
+    lines = list(locked_sale.lines.select_related("product", "variant__product", "product__unit_of_measure").order_by("public_id"))
+    for line in lines:
+        unit_cost = line.variant.effective_cost_price if line.variant else line.product.cost_price
+        if unit_cost is None:
+            raise ValidationError("A historical unit cost is required before completing a sale.")
+        target(locked_sale, line.product, line.variant)
+        inventory_item = InventoryItem.objects.filter(product=line.product).first() if line.product else InventoryItem.objects.filter(variant=line.variant).first()
+        if not inventory_item:
+            raise ValidationError("Inventory item missing.")
+        line.unit_cost_snapshot = unit_cost
+        line.save(update_fields=("unit_cost_snapshot", "updated_at"))
+        apply_stock_movement(inventory_item=inventory_item, movement_type=StockMovement.Type.SALE, performed_by=actor, quantity=line.quantity, reference_type="SALE", reference_id=line.public_id, reason=f"Sale {locked_sale.public_id}")
+    locked_sale.stock_deducted = True
+    locked_sale.save(update_fields=("stock_deducted", "updated_at"))
+    return locked_sale
+
+
 def complete(sale, actor, amount_paid, payment_method=None):
     """Finalize a sale, stock mutation and real collection as one transaction.
 
@@ -240,52 +262,22 @@ def complete(sale, actor, amount_paid, payment_method=None):
         total = locked_sale.total
         if amount_paid < 0 or amount_paid > total:
             raise ValidationError("Invalid paid amount.")
-        if amount_paid < total and not locked_sale.customer_id:
-            raise ValidationError("Customer is required for credit.")
-
-        lines = list(
-            locked_sale.lines.select_related("product", "variant__product").order_by("public_id")
-        )
-        snapshots = {}
-
-        for line in lines:
-            unit_cost_snapshot = (
-                line.variant.effective_cost_price if line.variant else line.product.cost_price
-            )
-            if unit_cost_snapshot is None:
-                raise ValidationError(
-                    "A historical unit cost is required before completing a sale."
-                )
-            snapshots[line.pk] = unit_cost_snapshot
-
-        for line in lines:
-            target(locked_sale, line.product, line.variant)
-            inventory_item = (
-                InventoryItem.objects.filter(product=line.product).first()
-                if line.product
-                else InventoryItem.objects.filter(variant=line.variant).first()
-            )
-            if not inventory_item:
-                raise ValidationError("Inventory item missing.")
-            line.unit_cost_snapshot = snapshots[line.pk]
-            line.save(update_fields=("unit_cost_snapshot", "updated_at"))
-            apply_stock_movement(
-                inventory_item=inventory_item,
-                movement_type=StockMovement.Type.SALE,
-                performed_by=actor,
-                quantity=line.quantity,
-                reference_type="SALE",
-                reference_id=line.public_id,
-                reason=f"Sale {locked_sale.public_id}",
-            )
+        if locked_sale.operation_type == Sale.OperationType.DIRECT_SALE and amount_paid != total:
+            raise ValidationError("A direct sale requires full payment.")
+        if locked_sale.operation_type == Sale.OperationType.INVOICE and not locked_sale.customer_name_snapshot.strip():
+            raise ValidationError("An invoice requires a customer name.")
 
         completed_at = timezone.now()
         locked_sale.status = Sale.Status.COMPLETED
         locked_sale.completed_at = completed_at
         locked_sale.completed_by = actor
-        locked_sale.save(update_fields=("status", "completed_at", "completed_by", "updated_at"))
+        locked_sale.issued_at = completed_at
+        if locked_sale.operation_type == Sale.OperationType.INVOICE:
+            locked_sale.invoice_number = locked_sale.invoice_number or f"INV-{locked_sale.public_id}"
+        locked_sale.save(update_fields=("status", "completed_at", "completed_by", "issued_at", "invoice_number", "updated_at"))
 
-        if amount_paid == total:
+        if locked_sale.operation_type == Sale.OperationType.DIRECT_SALE:
+            deduct_sale_stock(locked_sale, actor)
             create_financial_movement(
                 business=locked_sale.business,
                 direction=FinancialMovement.Direction.INFLOW,
@@ -296,7 +288,7 @@ def complete(sale, actor, amount_paid, payment_method=None):
                 sale=locked_sale,
                 occurred_at=completed_at,
             )
-        elif amount_paid < total:
+        else:
             from apps.receivables.models import Receivable
             from apps.receivables.services import add_payment
 
@@ -304,9 +296,11 @@ def complete(sale, actor, amount_paid, payment_method=None):
                 business=locked_sale.business,
                 sale=locked_sale,
                 customer=locked_sale.customer,
+                customer_name_snapshot=locked_sale.customer_name_snapshot,
                 currency=locked_sale.currency,
                 original_amount=total,
                 status=Receivable.Status.OPEN,
+                due_date=locked_sale.due_date,
             )
             if amount_paid > 0:
                 add_payment(
