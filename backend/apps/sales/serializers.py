@@ -71,6 +71,7 @@ class SaleSerializer(serializers.ModelSerializer):
     paid_amount = serializers.SerializerMethodField()
     balance = serializers.SerializerMethodField()
     payment_status = serializers.SerializerMethodField()
+    receivable = serializers.SerializerMethodField()
 
     class Meta:
         model = Sale
