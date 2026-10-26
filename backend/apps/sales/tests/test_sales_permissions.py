@@ -1,6 +1,4 @@
 from decimal import Decimal
-from multiprocessing import context
-
 import pytest
 from rest_framework.test import APIClient
 
@@ -97,12 +95,8 @@ def test_pos_mutations_require_permission_and_preserve_owner_access(permission_c
     assert created.status_code == 201
     grant_permission(context["owner"], context["manager"], Permission.SALE_UPDATE)
     grant_permission(context["owner"], context["manager"], Permission.SALE_LINE_CREATE)
-
-    grant_permission(context["owner"], context["manager"], Permission.SALE_UPDATE)
-    grant_permission(context["owner"], context["manager"], Permission.SALE_LINE_CREATE)
     grant_permission(context["owner"], context["manager"], Permission.SALE_COMPLETE)
 
-    
     assert manager_client.patch(
         sale_url,
         {"reference": "POS-EXPLICIT"},
@@ -173,6 +167,8 @@ def test_receivable_mutations_require_manage_receivables(permission_context):
     sale = Sale.objects.create(
         business=context["business"],
         customer=customer,
+        customer_name_snapshot=customer.name,
+        operation_type=Sale.OperationType.INVOICE,
         currency="CDF",
         created_by=context["owner_identity"],
         completed_by=context["owner_identity"],
@@ -203,7 +199,7 @@ def test_receivable_mutations_require_manage_receivables(permission_context):
     grant_permission(
         context["owner"],
         context["manager"],
-        Permission.RECEIVABLE_PAYMENT_CREATE,
+        Permission.INVOICE_PAYMENT_CREATE,
     )
     assert client.patch(url, {"notes": "authorized"}, format="json").status_code == 200
     assert client.post(

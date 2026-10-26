@@ -1,6 +1,3 @@
-from importlib import import_module
-from types import SimpleNamespace
-
 import pytest
 from django.core.exceptions import ValidationError
 from rest_framework.exceptions import NotFound, PermissionDenied
@@ -14,6 +11,7 @@ from apps.businesses.permissions import (
     require_permission,
 )
 from apps.businesses.services import grant_permission, revoke_permission
+from apps.businesses.services.invitations import _validated_permissions
 
 
 Permission = BusinessMemberPermission.Permission
@@ -224,47 +222,14 @@ def test_grant_and_revoke_reject_unknown_permissions():
         revoke_permission(owner, member, "UNKNOWN")
 
 
-def test_invitation_permission_migration_expands_known_and_drops_unknown_codes():
-    invitation = SimpleNamespace(
-        pk="invitation-1",
-        permissions=["VIEW_CATALOG", "PRODUCT_DELETE", "UNKNOWN_PERMISSION"],
-        saved_fields=None,
-    )
+def test_persisted_invitation_permissions_drop_legacy_codes_and_reject_unknown_codes():
+    assert _validated_permissions(
+        ["VIEW_CATALOG", "PRODUCT_DELETE", "PRODUCT_DELETE"],
+        persisted_invitation=True,
+    ) == ["PRODUCT_DELETE"]
 
-    class QuerySet(list):
-        def only(self, *_fields):
-            return self
-
-    class Manager:
-        def filter(self, **_filters):
-            return []
-
-        def all(self):
-            return QuerySet([invitation])
-
-    class FakePermissionModel:
-        objects = Manager()
-
-    class FakeInvitationModel:
-        objects = Manager()
-
-    def save(*, update_fields):
-        invitation.saved_fields = update_fields
-
-    invitation.save = save
-
-    class HistoricalApps:
-        def get_model(self, app_label, model_name):
-            assert app_label == "businesses"
-            return FakePermissionModel if model_name == "BusinessMemberPermission" else FakeInvitationModel
-
-    migration = import_module("apps.businesses.migrations.0012_expand_atomic_permissions")
-    migration.forwards(HistoricalApps(), None)
-
-    assert invitation.permissions == [
-        "VIEW_CATALOG",
-        "PRODUCT_VIEW",
-        "PRODUCT_VARIANT_VIEW",
-        "PRODUCT_DELETE",
-    ]
-    assert invitation.saved_fields == ("permissions",)
+    with pytest.raises(ValidationError, match="Permission inconnue"):
+        _validated_permissions(
+            ["PRODUCT_DELETE", "UNKNOWN_PERMISSION"],
+            persisted_invitation=True,
+        )

@@ -92,24 +92,20 @@ class ReceivableDetailView(ReceivableListView):
 
 class ReceivablePaymentsView(ReceivableDetailView):
     def get(self, request, business_public_id, receivable_public_id):
-        business = self.get_authorized_business(
-            request,
-            business_public_id,
-            BusinessMemberPermission.Permission.RECEIVABLE_PAYMENT_VIEW,
-        )
+        business = Business.objects.filter(public_id=business_public_id).first()
         receivable = self.get_receivable(business, receivable_public_id) if business else None
+        if receivable:
+            permission = BusinessMemberPermission.Permission.INVOICE_VIEW if receivable.sale.operation_type == receivable.sale.OperationType.INVOICE else BusinessMemberPermission.Permission.SALE_VIEW
+            require_permission(request.user, business, permission)
         return Response(P(receivable.payments.all(), many=True).data) if receivable else self.not_found()
 
     def post(self, request, business_public_id, receivable_public_id):
-        business = self.get_authorized_business(
-            request,
-            business_public_id,
-            BusinessMemberPermission.Permission.RECEIVABLE_PAYMENT_CREATE,
-            write=True,
-        )
+        business = Business.objects.filter(public_id=business_public_id).first()
         receivable = self.get_receivable(business, receivable_public_id) if business else None
         if not receivable:
             return self.not_found()
+        permission = BusinessMemberPermission.Permission.INVOICE_PAYMENT_CREATE if receivable.sale.operation_type == receivable.sale.OperationType.INVOICE else BusinessMemberPermission.Permission.SALE_COMPLETE
+        require_permission(request.user, business, permission, write=True)
         idempotency_key = request.headers.get("Idempotency-Key", "")
         if len(idempotency_key) > 255:
             return Response({"detail": "Invalid Idempotency-Key."}, status=400)

@@ -17,7 +17,7 @@ def data():
  c=ProductCategory.objects.create(code='RCAT',name='R',slug='r-cat');b=Business.objects.create(name='B');o=CarriIdentity.objects.create(carri_subject='rc-owner');e=CarriIdentity.objects.create(carri_subject='rc-employee');BusinessMember.objects.create(business=b,identity=o,role='OWNER');BusinessMember.objects.create(business=b,identity=e,role='EMPLOYEE');p=Product.objects.create(business=b,category=c,name='P',selling_price='100',cost_price='60',currency='CDF',attributes={});i=InventoryItem.objects.create(business=b,product=p);apply_stock_movement(inventory_item=i,movement_type='IN',performed_by=o,quantity=10);cu=Customer.objects.create(business=b,name='Client');return b,o,e,p,i,cu
 def api(u):x=APIClient();x.force_authenticate(user=u);return x
 def sale(b,u,p,customer=None):
- a=api(u);base=f'/api/v1/businesses/{b.public_id}/';r=a.post(base+'sales/',({'customer':customer.public_id} if customer else {}),format='json');assert r.status_code==201;sa=r.data['public_id'];assert a.post(base+f'sales/{sa}/lines/',{'product':p.public_id,'quantity':'1.000'},format='json').status_code==201;return a,base,sa
+ a=api(u);base=f'/api/v1/businesses/{b.public_id}/';payload={'operation_type':'INVOICE',**({'customer':customer.public_id} if customer else {})};r=a.post(base+'sales/',payload,format='json');assert r.status_code==201;sa=r.data['public_id'];assert a.post(base+f'sales/{sa}/lines/',{'product':p.public_id,'quantity':'1.000'},format='json').status_code==201;return a,base,sa
 def test_discovery_credit_and_initial_partial_payment(data):
  b,o,_,p,i,cu=data;a,base,sa=sale(b,o,p,cu);r=a.post(base+f'sales/{sa}/complete/',{'amount_paid':'40.00','payment_method':'CASH'},format='json');assert r.status_code==200;rc=Receivable.objects.get(sale__public_id=sa);assert rc.public_id.startswith('RC') and rc.original_amount==100 and rc.paid_amount==40 and rc.balance==60 and rc.status=='PARTIALLY_PAID';pay=rc.payments.get();assert pay.public_id.startswith('RP') and pay.payment_method=='CASH';assert InventoryItem.objects.get(pk=i.pk).quantity==9
 def test_anonymous_credit_and_overpayment_roll_back(data):
@@ -61,7 +61,7 @@ def test_payment_lifecycle_permissions_and_metadata_patch(data):
     member = BusinessMember.objects.get(business=business, identity=employee)
     BusinessMemberPermission.objects.create(
         member=member,
-        permission=BusinessMemberPermission.Permission.RECEIVABLE_PAYMENT_CREATE,
+        permission=BusinessMemberPermission.Permission.INVOICE_PAYMENT_CREATE,
     )
     assert employee_client.post(
         payments_url,
@@ -90,7 +90,7 @@ def test_payment_lifecycle_permissions_and_metadata_patch(data):
         format="json",
     ).status_code == 400
 def test_due_date_filters_and_complete_default(data):
- b,o,_,p,_,cu=data;a,base,sa=sale(b,o,p,cu);assert a.post(base+f'sales/{sa}/complete/',{'amount_paid':'100.00','payment_method':'CASH'},format='json').status_code==200 and not Receivable.objects.exists();_,_,sa=sale(b,o,p,cu);a.post(base+f'sales/{sa}/complete/',{'amount_paid':'0'},format='json');r=Receivable.objects.get(sale__public_id=sa);r.due_date=timezone.localdate()-timedelta(days=1);r.save();assert r.is_overdue;assert a.get(base+'receivables/?overdue=true').status_code==200
+ b,o,_,p,_,cu=data;a,base,sa=sale(b,o,p,cu);assert a.post(base+f'sales/{sa}/complete/',{'amount_paid':'100.00','payment_method':'CASH'},format='json').status_code==200 and Receivable.objects.filter(sale__public_id=sa,status=Receivable.Status.PAID).exists();_,_,sa=sale(b,o,p,cu);a.post(base+f'sales/{sa}/complete/',{'amount_paid':'0'},format='json');r=Receivable.objects.get(sale__public_id=sa);r.due_date=timezone.localdate()-timedelta(days=1);r.save();assert r.is_overdue;assert a.get(base+'receivables/?overdue=true').status_code==200
 
 from unittest.mock import patch
 
@@ -166,8 +166,8 @@ def test_financial_summary_counts_only_real_collections(data):
     client = api(owner)
     base = f"/api/v1/businesses/{business.public_id}/"
 
-    def create_sale(quantity):
-        created = client.post(base + "sales/", {"customer": customer.public_id}, format="json")
+    def create_sale(quantity, operation_type):
+        created = client.post(base + "sales/", {"customer": customer.public_id, "operation_type": operation_type}, format="json")
         sale_id = created.data["public_id"]
         assert client.post(
             base + f"sales/{sale_id}/lines/",
@@ -176,13 +176,13 @@ def test_financial_summary_counts_only_real_collections(data):
         ).status_code == 201
         return sale_id
 
-    paid_sale = create_sale("0.350")
+    paid_sale = create_sale("0.350", "DIRECT_SALE")
     assert client.post(
         base + f"sales/{paid_sale}/complete/",
         {"amount_paid": "35000.00", "payment_method": "CASH"},
         format="json",
     ).status_code == 200
-    credit_sale = create_sale("0.200")
+    credit_sale = create_sale("0.200", "INVOICE")
     assert client.post(
         base + f"sales/{credit_sale}/complete/",
         {"amount_paid": "0"},

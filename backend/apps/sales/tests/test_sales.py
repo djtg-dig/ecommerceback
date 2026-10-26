@@ -19,12 +19,14 @@ def test_internal_sale():
         identity=identity,
         role=BusinessMember.Role.EMPLOYEE,
     )
-    BusinessMemberPermission.objects.create(
-        member=member,
-        permission=BusinessMemberPermission.Permission.SALE_CREATE,
+    permissions = (
+        BusinessMemberPermission.Permission.SALE_CREATE,
+        BusinessMemberPermission.Permission.SALE_LINE_CREATE,
+        BusinessMemberPermission.Permission.SALE_COMPLETE,
     )
-    BusinessMemberPermission.objects.create(member=member, permission=BusinessMemberPermission.Permission.SALE_LINE_CREATE)
-    BusinessMemberPermission.objects.create(member=member, permission=BusinessMemberPermission.Permission.SALE_COMPLETE)
+    BusinessMemberPermission.objects.bulk_create(
+        [BusinessMemberPermission(member=member, permission=permission) for permission in permissions]
+    )
     product = Product.objects.create(
         business=business,
         category=category,
@@ -84,12 +86,22 @@ def test_sale_currency_is_imposed_by_business():
         identity=identity,
         role="EMPLOYEE",
     )
-    BusinessMemberPermission.objects.create(
-        member=member,
-        permission=BusinessMemberPermission.Permission.SALE_CREATE,
+    permissions = (
+        (
+            BusinessMemberPermission.Permission.INVOICE_CREATE,
+            BusinessMemberPermission.Permission.INVOICE_UPDATE,
+            BusinessMemberPermission.Permission.INVOICE_ISSUE,
+        )
+        if operation_type == "INVOICE"
+        else (
+            BusinessMemberPermission.Permission.SALE_CREATE,
+            BusinessMemberPermission.Permission.SALE_LINE_CREATE,
+            BusinessMemberPermission.Permission.SALE_COMPLETE,
+        )
     )
-    BusinessMemberPermission.objects.create(member=member, permission=BusinessMemberPermission.Permission.SALE_LINE_CREATE)
-    BusinessMemberPermission.objects.create(member=member, permission=BusinessMemberPermission.Permission.SALE_COMPLETE)
+    BusinessMemberPermission.objects.bulk_create(
+        [BusinessMemberPermission(member=member, permission=permission) for permission in permissions]
+    )
 
     client = APIClient()
     client.force_authenticate(user=identity)
@@ -105,7 +117,7 @@ from apps.finance.models import FinancialMovement, PaymentTransaction
 from apps.receivables.models import Receivable, ReceivablePayment
 
 
-def build_sale_context(customer=True):
+def build_sale_context(customer=True, operation_type="DIRECT_SALE"):
     category, _ = ProductCategory.objects.get_or_create(code="SALELOT3", defaults={"name": "Sales", "slug": "sales-lot3"})
     business = Business.objects.create(name="Sales lot 3")
     employee, _ = CarriIdentity.objects.get_or_create(carri_subject="sales-lot3-employee")
@@ -130,7 +142,10 @@ def build_sale_context(customer=True):
     client = APIClient()
     client.force_authenticate(user=employee)
     base = f"/api/v1/businesses/{business.public_id}/"
-    sale_response = client.post(base + "sales/", {"customer": customer_object.public_id} if customer else {}, format="json")
+    sale_payload = {"operation_type": operation_type}
+    if customer_object:
+        sale_payload["customer"] = customer_object.public_id
+    sale_response = client.post(base + "sales/", sale_payload, format="json")
     sale_id = sale_response.data["public_id"]
     assert client.post(base + f"sales/{sale_id}/lines/", {"product": product.public_id, "quantity": "1"}, format="json").status_code == 201
     return business, employee, product, inventory, customer_object, client, base, sale_id
@@ -156,7 +171,7 @@ def test_complete_requires_explicit_accurate_payment_method_and_creates_sale_inf
 
 
 def test_partial_credit_and_anonymous_sale_rules_prevent_double_counting():
-    _, employee, _, inventory, _, client, base, sale_id = build_sale_context()
+    _, employee, _, inventory, _, client, base, sale_id = build_sale_context(operation_type="INVOICE")
     response = client.post(base + f"sales/{sale_id}/complete/", {"amount_paid": "40", "payment_method": "CASH"}, format="json")
     assert response.status_code == 200
     receivable = Receivable.objects.get(sale__public_id=sale_id)
@@ -175,7 +190,7 @@ def test_partial_credit_and_anonymous_sale_rules_prevent_double_counting():
 
 
 def test_credit_sale_creates_no_financial_movement_and_finance_failure_rolls_back():
-    _, _, _, _, _, client, base, sale_id = build_sale_context()
+    _, _, _, _, _, client, base, sale_id = build_sale_context(operation_type="INVOICE")
     assert client.post(base + f"sales/{sale_id}/complete/", {"amount_paid": "0"}, format="json").status_code == 200
     assert Receivable.objects.get(sale__public_id=sale_id).balance == Decimal("100.00")
     assert not FinancialMovement.objects.filter().exists()
@@ -189,7 +204,7 @@ def test_credit_sale_creates_no_financial_movement_and_finance_failure_rolls_bac
     assert InventoryItem.objects.get(pk=inventory.pk).quantity == 10
     assert not StockMovement.objects.filter(movement_type="SALE", reference_id__isnull=False).filter(reference_id__contains=sale_id).exists()
 
-    _, employee, _, inventory, _, client, base, sale_id = build_sale_context()
+    _, employee, _, inventory, _, client, base, sale_id = build_sale_context(operation_type="INVOICE")
     with patch("apps.receivables.services.create_financial_movement", side_effect=RuntimeError("finance unavailable")):
         with pytest.raises(RuntimeError):
             from apps.sales.services import complete

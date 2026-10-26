@@ -7,7 +7,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from apps.businesses.models import Business, BusinessMemberPermission
-from apps.businesses.permissions import has_permission, membership_for, require_permission
+from apps.businesses.permissions import has_permission, membership_for, require_any_permission, require_permission
 from apps.finance.models import FinancialMovement
 from apps.receivables.models import Receivable, ReceivableAdjustment, ReceivablePayment
 from .models import Customer, Sale, SaleLine, SaleReturn
@@ -32,6 +32,11 @@ class M:
             write=write,
         )
         return business
+
+    @staticmethod
+    def sale_permission(sale, sale_permission, invoice_permission):
+        """Choisit la permission atomique selon le type de document."""
+        return invoice_permission if sale.operation_type == Sale.OperationType.INVOICE else sale_permission
 
 
 class Customers(M, APIView):
@@ -139,6 +144,7 @@ class CustomerCommercialProfile(CustomerDetail):
 
         member = membership_for(request.user, business)
         can_view_sales = has_permission(member, BusinessMemberPermission.Permission.SALE_VIEW)
+        can_view_invoices = has_permission(member, BusinessMemberPermission.Permission.INVOICE_VIEW)
         can_view_financials = has_permission(
             member, BusinessMemberPermission.Permission.FINANCIAL_SUMMARY_VIEW
         )
@@ -146,13 +152,17 @@ class CustomerCommercialProfile(CustomerDetail):
             member, BusinessMemberPermission.Permission.RECEIVABLE_VIEW
         )
         sales_data = None
-        if can_view_sales:
+        if can_view_sales or can_view_invoices:
             sales = (
                 Sale.objects.filter(business=business, customer=customer)
                 .select_related("receivable")
                 .prefetch_related("lines")
                 .order_by("-created_at", "-public_id")
             )
+            if can_view_sales and not can_view_invoices:
+                sales = sales.filter(operation_type=Sale.OperationType.DIRECT_SALE)
+            elif can_view_invoices and not can_view_sales:
+                sales = sales.filter(operation_type=Sale.OperationType.INVOICE)
             paginator = CommercialPartnerPagination()
             page = paginator.paginate_queryset(sales, request)
             sales_data = paginator.get_paginated_response(
@@ -202,6 +212,7 @@ class CustomerCommercialProfile(CustomerDetail):
             "financial_summary": financial_summary,
             "capabilities": {
                 "view_sales": can_view_sales,
+                "view_invoices": can_view_invoices,
                 "view_financials": can_view_financials,
                 "view_receivables": can_view_receivables,
             },
@@ -220,14 +231,18 @@ class PosCustomerSearch(M, APIView):
     serializer_class = PosCustomerSerializer
 
     def get(self, request, business_public_id):
-        business = self.authorized_business(
-            request,
-            business_public_id,
-            BusinessMemberPermission.Permission.SALE_CREATE,
-            write=False,
-        )
+        business = Business.objects.filter(public_id=business_public_id).first()
         if not business:
             return self.nf()
+        require_any_permission(
+            request.user,
+            business,
+            (
+                BusinessMemberPermission.Permission.SALE_CREATE,
+                BusinessMemberPermission.Permission.INVOICE_CREATE,
+            ),
+            write=False,
+        )
 
         customers = Customer.objects.filter(
             business=business,
@@ -250,28 +265,32 @@ class PosCustomerSearch(M, APIView):
 
 class Sales(M, APIView):
     def get(self, r, business_public_id):
-        b = self.authorized_business(
-            r,
-            business_public_id,
-            BusinessMemberPermission.Permission.SALE_VIEW,
-            write=False,
-        )
-        return (
-            Response(SaleSerializer(Sale.objects.filter(business=b), many=True).data)
-            if b
-            else self.nf()
-        )
+        b = Business.objects.filter(public_id=business_public_id).first()
+        if not b:
+            return self.nf()
+        member = membership_for(r.user, b, include_suspended=True)
+        if member is None:
+            require_permission(r.user, b, BusinessMemberPermission.Permission.SALE_VIEW, write=False)
+        can_sales = has_permission(member, BusinessMemberPermission.Permission.SALE_VIEW)
+        can_invoices = has_permission(member, BusinessMemberPermission.Permission.INVOICE_VIEW)
+        if not can_sales and not can_invoices:
+            require_permission(r.user, b, BusinessMemberPermission.Permission.SALE_VIEW, write=False)
+        queryset = Sale.objects.filter(business=b)
+        if can_sales and not can_invoices:
+            queryset = queryset.filter(operation_type=Sale.OperationType.DIRECT_SALE)
+        elif can_invoices and not can_sales:
+            queryset = queryset.filter(operation_type=Sale.OperationType.INVOICE)
+        return Response(SaleSerializer(queryset, many=True).data)
 
     def post(self, r, business_public_id):
-        b = self.authorized_business(
-            r,
-            business_public_id,
-            BusinessMemberPermission.Permission.SALE_CREATE,
-        )
+        b = Business.objects.filter(public_id=business_public_id).first()
         if not b:
             return self.nf()
         s = SaleWrite(data=r.data, context={"business": b})
         s.is_valid(raise_exception=True)
+        operation = s.validated_data.get("operation_type", Sale.OperationType.DIRECT_SALE)
+        permission = BusinessMemberPermission.Permission.INVOICE_CREATE if operation == Sale.OperationType.INVOICE else BusinessMemberPermission.Permission.SALE_CREATE
+        require_permission(r.user, b, permission, write=True)
         o = s.save(business=b, created_by=r.user, currency=b.primary_currency)
         return Response(SaleSerializer(o).data, 201)
 
@@ -281,24 +300,18 @@ class SD(Sales):
         return Sale.objects.filter(business=b, public_id=x).first()
 
     def get(self, r, business_public_id, sale_public_id):
-        b = self.authorized_business(
-            r,
-            business_public_id,
-            BusinessMemberPermission.Permission.SALE_VIEW,
-            write=False,
-        )
+        b = Business.objects.filter(public_id=business_public_id).first()
         o = self.o(b, sale_public_id) if b else None
+        if o:
+            require_permission(r.user, b, self.sale_permission(o, BusinessMemberPermission.Permission.SALE_VIEW, BusinessMemberPermission.Permission.INVOICE_VIEW), write=False)
         return Response(SaleSerializer(o).data) if o else self.nf()
 
     def patch(self, r, business_public_id, sale_public_id):
-        b = self.authorized_business(
-            r,
-            business_public_id,
-            BusinessMemberPermission.Permission.SALE_UPDATE,
-        )
+        b = Business.objects.filter(public_id=business_public_id).first()
         o = self.o(b, sale_public_id) if b else None
         if not o:
             return self.nf()
+        require_permission(r.user, b, self.sale_permission(o, BusinessMemberPermission.Permission.SALE_UPDATE, BusinessMemberPermission.Permission.INVOICE_UPDATE), write=True)
         if o.status != "DRAFT":
             return Response({"detail": "immutable"}, 400)
         s = SaleWrite(o, data=r.data, partial=True, context={"business": b})
@@ -309,26 +322,20 @@ class SD(Sales):
 
 class Lines(SD):
     def get(self, r, business_public_id, sale_public_id):
-        b = self.authorized_business(
-            r,
-            business_public_id,
-            BusinessMemberPermission.Permission.SALE_LINE_VIEW,
-            write=False,
-        )
+        b = Business.objects.filter(public_id=business_public_id).first()
         s = self.o(b, sale_public_id) if b else None
+        if s:
+            require_permission(r.user, b, self.sale_permission(s, BusinessMemberPermission.Permission.SALE_LINE_VIEW, BusinessMemberPermission.Permission.INVOICE_VIEW), write=False)
         return (
             Response(LineSerializer(s.lines.all(), many=True).data) if s else self.nf()
         )
 
     def post(self, r, business_public_id, sale_public_id):
-        b = self.authorized_business(
-            r,
-            business_public_id,
-            BusinessMemberPermission.Permission.SALE_LINE_CREATE,
-        )
+        b = Business.objects.filter(public_id=business_public_id).first()
         s = self.o(b, sale_public_id) if b else None
         if not s:
             return self.nf()
+        require_permission(r.user, b, self.sale_permission(s, BusinessMemberPermission.Permission.SALE_LINE_CREATE, BusinessMemberPermission.Permission.INVOICE_UPDATE), write=True)
         if s.status != "DRAFT":
             return Response({"detail": "immutable"}, 400)
         x = LineWrite(data=r.data, context={"sale": s})
@@ -342,10 +349,11 @@ class LineDetail(Lines):
         return sale.lines.filter(public_id=line_public_id).first()
 
     def patch(self, request, business_public_id, sale_public_id, line_public_id):
-        business = self.authorized_business(request, business_public_id, BusinessMemberPermission.Permission.SALE_UPDATE)
+        business = Business.objects.filter(public_id=business_public_id).first()
         sale = self.o(business, sale_public_id) if business else None
         line = self.get_object(sale, line_public_id) if sale else None
         if not line: return self.nf()
+        require_permission(request.user, business, self.sale_permission(sale, BusinessMemberPermission.Permission.SALE_UPDATE, BusinessMemberPermission.Permission.INVOICE_UPDATE), write=True)
         if sale.status != Sale.Status.DRAFT: return Response({"detail": "immutable"}, 400)
         serializer = LineWrite(data=request.data, context={"sale": sale})
         serializer.is_valid(raise_exception=True)
@@ -354,10 +362,11 @@ class LineDetail(Lines):
         return Response(LineSerializer(line).data)
 
     def delete(self, request, business_public_id, sale_public_id, line_public_id):
-        business = self.authorized_business(request, business_public_id, BusinessMemberPermission.Permission.SALE_UPDATE)
+        business = Business.objects.filter(public_id=business_public_id).first()
         sale = self.o(business, sale_public_id) if business else None
         line = self.get_object(sale, line_public_id) if sale else None
         if not line: return self.nf()
+        require_permission(request.user, business, self.sale_permission(sale, BusinessMemberPermission.Permission.SALE_UPDATE, BusinessMemberPermission.Permission.INVOICE_UPDATE), write=True)
         if sale.status != Sale.Status.DRAFT: return Response({"detail": "immutable"}, 400)
         line.delete()
         return Response(status=204)
@@ -367,19 +376,13 @@ class Action(SD):
     fn = None
 
     def post(self, r, business_public_id, sale_public_id):
-        permission = (
-            BusinessMemberPermission.Permission.SALE_COMPLETE
-            if self.fn == "complete"
-            else BusinessMemberPermission.Permission.SALE_CANCEL
-        )
-        b = self.authorized_business(
-            r,
-            business_public_id,
-            permission,
-        )
+        b = Business.objects.filter(public_id=business_public_id).first()
         s = self.o(b, sale_public_id) if b else None
         if not s:
             return self.nf()
+        sale_permission = BusinessMemberPermission.Permission.SALE_COMPLETE if self.fn == "complete" else BusinessMemberPermission.Permission.SALE_CANCEL
+        invoice_permission = BusinessMemberPermission.Permission.INVOICE_ISSUE if self.fn == "complete" else BusinessMemberPermission.Permission.INVOICE_CANCEL
+        require_permission(r.user, b, self.sale_permission(s, sale_permission, invoice_permission), write=True)
         try:
             if self.fn == "complete":
                 serializer = SaleCompleteSerializer(data=r.data)
