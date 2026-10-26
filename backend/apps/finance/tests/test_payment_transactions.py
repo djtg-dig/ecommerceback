@@ -74,7 +74,7 @@ def test_business_creation_initializes_default_payment_methods():
     identity = CarriIdentity.objects.create(carri_subject="payment-create")
     response = client_for(identity).post(
         "/api/v1/businesses/",
-        {"name": "Configured shop"},
+        {"name": "Configured shop", "sales_location_type": "HOME_BASED", "sales_channel": "ONLINE", "delivery_methods": ["HOME_DELIVERY"]},
         format="json",
     )
     business = Business.objects.get(public_id=response.data["public_id"])

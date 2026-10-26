@@ -343,7 +343,7 @@ def test_business_api_creation_seeds_default_expense_categories():
 
     response = api_client.post(
         "/api/v1/businesses/",
-        {"name": "Created through API", "primary_currency": "CDF"},
+        {"name": "Created through API", "primary_currency": "CDF", "sales_location_type": "MARKET_STALL", "sales_channel": "BOTH", "delivery_methods": ["HOME_DELIVERY", "PICKUP"]},
         format="json",
     )
 

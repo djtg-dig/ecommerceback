@@ -39,7 +39,13 @@ def test_create_business_creates_owner_and_is_scoped():
 
     response = auth(identity).post(
         "/api/v1/businesses/",
-        {"name": "Shop", "primary_currency": "CDF"},
+        {
+            "name": "Shop",
+            "primary_currency": "CDF",
+            "sales_location_type": "HOME_BASED",
+            "sales_channel": "ONLINE",
+            "delivery_methods": ["HOME_DELIVERY"],
+        },
         format="json",
     )
 
@@ -57,6 +63,23 @@ def test_create_business_creates_owner_and_is_scoped():
         f"/api/v1/businesses/{business.public_id}/"
     )
     assert other_response.status_code == 404
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"name": "Shop", "primary_currency": "CDF", "sales_channel": "ONLINE", "delivery_methods": ["PICKUP"]},
+        {"name": "Shop", "primary_currency": "CDF", "sales_location_type": "HOME_BASED", "delivery_methods": ["PICKUP"]},
+        {"name": "Shop", "primary_currency": "CDF", "sales_location_type": "HOME_BASED", "sales_channel": "ONLINE"},
+    ],
+)
+def test_create_business_requires_commercial_settings(payload):
+    identity = CarriIdentity.objects.create(carri_subject=f"commercial-create-{payload}")
+
+    response = auth(identity).post("/api/v1/businesses/", payload, format="json")
+
+    assert response.status_code == 400
 
 
 @pytest.mark.django_db
@@ -130,7 +153,7 @@ def test_primary_currency_is_immutable_after_business_creation():
     identity = CarriIdentity.objects.create(carri_subject="currency-owner")
     create_response = auth(identity).post(
         "/api/v1/businesses/",
-        {"name": "USD shop", "primary_currency": "USD"},
+        {"name": "USD shop", "primary_currency": "USD", "sales_location_type": "PHYSICAL_STORE", "sales_channel": "IN_PERSON", "delivery_methods": ["PICKUP"]},
         format="json",
     )
     business_id = create_response.data["public_id"]
@@ -168,6 +191,28 @@ def test_commercial_settings_are_validated_and_saved_for_an_authorized_business(
     assert response.data["delivery_methods"] == ["HOME_DELIVERY", "PICKUP"]
     business.refresh_from_db()
     assert business.delivery_methods == ["HOME_DELIVERY", "PICKUP"]
+
+
+@pytest.mark.django_db
+def test_business_update_preserves_unmodified_commercial_settings():
+    owner = CarriIdentity.objects.create(carri_subject="commercial-settings-preserve-owner")
+    business = Business.objects.create(
+        name="Commercial preserve shop",
+        sales_location_type="PHYSICAL_STORE",
+        sales_channel="BOTH",
+        delivery_methods=["HOME_DELIVERY", "PICKUP"],
+    )
+    BusinessMember.objects.create(business=business, identity=owner, is_owner=True, title="Gérant")
+
+    response = auth(owner).patch(
+        f"/api/v1/businesses/{business.public_id}/", {"name": "Renamed shop"}, format="json"
+    )
+
+    assert response.status_code == 200
+    assert response.data["name"] == "Renamed shop"
+    assert response.data["sales_location_type"] == "PHYSICAL_STORE"
+    assert response.data["sales_channel"] == "BOTH"
+    assert response.data["delivery_methods"] == ["HOME_DELIVERY", "PICKUP"]
 
 
 @pytest.mark.django_db
@@ -217,7 +262,9 @@ def test_commercial_settings_cannot_be_changed_outside_the_business_scope():
         format="json",
     )
 
-    assert response.status_code == 403
+    # Une absence de membership est masquée comme une entreprise inconnue pour
+    # ne pas révéler l’existence d’un tenant à une identité externe.
+    assert response.status_code == 404
     business.refresh_from_db()
     assert business.sales_channel == ""
 

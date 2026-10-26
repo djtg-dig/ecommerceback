@@ -47,6 +47,23 @@ class BaseBusinessSerializer(serializers.ModelSerializer):
 
 
 class BusinessCreateSerializer(BaseBusinessSerializer):
+    # Les nouveaux profils doivent décrire leur activité, tandis que le
+    # serializer de mise à jour reste compatible avec les entreprises créées
+    # avant l'introduction de ces champs.
+    sales_location_type = serializers.ChoiceField(
+        choices=Business.SalesLocationType.choices,
+        required=True,
+    )
+    sales_channel = serializers.ChoiceField(
+        choices=Business.SalesChannel.choices,
+        required=True,
+    )
+    delivery_methods = serializers.ListField(
+        child=serializers.ChoiceField(choices=Business.DeliveryMethod.choices),
+        required=True,
+        allow_empty=False,
+    )
+
     class Meta:
         model = Business
         fields = (
