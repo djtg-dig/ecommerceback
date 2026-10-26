@@ -682,4 +682,4 @@ _customer_profile = inline_serializer(
 CustomerDetail.get = extend_schema(tags=["Customers"], operation_id="customer_retrieve", responses={200: CustomerSerializer, 403: None, 404: None})(CustomerDetail.get)
 CustomerDetail.patch = extend_schema(tags=["Customers"], operation_id="customer_update", request=CustomerSerializer, responses={200: CustomerSerializer, 400: None, 403: None, 404: None})(CustomerDetail.patch)
 CustomerCommercialProfile.get = extend_schema(tags=["Customers"], operation_id="customer_commercial_profile", responses={200: _customer_profile, 403: None, 404: None})(CustomerCommercialProfile.get)
-CustomerCommercialProfile.http_method_names = ["get", "head", "options"]
+CustomerCommercialProfile.patch = extend_schema(exclude=True)(CustomerCommercialProfile.patch)

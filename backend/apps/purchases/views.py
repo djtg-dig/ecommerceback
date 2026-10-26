@@ -518,7 +518,7 @@ SupplierCommercialProfile.get = extend_schema(
     tags=["Suppliers"], operation_id="supplier_commercial_profile", parameters=[_bp, _sp],
     responses={200: _supplier_profile, 403: None, 404: None},
 )(SupplierCommercialProfile.get)
-SupplierCommercialProfile.http_method_names = ["get", "head", "options"]
+SupplierCommercialProfile.patch = extend_schema(exclude=True)(SupplierCommercialProfile.patch)
 
 class PurchasePayments(PurchaseDetail):
     def get(self, r, business_public_id, purchase_public_id):

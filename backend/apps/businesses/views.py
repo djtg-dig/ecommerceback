@@ -1820,7 +1820,8 @@ BusinessMediaView.delete = extend_schema(tags=["Businesses"], operation_id="busi
 BusinessCurrenciesView.get = extend_schema(tags=["Businesses"], responses={200: BusinessCurrencySerializer(many=True), 403: None, 404: None})(BusinessCurrenciesView.get)
 BusinessCurrenciesView.post = extend_schema(tags=["Businesses"], request=BusinessCurrencyWriteSerializer, responses={200: BusinessCurrencySerializer, 201: BusinessCurrencySerializer, 400: None, 403: None, 404: None})(BusinessCurrenciesView.post)
 BusinessCurrencyDetailView.patch = extend_schema(tags=["Businesses"], operation_id="business_currency_update", request=BusinessCurrencyWriteSerializer, responses={200: BusinessCurrencySerializer, 400: None, 403: None, 404: None})(BusinessCurrencyDetailView.patch)
-BusinessCurrencyDetailView.http_method_names = ["patch", "head", "options"]
+BusinessCurrencyDetailView.get = extend_schema(exclude=True)(BusinessCurrencyDetailView.get)
+BusinessCurrencyDetailView.post = extend_schema(exclude=True)(BusinessCurrencyDetailView.post)
 BusinessExchangeRatesView.get = extend_schema(tags=["Businesses"], operation_id="business_exchange_rate_list", responses={200: BusinessExchangeRateSerializer(many=True), 403: None, 404: None})(BusinessExchangeRatesView.get)
 BusinessExchangeRatesView.post = extend_schema(tags=["Businesses"], operation_id="business_exchange_rate_create", request=BusinessExchangeRateSerializer, responses={201: BusinessExchangeRateSerializer, 400: None, 403: None, 404: None})(BusinessExchangeRatesView.post)
 BusinessExchangeRatesView.http_method_names = ["get", "post", "head", "options"]

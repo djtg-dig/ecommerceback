@@ -627,5 +627,6 @@ ProductMediaListCreateView.get = extend_schema(tags=["Products"], operation_id="
 ProductMediaListCreateView.post = extend_schema(tags=["Products"], operation_id="product_media_create", parameters=[_business_public_id, _product_public_id], request=_product_media_upload, responses={201: ProductMediaSerializer, 400: None, 403: None, 404: None, 502: None, 503: None})(ProductMediaListCreateView.post)
 ProductMediaDetailView.patch = extend_schema(tags=["Products"], operation_id="product_media_update", parameters=[_business_public_id, _product_public_id, OpenApiParameter("media_id", str, OpenApiParameter.PATH)], request=_product_media_update, responses={200: ProductMediaSerializer, 400: None, 403: None, 404: None})(ProductMediaDetailView.patch)
 ProductMediaDetailView.delete = extend_schema(tags=["Products"], operation_id="product_media_delete", parameters=[_business_public_id, _product_public_id, OpenApiParameter("media_id", str, OpenApiParameter.PATH)], request=None, responses={204: None, 403: None, 404: None})(ProductMediaDetailView.delete)
-ProductMediaDetailView.http_method_names = ["patch", "delete", "head", "options"]
+ProductMediaDetailView.get = extend_schema(exclude=True)(ProductMediaDetailView.get)
+ProductMediaDetailView.post = extend_schema(exclude=True)(ProductMediaDetailView.post)
 UnitOfMeasureListView.get = extend_schema(tags=["Product Categories"], auth=[], responses={200: UnitOfMeasureSerializer(many=True)})(UnitOfMeasureListView.get)
