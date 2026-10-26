@@ -140,10 +140,13 @@ def test_legacy_manager_needs_explicit_administration_permissions(
     assert_write_status(manager_client, context, 403)
 
     for permission in (
-        Permission.UPDATE_BUSINESS,
-        Permission.VIEW_MEMBERS,
-        Permission.MANAGE_PAYMENT_METHODS,
-        Permission.VIEW_RECEIVABLES,
+        Permission.BUSINESS_UPDATE,
+        Permission.MEMBER_VIEW,
+        Permission.PAYMENT_METHOD_VIEW,
+        Permission.PAYMENT_METHOD_CREATE,
+        Permission.PAYMENT_METHOD_UPDATE,
+        Permission.RECEIVABLE_VIEW,
+        Permission.SALE_VIEW,
     ):
         grant_permission(context["owner"], context["manager"], permission)
 
@@ -157,10 +160,13 @@ def test_suspended_member_is_forbidden_and_foreign_member_is_hidden(
 ):
     context = permission_context
     for permission in (
-        Permission.UPDATE_BUSINESS,
-        Permission.VIEW_MEMBERS,
-        Permission.MANAGE_PAYMENT_METHODS,
-        Permission.VIEW_RECEIVABLES,
+        Permission.BUSINESS_UPDATE,
+        Permission.MEMBER_VIEW,
+        Permission.PAYMENT_METHOD_VIEW,
+        Permission.PAYMENT_METHOD_CREATE,
+        Permission.PAYMENT_METHOD_UPDATE,
+        Permission.RECEIVABLE_VIEW,
+        Permission.SALE_VIEW,
     ):
         grant_permission(context["owner"], context["suspended"], permission)
     context["suspended"].status = BusinessMember.Status.SUSPENDED

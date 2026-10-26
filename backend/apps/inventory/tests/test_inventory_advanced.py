@@ -8,7 +8,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
 from apps.businesses.models import Business, BusinessMember
-from apps.catalog.models import Product, ProductCategory
+from apps.catalog.models import Product, ProductCategory, UnitOfMeasure
 from apps.inventory.models import InventoryItem, StockMovement
 from apps.inventory.services import (
     apply_stock_movement,
@@ -20,6 +20,10 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 @pytest.fixture
 def inventory_context():
+    UnitOfMeasure.objects.get_or_create(
+        code="PCS",
+        defaults={"name": "Piece", "symbol": "pc", "category": "COUNT"},
+    )
     category = ProductCategory.objects.create(
         code="INV_ADVANCED",
         name="Inventory advanced",

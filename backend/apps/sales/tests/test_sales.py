@@ -87,17 +87,9 @@ def test_sale_currency_is_imposed_by_business():
         role="EMPLOYEE",
     )
     permissions = (
-        (
-            BusinessMemberPermission.Permission.INVOICE_CREATE,
-            BusinessMemberPermission.Permission.INVOICE_UPDATE,
-            BusinessMemberPermission.Permission.INVOICE_ISSUE,
-        )
-        if operation_type == "INVOICE"
-        else (
-            BusinessMemberPermission.Permission.SALE_CREATE,
-            BusinessMemberPermission.Permission.SALE_LINE_CREATE,
-            BusinessMemberPermission.Permission.SALE_COMPLETE,
-        )
+        BusinessMemberPermission.Permission.SALE_CREATE,
+        BusinessMemberPermission.Permission.SALE_LINE_CREATE,
+        BusinessMemberPermission.Permission.SALE_COMPLETE,
     )
     BusinessMemberPermission.objects.bulk_create(
         [BusinessMemberPermission(member=member, permission=permission) for permission in permissions]
@@ -126,12 +118,25 @@ def build_sale_context(customer=True, operation_type="DIRECT_SALE"):
         identity=employee,
         role="EMPLOYEE",
     )
-    BusinessMemberPermission.objects.create(
-        member=member,
-        permission=BusinessMemberPermission.Permission.SALE_CREATE,
+    permissions = (
+        (
+            BusinessMemberPermission.Permission.INVOICE_CREATE,
+            BusinessMemberPermission.Permission.INVOICE_UPDATE,
+            BusinessMemberPermission.Permission.INVOICE_ISSUE,
+        )
+        if operation_type == "INVOICE"
+        else (
+            BusinessMemberPermission.Permission.SALE_CREATE,
+            BusinessMemberPermission.Permission.SALE_LINE_CREATE,
+            BusinessMemberPermission.Permission.SALE_COMPLETE,
+        )
     )
-    BusinessMemberPermission.objects.create(member=member, permission=BusinessMemberPermission.Permission.SALE_LINE_CREATE)
-    BusinessMemberPermission.objects.create(member=member, permission=BusinessMemberPermission.Permission.SALE_COMPLETE)
+    BusinessMemberPermission.objects.bulk_create(
+        [
+            BusinessMemberPermission(member=member, permission=permission)
+            for permission in permissions
+        ]
+    )
     product = Product.objects.create(
         business=business, category=category, name="Item", selling_price="100.00", cost_price="60.00", currency="CDF", attributes={}
     )

@@ -112,7 +112,7 @@ def test_owner_creates_and_lists_compact_paginated_invitations(mailoutbox):
         if line.strip().startswith("https://")
     )
     delivered_query = parse_qs(urlsplit(delivered_link).query)
-    assert urlsplit(delivered_link).path == "/business-invitations"
+    assert urlsplit(delivered_link).path == "/api/invitation/continue"
     assert delivered_query["invitation"][0] == created.data["public_id"]
     invitation = BusinessMemberInvitation.objects.get(
         public_id=created.data["public_id"],

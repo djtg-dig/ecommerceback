@@ -130,7 +130,7 @@ def test_title_update_requires_non_empty_title():
     assert member.title == "Titre title-blank-target"
 
 
-def test_manage_members_permission_allows_title_update():
+def test_member_update_permission_allows_title_update():
     business, owner_identity, owner = create_business_with_owner("title-manager")
     manager_identity, manager = create_member(business, "title-manager-actor")
     _, member = create_member(business, "title-manager-target")
@@ -141,7 +141,7 @@ def test_manage_members_permission_allows_title_update():
         format="json",
     ).status_code == 403
 
-    grant_permission(owner, manager, Permission.MANAGE_MEMBERS)
+    grant_permission(owner, manager, Permission.MEMBER_UPDATE)
     response = authenticated_client(manager_identity).patch(
         member_url(business, member),
         {"title": "Nouveau titre"},
@@ -178,7 +178,7 @@ def test_suspended_member_cannot_update_title():
     business, owner_identity, owner = create_business_with_owner("title-suspended")
     manager_identity, manager = create_member(business, "title-suspended-actor")
     _, member = create_member(business, "title-suspended-target")
-    grant_permission(owner, manager, Permission.MANAGE_MEMBERS)
+    grant_permission(owner, manager, Permission.MEMBER_UPDATE)
 
     manager.status = BusinessMember.Status.SUSPENDED
     manager.save()
@@ -197,7 +197,7 @@ def test_suspended_member_cannot_update_title():
 def test_owner_can_suspend_member_and_access_is_blocked_immediately():
     business, owner_identity, owner = create_business_with_owner("suspend-owner")
     _, member = create_member(business, "suspend-target")
-    grant_permission(owner, member, Permission.USE_POS)
+    grant_permission(owner, member, Permission.SALE_CREATE)
 
     response = authenticated_client(owner_identity).post(
         f"{member_url(business, member)}suspend/",
@@ -211,12 +211,12 @@ def test_owner_can_suspend_member_and_access_is_blocked_immediately():
     assert member.suspended_at is not None
     assert member.suspended_by == owner.identity
     assert member.permissions.filter(
-        permission=Permission.USE_POS,
+        permission=Permission.SALE_CREATE,
     ).exists()
 
     from apps.businesses.permissions import has_permission
 
-    assert not has_permission(member, Permission.USE_POS)
+    assert not has_permission(member, Permission.SALE_CREATE)
     assert authenticated_client(member.identity).get(
         f"/api/v1/businesses/{business.public_id}/members/"
     ).status_code == 403
@@ -225,7 +225,7 @@ def test_owner_can_suspend_member_and_access_is_blocked_immediately():
 def test_suspension_is_idempotent():
     business, owner_identity, owner = create_business_with_owner("suspend-idempotent")
     _, member = create_member(business, "suspend-idempotent-target")
-    grant_permission(owner, member, Permission.USE_POS)
+    grant_permission(owner, member, Permission.SALE_CREATE)
 
     first = authenticated_client(owner_identity).post(
         f"{member_url(business, member)}suspend/",
@@ -246,7 +246,7 @@ def test_suspension_is_idempotent():
 def test_owner_cannot_suspend_owner_or_self_suspend():
     business, owner_identity, owner = create_business_with_owner("suspend-owner-protect")
     manager_identity, manager = create_member(business, "suspend-manager-actor")
-    grant_permission(owner, manager, Permission.MANAGE_MEMBERS)
+    grant_permission(owner, manager, Permission.MEMBER_SUSPEND)
 
     owner_suspend = authenticated_client(owner_identity).post(
         f"{member_url(business, owner)}suspend/",
@@ -265,11 +265,12 @@ def test_owner_cannot_suspend_owner_or_self_suspend():
     assert manager.status == BusinessMember.Status.ACTIVE
 
 
-def test_manage_members_permission_allows_suspend_and_reactivate():
+def test_atomic_permissions_allow_suspend_and_reactivate():
     business, owner_identity, owner = create_business_with_owner("suspend-manager")
     manager_identity, manager = create_member(business, "suspend-manager-actor")
     _, member = create_member(business, "suspend-manager-target")
-    grant_permission(owner, manager, Permission.MANAGE_MEMBERS)
+    grant_permission(owner, manager, Permission.MEMBER_SUSPEND)
+    grant_permission(owner, manager, Permission.MEMBER_REACTIVATE)
 
     suspend_response = authenticated_client(manager_identity).post(
         f"{member_url(business, member)}suspend/",
@@ -294,7 +295,7 @@ def test_manage_members_permission_allows_suspend_and_reactivate():
 def test_reactivation_restores_existing_permissions_without_elevation():
     business, owner_identity, owner = create_business_with_owner("reactivate")
     _, member = create_member(business, "reactivate-target")
-    grant_permission(owner, member, Permission.USE_POS)
+    grant_permission(owner, member, Permission.SALE_CREATE)
 
     authenticated_client(owner_identity).post(
         f"{member_url(business, member)}suspend/",
@@ -307,11 +308,11 @@ def test_reactivation_restores_existing_permissions_without_elevation():
 
     assert response.status_code == 200
     assert response.data["status"] == BusinessMember.Status.ACTIVE
-    assert response.data["permissions"] == [Permission.USE_POS]
+    assert response.data["permissions"] == [Permission.SALE_CREATE]
     member.refresh_from_db()
-    assert member.permissions.filter(permission=Permission.USE_POS).exists()
+    assert member.permissions.filter(permission=Permission.SALE_CREATE).exists()
     assert not member.permissions.filter(
-        permission=Permission.MANAGE_MEMBERS,
+        permission=Permission.MEMBER_UPDATE,
     ).exists()
 
 
@@ -349,8 +350,8 @@ def test_removed_member_cannot_be_reactivated_through_endpoint():
 def test_owner_can_logically_remove_member_and_permissions_are_revoked():
     business, owner_identity, owner = create_business_with_owner("remove-owner")
     _, member = create_member(business, "remove-target")
-    grant_permission(owner, member, Permission.USE_POS)
-    grant_permission(owner, member, Permission.VIEW_CATALOG)
+    grant_permission(owner, member, Permission.SALE_CREATE)
+    grant_permission(owner, member, Permission.PRODUCT_VIEW)
 
     response = authenticated_client(owner_identity).delete(
         member_url(business, member),
@@ -388,7 +389,7 @@ def test_logical_removal_is_idempotent():
 def test_owner_cannot_be_removed_and_member_cannot_remove_themselves():
     business, owner_identity, owner = create_business_with_owner("remove-protect")
     manager_identity, manager = create_member(business, "remove-manager-actor")
-    grant_permission(owner, manager, Permission.MANAGE_MEMBERS)
+    grant_permission(owner, manager, Permission.MEMBER_REMOVE)
 
     owner_remove = authenticated_client(owner_identity).delete(
         member_url(business, owner),
@@ -405,11 +406,11 @@ def test_owner_cannot_be_removed_and_member_cannot_remove_themselves():
     assert manager.status == BusinessMember.Status.ACTIVE
 
 
-def test_manage_members_permission_allows_logical_removal():
+def test_member_remove_permission_allows_logical_removal():
     business, owner_identity, owner = create_business_with_owner("remove-manager")
     manager_identity, manager = create_member(business, "remove-manager-actor")
     _, member = create_member(business, "remove-manager-target")
-    grant_permission(owner, manager, Permission.MANAGE_MEMBERS)
+    grant_permission(owner, manager, Permission.MEMBER_REMOVE)
 
     response = authenticated_client(manager_identity).delete(
         member_url(business, member),
@@ -601,6 +602,7 @@ def test_lifecycle_payloads_never_expose_internal_ids_or_identity():
         assert response.status_code == 200
         assert set(response.data) == {
             "public_id",
+            "identity_email",
             "title",
             "is_owner",
             "status",

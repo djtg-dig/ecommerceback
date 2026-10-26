@@ -77,7 +77,7 @@ def test_expense_report_categories_periods_and_payments_do_not_change_charge():
     grant_permission(
         owner_member,
         manager_member,
-        BusinessMemberPermission.Permission.VIEW_REPORTS,
+        BusinessMemberPermission.Permission.EXPENSE_RECEIVABLE_REPORT_VIEW,
     )
     first = ExpenseCategory.objects.create(business=business, code="FIRST", name="First")
     second = ExpenseCategory.objects.create(business=business, code="SECOND", name="Second")
@@ -259,7 +259,7 @@ def test_receivables_report_permissions_and_business_isolation():
     grant_permission(
         owner_member,
         manager_member,
-        BusinessMemberPermission.Permission.VIEW_REPORTS,
+        BusinessMemberPermission.Permission.EXPENSE_RECEIVABLE_REPORT_VIEW,
     )
     BusinessMember.objects.create(business=business, identity=employee, role="EMPLOYEE")
     other_customer = Customer.objects.create(business=other_business, name="Hidden")

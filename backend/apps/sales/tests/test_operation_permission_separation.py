@@ -126,8 +126,8 @@ def test_sale_and_invoice_permissions_are_mutually_exclusive(operations_context)
     assert {item["operation_type"] for item in sales_list.data} == {"DIRECT_SALE"}
     assert {item["operation_type"] for item in invoice_list.data} == {"INVOICE"}
     assert no_permission_client.get(base + "sales/").status_code == 403
-    assert sales_client.get(base + "customers/search/").status_code == 200
-    assert invoice_client.get(base + "customers/search/").status_code == 200
+    assert sales_client.get(base + "customers/pos/search/").status_code == 200
+    assert invoice_client.get(base + "customers/pos/search/").status_code == 200
 
     assert sales_client.post(base + "sales/", {"operation_type": "INVOICE", "customer_name_snapshot": "Blocked"}, format="json").status_code == 403
     assert invoice_client.post(base + "sales/", {"operation_type": "DIRECT_SALE"}, format="json").status_code == 403

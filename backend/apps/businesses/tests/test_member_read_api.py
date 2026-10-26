@@ -66,6 +66,7 @@ def test_member_list_is_compact_paginated_stable_and_excludes_removed_members():
     }
     assert set(first.data["results"][0]) == {
         "public_id",
+        "identity_email",
         "title",
         "is_owner",
         "status",
@@ -78,8 +79,8 @@ def test_member_list_is_compact_paginated_stable_and_excludes_removed_members():
 def test_member_detail_is_scoped_and_exposes_prefetched_explicit_permissions():
     business, owner_identity, owner = create_business_with_owner("detail")
     _, target = create_member(business, "detail-target")
-    grant_permission(owner, target, Permission.USE_POS)
-    grant_permission(owner, target, Permission.VIEW_CATALOG)
+    grant_permission(owner, target, Permission.SALE_CREATE)
+    grant_permission(owner, target, Permission.PRODUCT_VIEW)
     url = (
         f"/api/v1/businesses/{business.public_id}/members/"
         f"{target.public_id}/"
@@ -90,10 +91,11 @@ def test_member_detail_is_scoped_and_exposes_prefetched_explicit_permissions():
     assert response.status_code == 200
     assert response.data == {
         "public_id": target.public_id,
+        "identity_email": "",
         "title": target.title,
         "is_owner": False,
         "status": BusinessMember.Status.ACTIVE,
-        "permissions": [Permission.USE_POS, Permission.VIEW_CATALOG],
+        "permissions": [Permission.PRODUCT_VIEW, Permission.SALE_CREATE],
         "joined_at": response.data["joined_at"],
     }
 
@@ -101,7 +103,7 @@ def test_member_detail_is_scoped_and_exposes_prefetched_explicit_permissions():
     assert authenticated_client(owner_identity).get(url).status_code == 404
 
 
-def test_view_members_permission_has_no_legacy_role_or_title_bypass():
+def test_member_view_permission_has_no_legacy_role_or_title_bypass():
     business, owner_identity, owner = create_business_with_owner("permission")
     manager_identity, manager = create_member(
         business,
@@ -113,7 +115,7 @@ def test_view_members_permission_has_no_legacy_role_or_title_bypass():
     assert authenticated_client(owner_identity).get(url).status_code == 200
     assert authenticated_client(manager_identity).get(url).status_code == 403
 
-    grant_permission(owner, manager, Permission.VIEW_MEMBERS)
+    grant_permission(owner, manager, Permission.MEMBER_VIEW)
     assert authenticated_client(manager_identity).get(url).status_code == 200
 
     manager.status = BusinessMember.Status.SUSPENDED

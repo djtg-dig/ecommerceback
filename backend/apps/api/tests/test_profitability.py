@@ -46,7 +46,7 @@ def context(subject_suffix=""):
     grant_permission(
         owner_member,
         manager_member,
-        BusinessMemberPermission.Permission.VIEW_PROFITABILITY,
+        BusinessMemberPermission.Permission.PROFITABILITY_VIEW,
     )
     category, _ = ProductCategory.objects.get_or_create(
         code="PROFIT",
@@ -280,11 +280,14 @@ def test_profitability_does_not_double_count_credit_refund_or_expense():
     product.selling_price = Decimal("100")
     product.cost_price = Decimal("60")
     product.save(update_fields=("selling_price", "cost_price", "updated_at"))
+    customer = Customer.objects.create(business=business, name="Economic customer")
     sale = Sale.objects.create(
         business=business,
-        customer=Customer.objects.create(business=business, name="Economic customer"),
+        customer=customer,
         currency="CDF",
         created_by=owner,
+        operation_type=Sale.OperationType.INVOICE,
+        customer_name_snapshot=customer.name,
     )
     SaleLine.objects.create(
         sale=sale,

@@ -110,11 +110,11 @@ def test_legacy_manager_needs_each_explicit_permission(permission_context):
     ).status_code == 403
 
     grants = (
-        Permission.VIEW_CATALOG,
-        Permission.MANAGE_CATALOG,
-        Permission.USE_POS,
-        Permission.VIEW_INVENTORY,
-        Permission.MANAGE_INVENTORY,
+        Permission.PRODUCT_VIEW,
+        Permission.PRODUCT_UPDATE,
+        Permission.SALE_CREATE,
+        Permission.INVENTORY_VIEW,
+        Permission.INVENTORY_INITIALIZE,
     )
     for permission in grants:
         grant_permission(context["owner"], context["manager"], permission)
@@ -141,7 +141,7 @@ def test_suspended_member_is_forbidden_and_foreign_member_is_hidden(
     grant_permission(
         context["owner"],
         context["suspended"],
-        Permission.VIEW_CATALOG,
+        Permission.PRODUCT_VIEW,
     )
     context["suspended"].status = BusinessMember.Status.SUSPENDED
     context["suspended"].save(update_fields=("status", "updated_at"))

@@ -38,7 +38,7 @@ def make_context(suffix):
     grant_permission(
         owner_member,
         manager_member,
-        BusinessMemberPermission.Permission.VIEW_REPORTS,
+        BusinessMemberPermission.Permission.SALE_REPORT_VIEW,
     )
     category, _ = ProductCategory.objects.get_or_create(code="REPORTS", defaults={"name": "Reports", "slug": "reports"})
     return business, owner, manager, employee, category

@@ -54,6 +54,8 @@ def make_completed_sale(suffix, amount_paid):
         customer=customer,
         currency="CDF",
         created_by=owner,
+        operation_type=Sale.OperationType.INVOICE,
+        customer_name_snapshot=customer.name,
     )
     line = SaleLine.objects.create(
         sale=sale,

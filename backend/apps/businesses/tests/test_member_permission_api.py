@@ -8,6 +8,7 @@ from apps.businesses.models import (
     BusinessMember,
     BusinessMemberPermission,
 )
+from apps.businesses.permissions import atomic_permission_values
 from apps.businesses.services import grant_permission, remove_member
 
 
@@ -65,29 +66,29 @@ def test_owner_can_grant_and_revoke_permission():
 
     grant_response = authenticated_client(owner_identity).post(
         permissions_url(business, member),
-        {"permission": Permission.USE_POS},
+        {"permission": Permission.SALE_CREATE},
         format="json",
     )
 
     assert grant_response.status_code == 201
-    assert grant_response.data == {"permission": Permission.USE_POS}
-    assert member.permissions.filter(permission=Permission.USE_POS).exists()
+    assert grant_response.data == {"permission": Permission.SALE_CREATE}
+    assert member.permissions.filter(permission=Permission.SALE_CREATE).exists()
 
     revoke_response = authenticated_client(owner_identity).delete(
-        permission_url(business, member, Permission.USE_POS),
+        permission_url(business, member, Permission.SALE_CREATE),
     )
 
     assert revoke_response.status_code == 204
     assert not member.permissions.filter(
-        permission=Permission.USE_POS,
+        permission=Permission.SALE_CREATE,
     ).exists()
 
 
 def test_owner_can_read_member_permissions():
     business, owner_identity, owner = create_business_with_owner("read-owner")
     _, member = create_member(business, "read-target")
-    grant_permission(owner, member, Permission.USE_POS)
-    grant_permission(owner, member, Permission.VIEW_CATALOG)
+    grant_permission(owner, member, Permission.SALE_CREATE)
+    grant_permission(owner, member, Permission.PRODUCT_VIEW)
 
     response = authenticated_client(owner_identity).get(
         permissions_url(business, member),
@@ -95,8 +96,8 @@ def test_owner_can_read_member_permissions():
 
     assert response.status_code == 200
     assert response.data == [
-        {"permission": Permission.USE_POS},
-        {"permission": Permission.VIEW_CATALOG},
+        {"permission": Permission.PRODUCT_VIEW},
+        {"permission": Permission.SALE_CREATE},
     ]
 
 
@@ -109,7 +110,7 @@ def test_owner_permissions_are_implicit_and_readable():
 
     assert response.status_code == 200
     assert [row["permission"] for row in response.data] == list(
-        Permission.values,
+        atomic_permission_values(),
     )
     assert not owner.permissions.exists()
 
@@ -121,7 +122,7 @@ def test_permission_catalog_lists_registered_permissions():
 
     assert response.status_code == 200
     assert [row["permission"] for row in response.data] == list(
-        Permission.values,
+        atomic_permission_values(),
     )
     assert all(row["label"] for row in response.data)
 
@@ -132,50 +133,50 @@ def test_grant_is_idempotent():
 
     first = authenticated_client(owner_identity).post(
         permissions_url(business, member),
-        {"permission": Permission.USE_POS},
+        {"permission": Permission.SALE_CREATE},
         format="json",
     )
     second = authenticated_client(owner_identity).post(
         permissions_url(business, member),
-        {"permission": Permission.USE_POS},
+        {"permission": Permission.SALE_CREATE},
         format="json",
     )
 
     assert first.status_code == 201
     assert second.status_code == 201
-    assert member.permissions.filter(permission=Permission.USE_POS).count() == 1
+    assert member.permissions.filter(permission=Permission.SALE_CREATE).count() == 1
 
 
 def test_revoke_is_idempotent():
     business, owner_identity, owner = create_business_with_owner("revoke-idempotent")
     _, member = create_member(business, "revoke-idempotent-target")
-    grant_permission(owner, member, Permission.USE_POS)
+    grant_permission(owner, member, Permission.SALE_CREATE)
 
     first = authenticated_client(owner_identity).delete(
-        permission_url(business, member, Permission.USE_POS),
+        permission_url(business, member, Permission.SALE_CREATE),
     )
     second = authenticated_client(owner_identity).delete(
-        permission_url(business, member, Permission.USE_POS),
+        permission_url(business, member, Permission.SALE_CREATE),
     )
 
     assert first.status_code == 204
     assert second.status_code == 204
-    assert not member.permissions.filter(permission=Permission.USE_POS).exists()
+    assert not member.permissions.filter(permission=Permission.SALE_CREATE).exists()
 
 
-def test_manage_members_without_ownership_cannot_grant_or_revoke():
+def test_unrelated_member_permission_cannot_grant_or_revoke():
     business, owner_identity, owner = create_business_with_owner("grant-manager")
     manager_identity, manager = create_member(business, "grant-manager-actor")
     _, member = create_member(business, "grant-manager-target")
-    grant_permission(owner, manager, Permission.MANAGE_MEMBERS)
+    grant_permission(owner, manager, Permission.MEMBER_UPDATE)
 
     grant_response = authenticated_client(manager_identity).post(
         permissions_url(business, member),
-        {"permission": Permission.USE_POS},
+        {"permission": Permission.SALE_CREATE},
         format="json",
     )
     revoke_response = authenticated_client(manager_identity).delete(
-        permission_url(business, member, Permission.USE_POS),
+        permission_url(business, member, Permission.SALE_CREATE),
     )
 
     assert grant_response.status_code == 403
@@ -190,11 +191,11 @@ def test_member_without_permission_cannot_grant_or_revoke():
 
     grant_response = authenticated_client(employee_identity).post(
         permissions_url(business, member),
-        {"permission": Permission.USE_POS},
+        {"permission": Permission.SALE_CREATE},
         format="json",
     )
     revoke_response = authenticated_client(employee_identity).delete(
-        permission_url(business, member, Permission.USE_POS),
+        permission_url(business, member, Permission.SALE_CREATE),
     )
 
     assert grant_response.status_code == 403
@@ -213,7 +214,7 @@ def test_legacy_manager_without_permission_cannot_grant():
 
     response = authenticated_client(manager_identity).post(
         permissions_url(business, member),
-        {"permission": Permission.USE_POS},
+        {"permission": Permission.SALE_CREATE},
         format="json",
     )
 
@@ -225,18 +226,19 @@ def test_suspended_member_cannot_grant_or_revoke():
     business, owner_identity, owner = create_business_with_owner("grant-suspended")
     manager_identity, manager = create_member(business, "grant-suspended-actor")
     _, member = create_member(business, "grant-suspended-target")
-    grant_permission(owner, manager, Permission.MANAGE_MEMBERS)
+    grant_permission(owner, manager, Permission.MEMBER_PERMISSION_GRANT)
+    grant_permission(owner, manager, Permission.MEMBER_PERMISSION_REVOKE)
 
     manager.status = BusinessMember.Status.SUSPENDED
     manager.save()
 
     grant_response = authenticated_client(manager_identity).post(
         permissions_url(business, member),
-        {"permission": Permission.USE_POS},
+        {"permission": Permission.SALE_CREATE},
         format="json",
     )
     revoke_response = authenticated_client(manager_identity).delete(
-        permission_url(business, member, Permission.USE_POS),
+        permission_url(business, member, Permission.SALE_CREATE),
     )
 
     assert grant_response.status_code == 403
@@ -248,17 +250,18 @@ def test_removed_member_cannot_grant_or_revoke():
     business, owner_identity, owner = create_business_with_owner("grant-removed")
     manager_identity, manager = create_member(business, "grant-removed-actor")
     _, member = create_member(business, "grant-removed-target")
-    grant_permission(owner, manager, Permission.MANAGE_MEMBERS)
+    grant_permission(owner, manager, Permission.MEMBER_PERMISSION_GRANT)
+    grant_permission(owner, manager, Permission.MEMBER_PERMISSION_REVOKE)
 
     remove_member(owner, manager)
 
     grant_response = authenticated_client(manager_identity).post(
         permissions_url(business, member),
-        {"permission": Permission.USE_POS},
+        {"permission": Permission.SALE_CREATE},
         format="json",
     )
     revoke_response = authenticated_client(manager_identity).delete(
-        permission_url(business, member, Permission.USE_POS),
+        permission_url(business, member, Permission.SALE_CREATE),
     )
 
     assert grant_response.status_code == 404
@@ -271,11 +274,11 @@ def test_owner_cannot_grant_to_owner_or_self():
 
     owner_grant = authenticated_client(owner_identity).post(
         permissions_url(business, owner),
-        {"permission": Permission.USE_POS},
+        {"permission": Permission.SALE_CREATE},
         format="json",
     )
     owner_revoke = authenticated_client(owner_identity).delete(
-        permission_url(business, owner, Permission.USE_POS),
+        permission_url(business, owner, Permission.SALE_CREATE),
     )
 
     assert owner_grant.status_code == 400
@@ -318,24 +321,24 @@ def test_permission_grant_requires_payload():
 def test_permission_mutations_are_blocked_for_inactive_business():
     business, owner_identity, owner = create_business_with_owner("grant-inactive")
     _, member = create_member(business, "grant-inactive-target")
-    grant_permission(owner, member, Permission.USE_POS)
+    grant_permission(owner, member, Permission.SALE_CREATE)
     business.status = Business.Status.SUSPENDED
     business.save()
 
     grant_response = authenticated_client(owner_identity).post(
         permissions_url(business, member),
-        {"permission": Permission.VIEW_CATALOG},
+        {"permission": Permission.PRODUCT_VIEW},
         format="json",
     )
     revoke_response = authenticated_client(owner_identity).delete(
-        permission_url(business, member, Permission.USE_POS),
+        permission_url(business, member, Permission.SALE_CREATE),
     )
 
     assert grant_response.status_code == 403
     assert revoke_response.status_code == 403
-    assert member.permissions.filter(permission=Permission.USE_POS).exists()
+    assert member.permissions.filter(permission=Permission.SALE_CREATE).exists()
     assert not member.permissions.filter(
-        permission=Permission.VIEW_CATALOG,
+        permission=Permission.PRODUCT_VIEW,
     ).exists()
 
 
@@ -346,11 +349,11 @@ def test_permission_administration_never_crosses_business_boundaries():
 
     foreign_grant = authenticated_client(owner_a_identity).post(
         permissions_url(business_b, member_b),
-        {"permission": Permission.USE_POS},
+        {"permission": Permission.SALE_CREATE},
         format="json",
     )
     foreign_revoke = authenticated_client(owner_a_identity).delete(
-        permission_url(business_b, member_b, Permission.USE_POS),
+        permission_url(business_b, member_b, Permission.SALE_CREATE),
     )
     foreign_read = authenticated_client(owner_a_identity).get(
         permissions_url(business_b, member_b),
@@ -366,7 +369,7 @@ def test_permission_administration_never_crosses_business_boundaries():
     assert not member_b.permissions.exists()
 
 
-def test_permission_read_requires_view_members():
+def test_permission_read_requires_member_permission_view():
     business, owner_identity, owner = create_business_with_owner("read-gate")
     manager_identity, manager = create_member(business, "read-gate-manager")
     _, member = create_member(business, "read-gate-target")
@@ -378,7 +381,7 @@ def test_permission_read_requires_view_members():
         catalog_url(business),
     ).status_code == 403
 
-    grant_permission(owner, manager, Permission.VIEW_MEMBERS)
+    grant_permission(owner, manager, Permission.MEMBER_PERMISSION_VIEW)
 
     assert authenticated_client(manager_identity).get(
         permissions_url(business, member),
@@ -391,7 +394,7 @@ def test_permission_read_requires_view_members():
 def test_permission_read_returns_404_for_removed_member():
     business, owner_identity, owner = create_business_with_owner("read-removed")
     _, member = create_member(business, "read-removed-target")
-    grant_permission(owner, member, Permission.USE_POS)
+    grant_permission(owner, member, Permission.SALE_CREATE)
     remove_member(owner, member)
 
     response = authenticated_client(owner_identity).get(
@@ -404,23 +407,23 @@ def test_permission_read_returns_404_for_removed_member():
 def test_permission_grant_preserves_existing_permissions():
     business, owner_identity, owner = create_business_with_owner("grant-preserve")
     _, member = create_member(business, "grant-preserve-target")
-    grant_permission(owner, member, Permission.USE_POS)
+    grant_permission(owner, member, Permission.SALE_CREATE)
 
     response = authenticated_client(owner_identity).post(
         permissions_url(business, member),
-        {"permission": Permission.VIEW_CATALOG},
+        {"permission": Permission.PRODUCT_VIEW},
         format="json",
     )
 
     assert response.status_code == 201
-    assert member.permissions.filter(permission=Permission.USE_POS).exists()
-    assert member.permissions.filter(permission=Permission.VIEW_CATALOG).exists()
+    assert member.permissions.filter(permission=Permission.SALE_CREATE).exists()
+    assert member.permissions.filter(permission=Permission.PRODUCT_VIEW).exists()
 
 
 def test_suspended_member_keeps_permissions_but_cannot_use_them():
     business, owner_identity, owner = create_business_with_owner("suspend-perms")
     _, member = create_member(business, "suspend-perms-target")
-    grant_permission(owner, member, Permission.USE_POS)
+    grant_permission(owner, member, Permission.SALE_CREATE)
 
     authenticated_client(owner_identity).post(
         f"{member_url(business, member)}suspend/",
@@ -428,16 +431,16 @@ def test_suspended_member_keeps_permissions_but_cannot_use_them():
     )
     member.refresh_from_db()
 
-    assert member.permissions.filter(permission=Permission.USE_POS).exists()
+    assert member.permissions.filter(permission=Permission.SALE_CREATE).exists()
     from apps.businesses.permissions import has_permission
 
-    assert not has_permission(member, Permission.USE_POS)
+    assert not has_permission(member, Permission.SALE_CREATE)
 
 
 def test_removed_member_permissions_are_not_restored():
     business, owner_identity, owner = create_business_with_owner("remove-perms")
     _, member = create_member(business, "remove-perms-target")
-    grant_permission(owner, member, Permission.USE_POS)
+    grant_permission(owner, member, Permission.SALE_CREATE)
 
     remove_member(owner, member)
     member.refresh_from_db()
@@ -452,22 +455,22 @@ def test_concurrent_grant_and_revoke_are_serialized():
 
     grant = authenticated_client(owner_identity).post(
         permissions_url(business, member),
-        {"permission": Permission.USE_POS},
+        {"permission": Permission.SALE_CREATE},
         format="json",
     )
     revoke = authenticated_client(owner_identity).delete(
-        permission_url(business, member, Permission.USE_POS),
+        permission_url(business, member, Permission.SALE_CREATE),
     )
     re_grant = authenticated_client(owner_identity).post(
         permissions_url(business, member),
-        {"permission": Permission.USE_POS},
+        {"permission": Permission.SALE_CREATE},
         format="json",
     )
 
     assert grant.status_code == 201
     assert revoke.status_code == 204
     assert re_grant.status_code == 201
-    assert member.permissions.filter(permission=Permission.USE_POS).count() == 1
+    assert member.permissions.filter(permission=Permission.SALE_CREATE).count() == 1
 
 
 def test_permission_payloads_never_expose_internal_ids():
@@ -476,7 +479,7 @@ def test_permission_payloads_never_expose_internal_ids():
 
     grant_response = authenticated_client(owner_identity).post(
         permissions_url(business, member),
-        {"permission": Permission.USE_POS},
+        {"permission": Permission.SALE_CREATE},
         format="json",
     )
     read_response = authenticated_client(owner_identity).get(

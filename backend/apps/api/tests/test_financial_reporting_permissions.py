@@ -54,10 +54,10 @@ def reporting_permission_context():
     )
     base = f"/api/v1/businesses/{business.public_id}/"
     endpoints = {
-        Permission.VIEW_FINANCIAL_SUMMARY: base + "financial-movements/",
-        Permission.VIEW_DASHBOARD: base + "dashboard/",
-        Permission.VIEW_PROFITABILITY: base + "profitability-summary/",
-        Permission.VIEW_REPORTS: base + "reports/sales/",
+        Permission.FINANCIAL_MOVEMENT_VIEW: base + "financial-movements/",
+        Permission.DASHBOARD_VIEW: base + "dashboard/",
+        Permission.PROFITABILITY_VIEW: base + "profitability-summary/",
+        Permission.SALE_REPORT_VIEW: base + "reports/sales/",
     }
 
     return {

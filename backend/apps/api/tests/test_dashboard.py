@@ -42,6 +42,11 @@ def return_context(suffix, amount_paid):
         product=product,
         quantity=Decimal("10"),
     )
+    operation_type = (
+        Sale.OperationType.DIRECT_SALE
+        if Decimal(amount_paid) == Decimal("100")
+        else Sale.OperationType.INVOICE
+    )
     sale = Sale.objects.create(
         business=business,
         customer=Customer.objects.create(
@@ -50,6 +55,8 @@ def return_context(suffix, amount_paid):
         ),
         currency="CDF",
         created_by=owner,
+        operation_type=operation_type,
+        customer_name_snapshot=f"Return customer {suffix}",
     )
     line = SaleLine.objects.create(
         sale=sale,
@@ -115,7 +122,7 @@ def test_dashboard_permissions_and_period_validation():
     grant_permission(
         memberships["OWNER"],
         memberships["MANAGER"],
-        BusinessMemberPermission.Permission.VIEW_DASHBOARD,
+        BusinessMemberPermission.Permission.DASHBOARD_VIEW,
     )
     url=f'/api/v1/businesses/{business.public_id}/dashboard/'
     def api(user):

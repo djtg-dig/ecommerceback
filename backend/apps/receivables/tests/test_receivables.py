@@ -161,8 +161,12 @@ def test_receivable_payment_idempotency_conflict_immutability_and_finance_rollba
 
 def test_financial_summary_counts_only_real_collections(data):
     business, owner, _, product, _, customer = data
+    product.min_price = Decimal("100000.00")
+    product.max_price = Decimal("100000.00")
     product.selling_price = Decimal("100000.00")
-    product.save(update_fields=("selling_price", "updated_at"))
+    product.save(
+        update_fields=("min_price", "max_price", "selling_price", "updated_at")
+    )
     client = api(owner)
     base = f"/api/v1/businesses/{business.public_id}/"
 
@@ -177,11 +181,12 @@ def test_financial_summary_counts_only_real_collections(data):
         return sale_id
 
     paid_sale = create_sale("0.350", "DIRECT_SALE")
-    assert client.post(
+    paid_response = client.post(
         base + f"sales/{paid_sale}/complete/",
         {"amount_paid": "35000.00", "payment_method": "CASH"},
         format="json",
-    ).status_code == 200
+    )
+    assert paid_response.status_code == 200, paid_response.data
     credit_sale = create_sale("0.200", "INVOICE")
     assert client.post(
         base + f"sales/{credit_sale}/complete/",

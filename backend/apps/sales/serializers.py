@@ -41,10 +41,12 @@ class CustomerSaleHistorySerializer(serializers.ModelSerializer):
             "currency",
             "total",
             "payment_status",
+            "receivable",
             "created_at",
             "completed_at",
         )
 
+    @extend_schema_field(serializers.CharField())
     def get_payment_status(self, sale):
         if sale.status != Sale.Status.COMPLETED:
             return "NOT_APPLICABLE"
@@ -52,6 +54,13 @@ class CustomerSaleHistorySerializer(serializers.ModelSerializer):
             return sale.receivable.status
         except ObjectDoesNotExist:
             return "PAID"
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_receivable(self, sale):
+        try:
+            return sale.receivable.public_id
+        except ObjectDoesNotExist:
+            return None
 
 
 class PosCustomerSerializer(serializers.ModelSerializer):
@@ -78,27 +87,56 @@ class SaleSerializer(serializers.ModelSerializer):
         fields = (
             "public_id",
             "customer",
-            "customer_name_snapshot", "operation_type", "invoice_number", "issued_at", "due_date", "stock_deducted", "receivable",
+            "customer_name_snapshot",
+            "operation_type",
+            "invoice_number",
+            "issued_at",
+            "due_date",
+            "stock_deducted",
+            "receivable",
             "status",
             "currency",
             "reference",
             "notes",
             "total",
+            "paid_amount",
+            "balance",
+            "payment_status",
             "created_at",
             "completed_at",
         )
+
+    @extend_schema_field(serializers.DecimalField(max_digits=16, decimal_places=2))
     def get_paid_amount(self, sale):
-        try: return sale.receivable.paid_amount
-        except ObjectDoesNotExist: return sale.total if sale.status == Sale.Status.COMPLETED else Decimal("0.00")
+        try:
+            return sale.receivable.paid_amount
+        except ObjectDoesNotExist:
+            if sale.status == Sale.Status.COMPLETED:
+                return sale.total
+            return Decimal("0.00")
+
+    @extend_schema_field(serializers.DecimalField(max_digits=16, decimal_places=2))
     def get_balance(self, sale):
-        try: return sale.receivable.balance
-        except ObjectDoesNotExist: return Decimal("0.00")
+        try:
+            return sale.receivable.balance
+        except ObjectDoesNotExist:
+            return Decimal("0.00")
+
+    @extend_schema_field(serializers.CharField())
     def get_payment_status(self, sale):
-        try: return sale.receivable.status
-        except ObjectDoesNotExist: return "PAID" if sale.status == Sale.Status.COMPLETED else "NOT_APPLICABLE"
+        try:
+            return sale.receivable.status
+        except ObjectDoesNotExist:
+            if sale.status == Sale.Status.COMPLETED:
+                return "PAID"
+            return "NOT_APPLICABLE"
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_receivable(self, sale):
-        try: return sale.receivable.public_id
-        except ObjectDoesNotExist: return None
+        try:
+            return sale.receivable.public_id
+        except ObjectDoesNotExist:
+            return None
 
 
 class SaleWrite(serializers.ModelSerializer):

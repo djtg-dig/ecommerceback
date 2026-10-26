@@ -178,7 +178,10 @@ class ProductListCreateView(BusinessProductMixin, APIView):
         )
         if not business:
             return self.not_found()
-        products = Product.objects.filter(business=business).select_related("category").prefetch_related(
+        products = Product.objects.filter(business=business).select_related(
+            "category",
+            "unit_of_measure",
+        ).prefetch_related(
             Prefetch(
                 "media",
                 queryset=ProductMedia.objects.filter(media_type=ProductMedia.MediaType.IMAGE)
