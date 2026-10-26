@@ -1078,9 +1078,15 @@ class BusinessInvitationAccountActionView(APIView):
 class BusinessInvitationAccountAcceptView(BusinessInvitationAccountActionView):
     action = "accept"
 
+    def post(self, request, invitation_public_id):
+        return super().post(request, invitation_public_id)
+
 
 class BusinessInvitationAccountDeclineView(BusinessInvitationAccountActionView):
     action = "decline"
+
+    def post(self, request, invitation_public_id):
+        return super().post(request, invitation_public_id)
 
 
 class BusinessInvitationAcceptView(BusinessInvitationRecipientActionView):
@@ -1800,3 +1806,25 @@ BusinessCategoriesView.get = extend_schema(
     auth=[],
     responses={200: CategorySerializer(many=True)},
 )(BusinessCategoriesView.get)
+
+# Contrats explicites pour les APIView qui ne portent pas de serializer_class.
+_media_upload = inline_serializer("BusinessMediaUpload", {"file": serializers.FileField()})
+_my_permissions = inline_serializer("BusinessMyPermissions", {
+    "user_id": serializers.UUIDField(), "member_status": serializers.CharField(),
+    "permissions": serializers.ListField(child=serializers.CharField()),
+})
+CurrencyListView.get = extend_schema(tags=["Businesses"], responses={200: CurrencySerializer(many=True)})(CurrencyListView.get)
+BusinessMediaView.get = extend_schema(tags=["Businesses"], operation_id="business_media_retrieve", request=None, responses={200: BusinessMediaSerializer, 403: None, 404: None})(BusinessMediaView.get)
+BusinessMediaView.patch = extend_schema(tags=["Businesses"], operation_id="business_media_replace", request=_media_upload, responses={200: BusinessMediaSerializer, 400: None, 403: None, 404: None, 502: None, 503: None})(BusinessMediaView.patch)
+BusinessMediaView.delete = extend_schema(tags=["Businesses"], operation_id="business_media_delete", request=None, responses={204: None, 403: None, 404: None})(BusinessMediaView.delete)
+BusinessCurrenciesView.get = extend_schema(tags=["Businesses"], responses={200: BusinessCurrencySerializer(many=True), 403: None, 404: None})(BusinessCurrenciesView.get)
+BusinessCurrenciesView.post = extend_schema(tags=["Businesses"], request=BusinessCurrencyWriteSerializer, responses={200: BusinessCurrencySerializer, 201: BusinessCurrencySerializer, 400: None, 403: None, 404: None})(BusinessCurrenciesView.post)
+BusinessCurrencyDetailView.patch = extend_schema(tags=["Businesses"], operation_id="business_currency_update", request=BusinessCurrencyWriteSerializer, responses={200: BusinessCurrencySerializer, 400: None, 403: None, 404: None})(BusinessCurrencyDetailView.patch)
+BusinessCurrencyDetailView.http_method_names = ["patch", "head", "options"]
+BusinessExchangeRatesView.get = extend_schema(tags=["Businesses"], operation_id="business_exchange_rate_list", responses={200: BusinessExchangeRateSerializer(many=True), 403: None, 404: None})(BusinessExchangeRatesView.get)
+BusinessExchangeRatesView.post = extend_schema(tags=["Businesses"], operation_id="business_exchange_rate_create", request=BusinessExchangeRateSerializer, responses={201: BusinessExchangeRateSerializer, 400: None, 403: None, 404: None})(BusinessExchangeRatesView.post)
+BusinessExchangeRatesView.http_method_names = ["get", "post", "head", "options"]
+BusinessMyPermissionsView.get = extend_schema(tags=["Businesses"], operation_id="business_my_permissions", responses={200: _my_permissions, 403: None, 404: None})(BusinessMyPermissionsView.get)
+BusinessInvitationRecipientListView.get = extend_schema(tags=["Businesses"], operation_id="business_recipient_invitation_list", parameters=[OpenApiParameter("invitation", str, OpenApiParameter.QUERY)], responses={200: BusinessMemberInvitationRecipientSerializer(many=True), 403: _invitation_error_schema})(BusinessInvitationRecipientListView.get)
+BusinessInvitationAccountAcceptView.post = extend_schema(tags=["Businesses"], operation_id="business_invitation_accept_authenticated", request=None, responses={200: BusinessMemberInvitationActionSerializer, 401: _invitation_error_schema, 403: _invitation_error_schema, 404: _invitation_error_schema, 409: _invitation_error_schema, 410: _invitation_error_schema})(BusinessInvitationAccountAcceptView.post)
+BusinessInvitationAccountDeclineView.post = extend_schema(tags=["Businesses"], operation_id="business_invitation_decline_authenticated", request=None, responses={200: BusinessMemberInvitationActionSerializer, 401: _invitation_error_schema, 403: _invitation_error_schema, 404: _invitation_error_schema, 409: _invitation_error_schema, 410: _invitation_error_schema})(BusinessInvitationAccountDeclineView.post)

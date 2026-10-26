@@ -18,6 +18,11 @@ def atomic_permission_values():
     return [value for value in BusinessMemberPermission.Permission.values if value not in LEGACY_PERMISSION_VALUES]
 
 
+# Référence immuable utilisée aussi par le schéma OpenAPI pour nommer sans
+# ambiguïté le sous-ensemble de permissions effectivement attribuables.
+ATOMIC_PERMISSION_VALUES = tuple(atomic_permission_values())
+
+
 def effective_permissions(member):
     """Return the current member's effective atomic permissions in registry order.
 

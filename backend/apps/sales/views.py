@@ -667,3 +667,19 @@ SaleReturns.post = extend_schema(
         409: _error_response,
     },
 )(SaleReturns.post)
+_customer_profile = inline_serializer(
+    name="CustomerCommercialProfile",
+    fields={
+        "customer": CustomerSerializer(),
+        "sales": serializers.JSONField(allow_null=True),
+        "financial_summary": serializers.JSONField(allow_null=True),
+        "capabilities": inline_serializer("CustomerCommercialCapabilities", {
+            "view_sales": serializers.BooleanField(), "view_invoices": serializers.BooleanField(),
+            "view_financials": serializers.BooleanField(), "view_receivables": serializers.BooleanField(),
+        }),
+    },
+)
+CustomerDetail.get = extend_schema(tags=["Customers"], operation_id="customer_retrieve", responses={200: CustomerSerializer, 403: None, 404: None})(CustomerDetail.get)
+CustomerDetail.patch = extend_schema(tags=["Customers"], operation_id="customer_update", request=CustomerSerializer, responses={200: CustomerSerializer, 400: None, 403: None, 404: None})(CustomerDetail.patch)
+CustomerCommercialProfile.get = extend_schema(tags=["Customers"], operation_id="customer_commercial_profile", responses={200: _customer_profile, 403: None, 404: None})(CustomerCommercialProfile.get)
+CustomerCommercialProfile.http_method_names = ["get", "head", "options"]

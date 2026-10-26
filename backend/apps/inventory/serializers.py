@@ -3,6 +3,7 @@
 from decimal import Decimal
 
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 
 from apps.catalog.models import Product, ProductVariant
 from .models import InventoryItem, StockMovement
@@ -24,13 +25,16 @@ class InventoryItemSerializer(serializers.ModelSerializer):
         model = InventoryItem
         fields = ("public_id", "product", "variant", "item_name", "internal_reference", "quantity", "reserved_quantity", "available_quantity", "low_stock_threshold", "is_low_stock", "stock_status", "last_movement_at", "created_at", "updated_at")
 
+    @extend_schema_field(serializers.CharField())
     def get_item_name(self, item):
         return item.product.name if item.product_id else item.variant.product.name
 
+    @extend_schema_field(serializers.CharField())
     def get_internal_reference(self, item):
         target = item.product if item.product_id else item.variant
         return target.internal_reference
 
+    @extend_schema_field(serializers.ChoiceField(choices=("AVAILABLE", "LOW_STOCK", "OUT_OF_STOCK")))
     def get_stock_status(self, item):
         if item.available_quantity == 0:
             return "OUT_OF_STOCK"
@@ -65,14 +69,17 @@ class StockMovementSerializer(serializers.ModelSerializer):
         model = StockMovement
         fields = ("public_id", "inventory_item", "item_name", "product", "variant", "movement_type", "quantity", "quantity_before", "quantity_after", "reason", "reference_type", "reference_id", "performed_by", "created_at")
 
+    @extend_schema_field(serializers.CharField())
     def get_item_name(self, movement):
         item = movement.inventory_item
         return item.product.name if item.product_id else item.variant.product.name
 
+    @extend_schema_field(serializers.CharField())
     def get_product(self, movement):
         item = movement.inventory_item
         return item.product.public_id if item.product_id else item.variant.product.public_id
 
+    @extend_schema_field(serializers.CharField(allow_null=True))
     def get_variant(self, movement):
         item = movement.inventory_item
         return item.variant.public_id if item.variant_id else None

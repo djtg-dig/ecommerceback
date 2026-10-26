@@ -22,6 +22,14 @@ class ProductCategorySerializer(serializers.ModelSerializer):
         fields = ("code", "name", "slug", "description", "parent_code", "level", "product_type_key", "sort_order")
 
 
+class UnitOfMeasureSerializer(serializers.ModelSerializer):
+    """Référence publique et immuable des unités de mesure."""
+
+    class Meta:
+        model = UnitOfMeasure
+        fields = ("code", "name", "symbol", "category")
+
+
 class AttributeOptionSerializer(serializers.Serializer):
     value = serializers.CharField()
     label = serializers.CharField()
@@ -65,18 +73,23 @@ class ProductOutputSerializer(serializers.ModelSerializer):
             setattr(product, cache_name, resolve_product_category(product))
         return getattr(product, cache_name)
 
+    @extend_schema_field(serializers.CharField())
     def get_category(self, product):
         return self._resolved_category(product).code
 
+    @extend_schema_field(serializers.CharField())
     def get_category_name(self, product):
         return self._resolved_category(product).name
 
+    @extend_schema_field(serializers.CharField())
     def get_category_source(self, product):
         return self._resolved_category(product).source
 
+    @extend_schema_field(serializers.CharField())
     def get_product_type_key(self, product):
         return self._resolved_category(product).product_type_key
 
+    @extend_schema_field(serializers.URLField(allow_null=True))
     def get_primary_image_url(self, product):
         prefetched = getattr(product, "_prefetched_objects_cache", {}).get("media")
         if prefetched is not None:

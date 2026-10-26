@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError
 from django.db.models import Prefetch, Q, Sum
 from rest_framework.pagination import PageNumberPagination
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -398,7 +398,7 @@ class Cancel(Action):
         return super().post(*a, **kw)
 
 
-from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.utils import extend_schema, inline_serializer, OpenApiParameter
 
 _bp = OpenApiParameter("business_public_id", str, OpenApiParameter.PATH)
 _sp = OpenApiParameter("supplier_public_id", str, OpenApiParameter.PATH)
@@ -504,6 +504,21 @@ LineDetail.http_method_names = ["get", "patch", "delete", "head", "options"]
 Confirm.http_method_names = ["post", "options"]
 Receive.http_method_names = ["post", "options"]
 Cancel.http_method_names = ["post", "options"]
+
+_supplier_profile = inline_serializer(
+    name="SupplierCommercialProfile",
+    fields={
+        "supplier": SupplierSerializer(),
+        "purchases": serializers.JSONField(),
+        "financial_summary": serializers.JSONField(allow_null=True),
+        "capabilities": inline_serializer("SupplierCommercialCapabilities", {"view_financials": serializers.BooleanField()}),
+    },
+)
+SupplierCommercialProfile.get = extend_schema(
+    tags=["Suppliers"], operation_id="supplier_commercial_profile", parameters=[_bp, _sp],
+    responses={200: _supplier_profile, 403: None, 404: None},
+)(SupplierCommercialProfile.get)
+SupplierCommercialProfile.http_method_names = ["get", "head", "options"]
 
 class PurchasePayments(PurchaseDetail):
     def get(self, r, business_public_id, purchase_public_id):

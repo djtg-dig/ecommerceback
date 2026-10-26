@@ -619,3 +619,8 @@ UserPreferencesView.patch = extend_schema(
     responses={200: UserPreferencesSerializer, 400: _error_schema, 401: _error_schema},
     description="Met à jour les préférences de l'identité E-commerce authentifiée.",
 )(UserPreferencesView.patch)
+EcommerceLogoutView.post = extend_schema(
+    tags=["Authentication"], operation_id="ecommerce_logout", request=None,
+    responses={204: None, 401: _error_schema},
+    description="Invalide les sessions JWT Ecommerce locales sans déconnecter Carri Account.",
+)(EcommerceLogoutView.post)

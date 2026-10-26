@@ -7,7 +7,7 @@ from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError
 from django.db.models import DecimalField, Exists, F, OuterRef, Prefetch, Q, Subquery, Value
 from django.db.models.functions import Coalesce, Trim, Upper
-from rest_framework import generics, permissions, status
+from rest_framework import generics, permissions, serializers, status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -29,6 +29,7 @@ from .serializers import (
     ProductVariantWriteSerializer,
     ProductWriteSerializer,
     PosSearchResultSerializer,
+    UnitOfMeasureSerializer,
 )
 from .services import create_product, create_variant, effective_attributes
 
@@ -113,15 +114,12 @@ class UnitOfMeasureListView(generics.ListAPIView):
     def get_queryset(self):
         return UnitOfMeasure.objects.all()
 
+    def get(self, request, *args, **kwargs):
+        """Liste les unités partagées sans hériter du contrat des catégories."""
+        return super().get(request, *args, **kwargs)
+
     def get_serializer_class(self):
-        from rest_framework import serializers
-
-        class UnitSerializer(serializers.ModelSerializer):
-            class Meta:
-                model = UnitOfMeasure
-                fields = ("code", "name", "symbol", "category")
-
-        return UnitSerializer
+        return UnitOfMeasureSerializer
 
 
 class BusinessProductMixin:
@@ -584,7 +582,7 @@ class ProductVariantDetailView(BusinessProductMixin, APIView):
             return Response({"detail": "Combinaison de variante ou référence interne déjà utilisée."}, status=400)
         return Response(ProductVariantOutputSerializer(variant).data)
 
-from drf_spectacular.utils import OpenApiParameter, extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
 
 _business_public_id = OpenApiParameter("business_public_id", str, OpenApiParameter.PATH, description="Identifiant public Business, format SH + 10 caractères.")
 _product_public_id = OpenApiParameter("product_public_id", str, OpenApiParameter.PATH, description="Identifiant public Product, format PR + 10 caractères.")
@@ -617,3 +615,17 @@ ProductVariantListCreateView.get = extend_schema(tags=["Product Variants"], oper
 ProductVariantListCreateView.post = extend_schema(tags=["Product Variants"], operation_id="product_variant_create", parameters=[_business_public_id, _product_public_id], request=ProductVariantWriteSerializer, responses={201: ProductVariantOutputSerializer, 400: None, 403: None, 404: None})(ProductVariantListCreateView.post)
 ProductVariantDetailView.get = extend_schema(tags=["Product Variants"], operation_id="product_variant_retrieve", parameters=[_business_public_id, _product_public_id, _variant_public_id], responses={200: ProductVariantOutputSerializer, 403: None, 404: None})(ProductVariantDetailView.get)
 ProductVariantDetailView.patch = extend_schema(tags=["Product Variants"], operation_id="product_variant_update", parameters=[_business_public_id, _product_public_id, _variant_public_id], request=ProductVariantWriteSerializer, responses={200: ProductVariantOutputSerializer, 400: None, 403: None, 404: None})(ProductVariantDetailView.patch)
+_product_media_upload = inline_serializer("ProductMediaUpload", {
+    "media_type": serializers.ChoiceField(choices=("IMAGE", "VIDEO")),
+    "file": serializers.FileField(),
+})
+_product_media_update = inline_serializer("ProductMediaUpdate", {
+    "is_primary": serializers.BooleanField(required=False),
+    "position": serializers.IntegerField(required=False, min_value=0),
+})
+ProductMediaListCreateView.get = extend_schema(tags=["Products"], operation_id="product_media_list", parameters=[_business_public_id, _product_public_id], responses={200: ProductMediaSerializer(many=True), 403: None, 404: None})(ProductMediaListCreateView.get)
+ProductMediaListCreateView.post = extend_schema(tags=["Products"], operation_id="product_media_create", parameters=[_business_public_id, _product_public_id], request=_product_media_upload, responses={201: ProductMediaSerializer, 400: None, 403: None, 404: None, 502: None, 503: None})(ProductMediaListCreateView.post)
+ProductMediaDetailView.patch = extend_schema(tags=["Products"], operation_id="product_media_update", parameters=[_business_public_id, _product_public_id, OpenApiParameter("media_id", str, OpenApiParameter.PATH)], request=_product_media_update, responses={200: ProductMediaSerializer, 400: None, 403: None, 404: None})(ProductMediaDetailView.patch)
+ProductMediaDetailView.delete = extend_schema(tags=["Products"], operation_id="product_media_delete", parameters=[_business_public_id, _product_public_id, OpenApiParameter("media_id", str, OpenApiParameter.PATH)], request=None, responses={204: None, 403: None, 404: None})(ProductMediaDetailView.delete)
+ProductMediaDetailView.http_method_names = ["patch", "delete", "head", "options"]
+UnitOfMeasureListView.get = extend_schema(tags=["Product Categories"], auth=[], responses={200: UnitOfMeasureSerializer(many=True)})(UnitOfMeasureListView.get)

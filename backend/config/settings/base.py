@@ -128,7 +128,7 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
     "DEFAULT_FILTER_BACKENDS": ["django_filters.rest_framework.DjangoFilterBackend", "rest_framework.filters.SearchFilter", "rest_framework.filters.OrderingFilter"],
-    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_SCHEMA_CLASS": "config.openapi.EcommerceAutoSchema",
 }
 
 # OAuth 2.0 / OpenID Connect settings for the future Carri Account integration.
@@ -292,6 +292,9 @@ SPECTACULAR_SETTINGS = {
         "BusinessCurrencyEnum": "apps.businesses.models.Business.Currency",
         "BusinessMemberInvitationStatusEnum": "apps.businesses.models.BusinessMemberInvitation.Status",
         "ProductStatusEnum": "apps.catalog.models.Product.Status",
+        "BusinessAtomicPermissionEnum": "apps.businesses.permissions.ATOMIC_PERMISSION_VALUES",
+        "BusinessPermissionCatalogEnum": "apps.businesses.models.BusinessMemberPermission.Permission",
+        "PaymentMethodEnum": "apps.common.choices.PaymentMethod",
     },
     "TAGS": [
         {"name": "Health", "description": "Liveness technique publique."},

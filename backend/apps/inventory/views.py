@@ -274,7 +274,8 @@ class BusinessStockMovementHistoryView(BusinessInventoryMixin, APIView):
             StockMovementSerializer(page, many=True).data
         )
 
-from drf_spectacular.utils import OpenApiParameter, extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
+from rest_framework import serializers
 
 _inventory_business_id = OpenApiParameter("business_public_id", str, OpenApiParameter.PATH, description="Identifiant Business, format SH + 10 caractères.")
 _inventory_item_id = OpenApiParameter("inventory_public_id", str, OpenApiParameter.PATH, description="Identifiant InventoryItem, format IV + 10 caractères.")
@@ -297,3 +298,26 @@ StockMovementListCreateView.post = extend_schema(
     responses={201: StockMovementSerializer, 400: None, 403: None, 404: None},
     description="IN et OUT utilisent quantity positive. ADJUSTMENT utilise target_quantity absolue.",
 )(StockMovementListCreateView.post)
+_inventory_summary = inline_serializer("InventorySummary", {
+    "tracked_products": serializers.IntegerField(), "in_stock": serializers.IntegerField(),
+    "out_of_stock": serializers.IntegerField(), "low_stock": serializers.IntegerField(),
+    "total_available_quantity": serializers.DecimalField(max_digits=14, decimal_places=3),
+    "recent_movements": StockMovementSerializer(many=True),
+})
+_paginated_movement_history = inline_serializer("PaginatedStockMovementHistory", {
+    "count": serializers.IntegerField(), "next": serializers.URLField(allow_null=True),
+    "previous": serializers.URLField(allow_null=True), "results": StockMovementSerializer(many=True),
+})
+InventorySummaryView.get = extend_schema(
+    tags=["Inventory"], operation_id="inventory_summary", parameters=[_inventory_business_id],
+    responses={200: _inventory_summary, 403: None, 404: None},
+)(InventorySummaryView.get)
+BusinessStockMovementHistoryView.get = extend_schema(
+    tags=["Stock Movements"], operation_id="business_stock_movement_history",
+    parameters=[_inventory_business_id, OpenApiParameter("product", str, OpenApiParameter.QUERY),
+                OpenApiParameter("type", str, OpenApiParameter.QUERY, enum=["IN", "OUT", "ADJUSTMENT"]),
+                OpenApiParameter("origin", str, OpenApiParameter.QUERY),
+                OpenApiParameter("date_from", str, OpenApiParameter.QUERY),
+                OpenApiParameter("date_to", str, OpenApiParameter.QUERY), OpenApiParameter("page", int, OpenApiParameter.QUERY)],
+    responses={200: _paginated_movement_history, 400: None, 403: None, 404: None},
+)(BusinessStockMovementHistoryView.get)
