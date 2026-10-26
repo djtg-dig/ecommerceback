@@ -27,6 +27,20 @@ class Business(models.Model):
         CDF = "CDF", "CDF"
         USD = "USD", "USD"
 
+    class SalesLocationType(models.TextChoices):
+        HOME_BASED = "HOME_BASED", "Home based"
+        MARKET_STALL = "MARKET_STALL", "Market stall"
+        PHYSICAL_STORE = "PHYSICAL_STORE", "Physical store"
+
+    class SalesChannel(models.TextChoices):
+        IN_PERSON = "IN_PERSON", "In person"
+        ONLINE = "ONLINE", "Online"
+        BOTH = "BOTH", "Online and in person"
+
+    class DeliveryMethod(models.TextChoices):
+        HOME_DELIVERY = "HOME_DELIVERY", "Home delivery"
+        PICKUP = "PICKUP", "Pickup"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     public_id = models.CharField(
         max_length=12,
@@ -44,6 +58,19 @@ class Business(models.Model):
         default=Currency.CDF,
     )
     phone = models.CharField(max_length=40, blank=True)
+    # Les valeurs vides conservent les entreprises historiques sans leur
+    # attribuer de fonctionnement commercial par défaut.
+    sales_location_type = models.CharField(
+        max_length=20,
+        choices=SalesLocationType.choices,
+        blank=True,
+    )
+    sales_channel = models.CharField(
+        max_length=12,
+        choices=SalesChannel.choices,
+        blank=True,
+    )
+    delivery_methods = models.JSONField(default=list, blank=True)
     status = models.CharField(
         max_length=12,
         choices=Status.choices,
@@ -75,6 +102,17 @@ class Business(models.Model):
             self.public_id = generate_business_public_id()
 
         super().save(*args, **kwargs)
+
+    def clean(self):
+        """Valide les modalités de remise quand elles sont renseignées."""
+        super().clean()
+        if not isinstance(self.delivery_methods, list):
+            raise ValidationError({"delivery_methods": "Delivery methods must be a list."})
+        allowed_methods = set(self.DeliveryMethod.values)
+        if any(method not in allowed_methods for method in self.delivery_methods):
+            raise ValidationError({"delivery_methods": "Unknown delivery method."})
+        if len(set(self.delivery_methods)) != len(self.delivery_methods):
+            raise ValidationError({"delivery_methods": "Delivery methods must not contain duplicates."})
 
 
 class BusinessMedia(models.Model):
@@ -442,6 +480,12 @@ class BusinessMemberPermission(models.Model):
         SALE_LINE_CREATE = "SALE_LINE_CREATE", "Create sale lines"
         SALE_RETURN_VIEW = "SALE_RETURN_VIEW", "View sale returns"
         SALE_RETURN = "SALE_RETURN", "Create sale returns"
+        INVOICE_VIEW = "INVOICE_VIEW", "View invoices"
+        INVOICE_CREATE = "INVOICE_CREATE", "Create invoices"
+        INVOICE_UPDATE = "INVOICE_UPDATE", "Update invoices"
+        INVOICE_ISSUE = "INVOICE_ISSUE", "Issue invoices"
+        INVOICE_CANCEL = "INVOICE_CANCEL", "Cancel invoices"
+        INVOICE_PAYMENT_CREATE = "INVOICE_PAYMENT_CREATE", "Create invoice payments"
         RECEIVABLE_VIEW = "RECEIVABLE_VIEW", "View receivables"
         RECEIVABLE_UPDATE = "RECEIVABLE_UPDATE", "Update receivables"
         RECEIVABLE_PAYMENT_VIEW = "RECEIVABLE_PAYMENT_VIEW", "View receivable payments"

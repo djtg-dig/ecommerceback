@@ -34,6 +34,16 @@ class BaseBusinessSerializer(serializers.ModelSerializer):
         required=False,
     )
     primary_category = serializers.CharField(write_only=True, required=False)
+    delivery_methods = serializers.ListField(
+        child=serializers.ChoiceField(choices=Business.DeliveryMethod.choices),
+        required=False,
+        allow_empty=False,
+    )
+
+    def validate_delivery_methods(self, value):
+        if len(value) != len(set(value)):
+            raise serializers.ValidationError("Chaque modalité ne peut être sélectionnée qu'une fois.")
+        return value
 
 
 class BusinessCreateSerializer(BaseBusinessSerializer):
@@ -46,6 +56,9 @@ class BusinessCreateSerializer(BaseBusinessSerializer):
             "zone",
             "primary_currency",
             "phone",
+            "sales_location_type",
+            "sales_channel",
+            "delivery_methods",
             "categories",
             "primary_category",
         )
@@ -70,6 +83,9 @@ class BusinessUpdateSerializer(BaseBusinessSerializer):
             "zone",
             "primary_currency",
             "phone",
+            "sales_location_type",
+            "sales_channel",
+            "delivery_methods",
             "categories",
             "primary_category",
         )
@@ -89,6 +105,9 @@ class BusinessSerializer(serializers.ModelSerializer):
             "zone",
             "primary_currency",
             "phone",
+            "sales_location_type",
+            "sales_channel",
+            "delivery_methods",
             "status",
             "categories",
             "primary_category",

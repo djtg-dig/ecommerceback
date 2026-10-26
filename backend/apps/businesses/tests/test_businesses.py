@@ -147,6 +147,82 @@ def test_primary_currency_is_immutable_after_business_creation():
 
 
 @pytest.mark.django_db
+def test_commercial_settings_are_validated_and_saved_for_an_authorized_business():
+    owner = CarriIdentity.objects.create(carri_subject="commercial-settings-owner")
+    business = Business.objects.create(name="Commercial shop")
+    BusinessMember.objects.create(business=business, identity=owner, is_owner=True, title="Gérant")
+
+    response = auth(owner).patch(
+        f"/api/v1/businesses/{business.public_id}/",
+        {
+            "sales_location_type": "MARKET_STALL",
+            "sales_channel": "BOTH",
+            "delivery_methods": ["HOME_DELIVERY", "PICKUP"],
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.data["sales_location_type"] == "MARKET_STALL"
+    assert response.data["sales_channel"] == "BOTH"
+    assert response.data["delivery_methods"] == ["HOME_DELIVERY", "PICKUP"]
+    business.refresh_from_db()
+    assert business.delivery_methods == ["HOME_DELIVERY", "PICKUP"]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"sales_location_type": "UNKNOWN"},
+        {"sales_channel": "UNKNOWN"},
+        {"delivery_methods": []},
+        {"delivery_methods": ["HOME_DELIVERY", "HOME_DELIVERY"]},
+        {"delivery_methods": ["UNKNOWN"]},
+    ],
+)
+def test_commercial_settings_reject_invalid_values(payload):
+    owner = CarriIdentity.objects.create(carri_subject=f"commercial-invalid-{str(payload)}")
+    business = Business.objects.create(name="Commercial validation shop")
+    BusinessMember.objects.create(business=business, identity=owner, is_owner=True, title="Gérant")
+
+    response = auth(owner).patch(
+        f"/api/v1/businesses/{business.public_id}/", payload, format="json"
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_historical_business_keeps_unset_commercial_settings():
+    business = Business.objects.create(name="Historic shop")
+
+    assert business.sales_location_type == ""
+    assert business.sales_channel == ""
+    assert business.delivery_methods == []
+
+
+@pytest.mark.django_db
+def test_commercial_settings_cannot_be_changed_outside_the_business_scope():
+    owner = CarriIdentity.objects.create(carri_subject="commercial-scope-owner")
+    outsider = CarriIdentity.objects.create(carri_subject="commercial-scope-outsider")
+    business = Business.objects.create(name="Scoped commercial shop")
+    other_business = Business.objects.create(name="Other commercial shop")
+    BusinessMember.objects.create(business=business, identity=owner, is_owner=True, title="Gérant")
+    BusinessMember.objects.create(business=other_business, identity=outsider, is_owner=True, title="Gérant")
+
+    response = auth(outsider).patch(
+        f"/api/v1/businesses/{business.public_id}/",
+        {"sales_channel": "ONLINE"},
+        format="json",
+    )
+
+    assert response.status_code == 403
+    business.refresh_from_db()
+    assert business.sales_channel == ""
+
+
+@pytest.mark.django_db
 def test_owner_has_all_permissions_by_design():
     business = Business.objects.create(name="Perm shop")
     owner = CarriIdentity.objects.create(carri_subject="perm-owner")
