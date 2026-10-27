@@ -8,6 +8,7 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from apps.businesses.models import BusinessPaymentMethod
+from apps.businesses.services import ensure_default_payment_methods
 from apps.common.choices import PaymentMethod
 from apps.finance.models import FinancialMovement
 from apps.finance.services import create_financial_movement
@@ -253,6 +254,12 @@ def complete(sale, actor, amount_paid, payment_method=None):
         raise ValidationError("payment_method is required for a payment.")
     if amount_paid == 0 and payment_method is not None:
         raise ValidationError("payment_method must be absent for a credit sale.")
+    if amount_paid > 0:
+        ensure_default_payment_methods(sale.business)
+    if amount_paid > 0 and not BusinessPaymentMethod.objects.filter(
+        business=sale.business, category=payment_method, is_active=True
+    ).exists():
+        raise ValidationError("No active payment method is configured for this category.")
 
     with transaction.atomic():
         locked_sale = Sale.objects.select_for_update().get(pk=sale.pk)

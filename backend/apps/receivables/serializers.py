@@ -3,5 +3,10 @@ from .models import Receivable,ReceivablePayment
 class R(serializers.ModelSerializer):
  sale=serializers.CharField(source='sale.public_id',read_only=True);customer=serializers.CharField(source='customer.public_id',read_only=True,allow_null=True);paid_amount=serializers.DecimalField(max_digits=16,decimal_places=2,read_only=True);balance=serializers.DecimalField(max_digits=16,decimal_places=2,read_only=True);is_overdue=serializers.BooleanField(read_only=True)
  class Meta:model=Receivable;fields=('public_id','sale','customer','customer_name_snapshot','currency','original_amount','paid_amount','balance','status','due_date','notes','is_overdue','settled_at')
+class ReceivableUpdateSerializer(serializers.ModelSerializer):
+ """Limite une modification de créance aux métadonnées non financières."""
+ class Meta:
+  model=Receivable
+  fields=('due_date','notes')
 class P(serializers.ModelSerializer):
  class Meta:model=ReceivablePayment;fields=('public_id','amount','payment_method','reference','notes','paid_at');read_only_fields=('public_id','paid_at')

@@ -9,7 +9,7 @@ from apps.businesses.models import Business, BusinessMemberPermission
 from apps.businesses.permissions import require_permission
 
 from .models import Receivable
-from .serializers import P, R
+from .serializers import P, R, ReceivableUpdateSerializer
 from .services import IdempotencyConflict, add_payment
 
 
@@ -83,10 +83,9 @@ class ReceivableDetailView(ReceivableListView):
         receivable = self.get_receivable(business, receivable_public_id) if business else None
         if not receivable:
             return self.not_found()
-        for field in ("due_date", "notes"):
-            if field in request.data:
-                setattr(receivable, field, request.data[field])
-        receivable.save(update_fields=("due_date", "notes", "updated_at"))
+        serializer = ReceivableUpdateSerializer(receivable, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
         return Response(R(receivable).data)
 
 

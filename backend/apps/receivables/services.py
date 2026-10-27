@@ -8,6 +8,8 @@ from django.utils import timezone
 from apps.common.choices import PaymentMethod
 from apps.finance.models import FinancialMovement
 from apps.finance.services import create_financial_movement
+from apps.businesses.models import BusinessPaymentMethod
+from apps.businesses.services import ensure_default_payment_methods
 
 from .models import Receivable, ReceivablePayment
 
@@ -44,6 +46,11 @@ def add_payment(
     """
     if amount is None or amount <= 0 or payment_method not in PaymentMethod.values:
         raise ValidationError("Invalid payment.")
+    ensure_default_payment_methods(receivable.business)
+    if not BusinessPaymentMethod.objects.filter(
+        business=receivable.business, category=payment_method, is_active=True
+    ).exists():
+        raise ValidationError("No active payment method is configured for this category.")
 
     with transaction.atomic():
         receivable = Receivable.objects.select_for_update().get(pk=receivable.pk)
