@@ -9,7 +9,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import CarriIdentity
 from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
 from apps.businesses.services import grant_permission
-from apps.catalog.models import Product, ProductCategory, ProductVariant
+from apps.catalog.models import Product, ProductCategory, ProductVariant, UnitOfMeasure
 from apps.inventory.models import InventoryItem, StockMovement
 from apps.inventory.services import apply_stock_movement
 
@@ -128,6 +128,56 @@ def test_service_rejects_invalid_quantities_without_changing_balance(setup):
     with pytest.raises(ValidationError):
         apply_stock_movement(inventory_item=item, movement_type="ADJUSTMENT", performed_by=owner, target_quantity=Decimal("-1"))
     assert InventoryItem.objects.get(pk=item.pk).quantity == Decimal("0.000")
+
+
+def test_service_normalizes_quantities_and_enforces_unit_and_stock_precision(setup):
+    """Les appels internes au service gardent les mêmes garanties que l'API."""
+    business, _, owner, _, _, _, product, _ = setup
+    item = InventoryItem.objects.create(business=business, product=product)
+
+    for value in (10, Decimal("2"), "3.000"):
+        apply_stock_movement(
+            inventory_item=item,
+            movement_type=StockMovement.Type.IN,
+            performed_by=owner,
+            quantity=value,
+        )
+    item.refresh_from_db()
+    assert item.quantity == Decimal("15.000")
+
+    for value in ("1.500", "invalid", Decimal("NaN"), "1.0001", "100000000000"):
+        with pytest.raises(ValidationError):
+            apply_stock_movement(
+                inventory_item=item,
+                movement_type=StockMovement.Type.IN,
+                performed_by=owner,
+                quantity=value,
+            )
+    item.refresh_from_db()
+    assert item.quantity == Decimal("15.000")
+
+    kilogram, _ = UnitOfMeasure.objects.get_or_create(
+        code="TEST-KG",
+        defaults={
+            "name": "Test kilogram",
+            "symbol": "kg",
+            "category": "MASS",
+            "allows_decimal_quantity": True,
+        },
+    )
+    if not kilogram.allows_decimal_quantity:
+        kilogram.allows_decimal_quantity = True
+        kilogram.save(update_fields=("allows_decimal_quantity", "updated_at"))
+    product.unit_of_measure = kilogram
+    product.save(update_fields=("unit_of_measure", "updated_at"))
+    apply_stock_movement(
+        inventory_item=item,
+        movement_type=StockMovement.Type.IN,
+        performed_by=owner,
+        quantity="1.500",
+    )
+    item.refresh_from_db()
+    assert item.quantity == Decimal("16.500")
 
 
 def test_variant_creation_is_refused_after_product_inventory_exists(setup):

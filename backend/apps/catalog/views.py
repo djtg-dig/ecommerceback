@@ -233,7 +233,7 @@ class PosSearchView(BusinessProductMixin, APIView):
         available_stock = InventoryItem.objects.filter(product_id=OuterRef("pk")).annotate(
             available=F("quantity") - F("reserved_quantity")
         ).values("available")[:1]
-        return Product.objects.filter(business=business, status=Product.Status.ACTIVE).annotate(
+        return Product.objects.filter(business=business, status=Product.Status.ACTIVE).select_related("unit_of_measure").annotate(
             has_active_variant=Exists(active_variants),
             pos_available_quantity=Coalesce(
                 Subquery(available_stock, output_field=DecimalField(max_digits=14, decimal_places=3)),
@@ -252,7 +252,7 @@ class PosSearchView(BusinessProductMixin, APIView):
             product__business=business,
             product__status=Product.Status.ACTIVE,
             status=ProductVariant.Status.ACTIVE,
-        ).select_related("product").annotate(
+        ).select_related("product__unit_of_measure").annotate(
             pos_available_quantity=Coalesce(
                 Subquery(available_stock, output_field=DecimalField(max_digits=14, decimal_places=3)),
                 Value(Decimal("0.000")),
@@ -277,6 +277,9 @@ class PosSearchView(BusinessProductMixin, APIView):
                         "effective_price": item.selling_price,
                         "currency": item.currency,
                         "available_quantity": item.pos_available_quantity,
+                        "unit_code": item.unit_of_measure.code,
+                        "unit_symbol": item.unit_of_measure.symbol,
+                        "allows_decimal_quantity": item.unit_of_measure.allows_decimal_quantity,
                     }
                 )
             else:
@@ -292,6 +295,9 @@ class PosSearchView(BusinessProductMixin, APIView):
                         "effective_price": item.effective_selling_price,
                         "currency": item.product.currency,
                         "available_quantity": item.pos_available_quantity,
+                        "unit_code": item.product.unit_of_measure.code,
+                        "unit_symbol": item.product.unit_of_measure.symbol,
+                        "allows_decimal_quantity": item.product.unit_of_measure.allows_decimal_quantity,
                     }
                 )
         return rows

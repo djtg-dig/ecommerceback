@@ -8,7 +8,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import CarriIdentity
 from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission, BusinessPaymentMethod
 from apps.businesses.services import grant_permission
-from apps.catalog.models import Product, ProductCategory
+from apps.catalog.models import Product, ProductCategory, UnitOfMeasure
 from apps.inventory.models import InventoryItem
 from apps.sales.models import Customer, Sale, SaleLine
 from apps.sales.services import complete, create_sale_return
@@ -17,6 +17,7 @@ pytestmark = pytest.mark.django_db
 
 
 def return_context(suffix, amount_paid):
+    """Construit un article mesuré : les retours de ce scénario sont fractionnaires."""
     category, _ = ProductCategory.objects.get_or_create(
         code="DASHRETURN",
         defaults={"name": "Dashboard returns", "slug": "dashboard-returns"},
@@ -36,6 +37,7 @@ def return_context(suffix, amount_paid):
         cost_price=Decimal("60"),
         currency="CDF",
         attributes={},
+        unit_of_measure=UnitOfMeasure.objects.get(code="KG"),
     )
     inventory = InventoryItem.objects.create(
         business=business,
@@ -456,7 +458,8 @@ def test_dashboard_query_cost_is_stable_for_enriched_dataset():
     products = [
         Product.objects.create(
             business=business, category=category, name=f'Measurement product {index}',
-            selling_price=Decimal('1000'), currency='CDF', attributes={}
+            selling_price=Decimal('1000'), currency='CDF', attributes={},
+            unit_of_measure=UnitOfMeasure.objects.get(code='KG'),
         )
         for index in range(12)
     ]

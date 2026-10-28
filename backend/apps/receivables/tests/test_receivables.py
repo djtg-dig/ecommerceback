@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 from apps.accounts.models import CarriIdentity
 from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
-from apps.catalog.models import ProductCategory,Product
+from apps.catalog.models import ProductCategory,Product,UnitOfMeasure
 from apps.inventory.models import InventoryItem,StockMovement
 from apps.inventory.services import apply_stock_movement
 from apps.sales.models import Customer,Sale
@@ -161,6 +161,9 @@ def test_receivable_payment_idempotency_conflict_immutability_and_finance_rollba
 
 def test_financial_summary_counts_only_real_collections(data):
     business, owner, _, product, _, customer = data
+    # Ce test vérifie des montants issus de ventes fractionnaires pondérées.
+    product.unit_of_measure = UnitOfMeasure.objects.get(code="KG")
+    product.save(update_fields=("unit_of_measure", "updated_at"))
     product.min_price = Decimal("100000.00")
     product.max_price = Decimal("100000.00")
     product.selling_price = Decimal("100000.00")

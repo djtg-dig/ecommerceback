@@ -3,7 +3,7 @@
 import hashlib
 import json
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -11,10 +11,44 @@ from django.db import IntegrityError, transaction
 from .models import InventoryItem, StockMovement
 
 MANUAL_MOVEMENT_TYPES = {StockMovement.Type.IN, StockMovement.Type.OUT, StockMovement.Type.ADJUSTMENT}
+STOCK_DECIMAL_PLACES = 3
+STOCK_MAX_INTEGER_DIGITS = 11
 
 
 class StockMovementIdempotencyConflict(ValidationError):
     """Raised when one retry key is reused for a different stock intent."""
+
+
+class InsufficientStockError(ValidationError):
+    """A safe, structured stock conflict for commercial clients."""
+
+    def __init__(self, *, inventory_item, requested_quantity):
+        self.inventory_item = inventory_item
+        self.requested_quantity = requested_quantity
+        self.available_quantity = inventory_item.available_quantity
+        super().__init__("Stock insuffisant.")
+
+
+def normalize_stock_quantity(value, *, field):
+    """Convertit une quantité externe en ``Decimal`` compatible avec le stock.
+
+    Les services sont aussi appelés hors serializers DRF (réceptions, ventes et
+    scripts). Cette normalisation évite que ces appelants puissent contourner
+    les garanties du ``DecimalField`` ou provoquer une erreur de type interne.
+    """
+    if isinstance(value, bool):
+        raise ValidationError({field: "La quantité doit être un nombre valide."})
+    try:
+        normalized = value if isinstance(value, Decimal) else Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValidationError({field: "La quantité doit être un nombre valide."}) from None
+    if not normalized.is_finite():
+        raise ValidationError({field: "La quantité doit être un nombre fini."})
+    if normalized.as_tuple().exponent < -STOCK_DECIMAL_PLACES:
+        raise ValidationError({field: "La quantité ne peut pas avoir plus de 3 décimales."})
+    if normalized and normalized.adjusted() >= STOCK_MAX_INTEGER_DIGITS:
+        raise ValidationError({field: "La quantité dépasse la précision maximale du stock."})
+    return normalized
 
 
 def movement_fingerprint(*, inventory_item, movement_type, quantity, target_quantity, reason):
@@ -93,6 +127,10 @@ def apply_stock_movement(*, inventory_item, movement_type, performed_by, quantit
     """
     if movement_type not in MANUAL_MOVEMENT_TYPES and not (movement_type == StockMovement.Type.SALE and reference_type == 'SALE') and not (movement_type == StockMovement.Type.RETURN and reference_type == 'SALE_RETURN_LINE'):
         raise ValidationError({"type": "Seuls IN, OUT et ADJUSTMENT sont autorisés manuellement."})
+    if quantity is not None:
+        quantity = normalize_stock_quantity(quantity, field="quantity")
+    if target_quantity is not None:
+        target_quantity = normalize_stock_quantity(target_quantity, field="target_quantity")
     with transaction.atomic():
         item = InventoryItem.objects.select_for_update(of=("self",)).select_related("product", "variant__product").get(pk=inventory_item.pk)
         fingerprint = movement_fingerprint(
@@ -114,8 +152,12 @@ def apply_stock_movement(*, inventory_item, movement_type, performed_by, quantit
                     )
                 existing._idempotent_replay = True
                 return existing
-        target = item.variant or item.product
         validate_inventory_target(business=item.business, product=item.product, variant=item.variant, allow_archived_target=allow_archived_target)
+        unit = item.variant.product.unit_of_measure if item.variant_id else item.product.unit_of_measure
+        value_to_validate = target_quantity if movement_type == StockMovement.Type.ADJUSTMENT else quantity
+        if value_to_validate is not None and not unit.allows_decimal_quantity and value_to_validate != value_to_validate.to_integral_value():
+            field = "target_quantity" if movement_type == StockMovement.Type.ADJUSTMENT else "quantity"
+            raise ValidationError({field: "Cette unité doit être stockée en quantité entière."})
         before = item.quantity
         available = item.available_quantity
         if movement_type == StockMovement.Type.ADJUSTMENT:
@@ -130,8 +172,9 @@ def apply_stock_movement(*, inventory_item, movement_type, performed_by, quantit
                 after, delta = before + quantity, quantity
             else:
                 if quantity > available:
-                    raise ValidationError({"quantity": "La sortie dépasse le stock disponible."})
+                    raise InsufficientStockError(inventory_item=item, requested_quantity=quantity)
                 after, delta = before - quantity, -quantity
+        normalize_stock_quantity(after, field="quantity")
         if after < item.reserved_quantity:
             raise ValidationError({"quantity": "L'opération descend sous la quantité réservée."})
         item.quantity = after

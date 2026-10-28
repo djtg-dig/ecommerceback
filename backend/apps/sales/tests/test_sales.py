@@ -2,7 +2,7 @@ import pytest
 from rest_framework.test import APIClient
 from apps.accounts.models import CarriIdentity
 from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
-from apps.catalog.models import ProductCategory,Product
+from apps.catalog.models import ProductCategory,Product,UnitOfMeasure
 from apps.inventory.models import InventoryItem,StockMovement
 from apps.sales.models import Customer, Sale
 pytestmark=pytest.mark.django_db
@@ -75,6 +75,60 @@ def test_internal_sale():
     movement = FinancialMovement.objects.get(sale__public_id=sale_id)
     assert movement.payment_transaction_id
     assert movement.payment_transaction.recording_mode == "MANUAL"
+
+
+def test_piece_sale_rejects_fractional_quantity_and_mass_sale_accepts_it():
+    category = ProductCategory.objects.create(code="SALEUNIT", name="Units", slug="saleunit")
+    business = Business.objects.create(name="Unit sale")
+    identity = CarriIdentity.objects.create(carri_subject="unit-sale")
+    member = BusinessMember.objects.create(business=business, identity=identity, role=BusinessMember.Role.EMPLOYEE)
+    BusinessMemberPermission.objects.bulk_create([
+        BusinessMemberPermission(member=member, permission=permission)
+        for permission in (
+            BusinessMemberPermission.Permission.SALE_CREATE,
+            BusinessMemberPermission.Permission.SALE_LINE_CREATE,
+        )
+    ])
+    pieces = Product.objects.create(business=business, category=category, name="Desk", selling_price="5", cost_price="3", currency="CDF", attributes={}, unit_of_measure=UnitOfMeasure.objects.get(code="PCS"))
+    kilograms = Product.objects.create(business=business, category=category, name="Rice", selling_price="5", cost_price="3", currency="CDF", attributes={}, unit_of_measure=UnitOfMeasure.objects.get(code="KG"))
+    client = APIClient(); client.force_authenticate(user=identity)
+    base = f"/api/v1/businesses/{business.public_id}/"
+    sale_id = client.post(base + "sales/", {}, format="json").data["public_id"]
+
+    fractional_piece = client.post(base + f"sales/{sale_id}/lines/", {"product": pieces.public_id, "quantity": "1.500"}, format="json")
+    fractional_mass = client.post(base + f"sales/{sale_id}/lines/", {"product": kilograms.public_id, "quantity": "1.500"}, format="json")
+
+    assert fractional_piece.status_code == 400
+    assert "quantité entière" in str(fractional_piece.data["quantity"])
+    assert fractional_mass.status_code == 201
+
+
+def test_completion_reports_a_safe_structured_stock_conflict():
+    _, employee, product, inventory, _, client, base, sale_id = build_sale_context()
+    from apps.inventory.services import apply_stock_movement
+
+    apply_stock_movement(
+        inventory_item=inventory,
+        movement_type="OUT",
+        performed_by=employee,
+        quantity=10,
+        reason="Concurrent stock change",
+    )
+
+    response = client.post(
+        base + f"sales/{sale_id}/complete/",
+        {"amount_paid": "100", "payment_method": "CASH"},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.data == {
+        "code": "insufficient_stock",
+        "detail": "Stock insuffisant.",
+        "target_public_id": [product.public_id],
+        "available_quantity": ["0.000"],
+        "requested_quantity": ["1.000"],
+    }
 
 
 def test_sale_currency_is_imposed_by_business():

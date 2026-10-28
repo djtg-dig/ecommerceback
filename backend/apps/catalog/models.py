@@ -148,13 +148,14 @@ class AttributeOption(models.Model):
 
 
 class UnitOfMeasure(models.Model):
-    """Global, code-based unit used only to describe a product's listed price."""
+    """Global unit metadata, including whether a sale quantity may be fractional."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     code = models.CharField(max_length=30, unique=True)
     name = models.CharField(max_length=100)
     symbol = models.CharField(max_length=20)
     category = models.CharField(max_length=30)
+    allows_decimal_quantity = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

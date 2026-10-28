@@ -213,6 +213,8 @@ class LineWrite(serializers.Serializer):
         target(self.context["sale"], a.get("product"), a.get("variant"))
         target_value = a.get("variant") or a.get("product")
         product = a["variant"].product if a.get("variant") else a["product"]
+        if not product.unit_of_measure.allows_decimal_quantity and a["quantity"] != a["quantity"].to_integral_value():
+            raise serializers.ValidationError({"quantity": "Cette unité doit être vendue en quantité entière."})
         if "unit_price" not in a:
             a["unit_price"] = target_value.effective_selling_price if a.get("variant") else product.selling_price
         elif not product.is_negotiable and a["unit_price"] != (target_value.effective_selling_price if a.get("variant") else product.selling_price):

@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import CarriIdentity
 from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
 from apps.businesses.services import grant_permission
-from apps.catalog.models import Product, ProductCategory, ProductVariant
+from apps.catalog.models import Product, ProductCategory, ProductVariant, UnitOfMeasure
 from apps.finance.models import FinancialMovement
 from apps.inventory.models import InventoryItem, StockMovement
 from apps.inventory.services import apply_stock_movement
@@ -45,7 +45,8 @@ def make_context(suffix):
 
 
 def add_product(business, category, name, price, cost):
-    product = Product.objects.create(business=business, category=category, name=name, selling_price=price, cost_price=cost, currency="CDF", attributes={})
+    # Les agrégats produits couvrent des retours partiels : article mesuré en kg.
+    product = Product.objects.create(business=business, category=category, name=name, selling_price=price, cost_price=cost, currency="CDF", attributes={}, unit_of_measure=UnitOfMeasure.objects.get(code="KG"))
     inventory = InventoryItem.objects.create(business=business, product=product)
     return product, inventory
 

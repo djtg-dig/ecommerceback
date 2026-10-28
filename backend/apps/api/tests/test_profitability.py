@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import CarriIdentity
 from apps.businesses.models import Business, BusinessMember, BusinessMemberPermission
 from apps.businesses.services import grant_permission
-from apps.catalog.models import Product, ProductCategory, ProductVariant
+from apps.catalog.models import Product, ProductCategory, ProductVariant, UnitOfMeasure
 from apps.expenses.models import Expense, ExpenseCategory
 from apps.finance.models import FinancialMovement
 from apps.inventory.models import InventoryItem, StockMovement
@@ -52,7 +52,8 @@ def context(subject_suffix=""):
         code="PROFIT",
         defaults={"name": "Profit", "slug": "profit"},
     )
-    product = Product.objects.create(business=business, category=category, name="Product", selling_price=Decimal("100000"), cost_price=Decimal("60000"), currency="CDF", attributes={})
+    # Les retours partiels de cette fixture représentent des articles mesurés.
+    product = Product.objects.create(business=business, category=category, name="Product", selling_price=Decimal("100000"), cost_price=Decimal("60000"), currency="CDF", attributes={}, unit_of_measure=UnitOfMeasure.objects.get(code="KG"))
     inventory = InventoryItem.objects.create(business=business, product=product)
     apply_stock_movement(inventory_item=inventory, movement_type=StockMovement.Type.IN, performed_by=owner, quantity=Decimal("20"))
     return business, owner, manager, employee, product
@@ -229,6 +230,7 @@ def test_profitability_multiple_product_and_variant_returns_use_snapshots():
         cost_price=Decimal("30"),
         currency="CDF",
         attributes={},
+        unit_of_measure=UnitOfMeasure.objects.get(code="KG"),
     )
     variant = ProductVariant.objects.create(
         product=variant_product,

@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
 from apps.businesses.models import Business, BusinessMember, BusinessPaymentMethod
-from apps.catalog.models import Product, ProductCategory
+from apps.catalog.models import Product, ProductCategory, UnitOfMeasure
 from apps.expenses.models import Expense, ExpenseCategory
 from apps.finance.models import FinancialMovement
 from apps.inventory.models import InventoryItem, StockMovement
@@ -40,6 +40,8 @@ def make_completed_sale(suffix, amount_paid):
         cost_price=Decimal("60"),
         currency="CDF",
         attributes={},
+        # Le flux inter-modules couvre un retour partiel de 0,700 kg.
+        unit_of_measure=UnitOfMeasure.objects.get(code="KG"),
     )
     inventory = InventoryItem.objects.create(business=business, product=product)
     apply_stock_movement(

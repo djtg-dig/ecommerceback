@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from apps.businesses.models import Business, BusinessMemberPermission
 from apps.businesses.permissions import has_permission, membership_for, require_any_permission, require_permission
 from apps.finance.models import FinancialMovement
+from apps.inventory.services import InsufficientStockError
 from apps.receivables.models import Receivable, ReceivableAdjustment, ReceivablePayment
 from .models import Customer, Sale, SaleLine, SaleReturn
 from .serializers import *
@@ -390,6 +391,18 @@ class Action(SD):
                 o = complete(s, r.user, **serializer.validated_data)
             else:
                 o = cancel(s, r.user)
+        except InsufficientStockError as error:
+            target = error.inventory_item.variant or error.inventory_item.product
+            return Response(
+                {
+                    "code": "insufficient_stock",
+                    "detail": "Stock insuffisant.",
+                    "target_public_id": [target.public_id],
+                    "available_quantity": [str(error.available_quantity)],
+                    "requested_quantity": [str(error.requested_quantity)],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except ValidationError as e:
             return Response({"detail": str(e)}, 400)
         return Response(SaleSerializer(o).data)

@@ -27,7 +27,7 @@ class UnitOfMeasureSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UnitOfMeasure
-        fields = ("code", "name", "symbol", "category")
+        fields = ("code", "name", "symbol", "category", "allows_decimal_quantity")
 
 
 class AttributeOptionSerializer(serializers.Serializer):
@@ -288,3 +288,6 @@ class PosSearchResultSerializer(serializers.Serializer):
     effective_price = serializers.DecimalField(max_digits=14, decimal_places=2)
     currency = serializers.ChoiceField(choices=("CDF", "USD"))
     available_quantity = serializers.DecimalField(max_digits=14, decimal_places=3)
+    unit_code = serializers.CharField()
+    unit_symbol = serializers.CharField()
+    allows_decimal_quantity = serializers.BooleanField()

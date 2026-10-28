@@ -69,7 +69,8 @@ def test_pos_product_stock_price_and_employee_access():
         "type": "PRODUCT", "public_id": item.public_id, "product_public_id": item.public_id,
         "name": "Tea", "variant_label": None, "internal_reference": " tea-1 ",
         "barcode": " 111 ", "effective_price": "10.00", "currency": "CDF",
-        "available_quantity": "3.000",
+        "available_quantity": "3.000", "unit_code": "PCS", "unit_symbol": "pce",
+        "allows_decimal_quantity": False,
     }
     assert search(client, business, "  tea-1 ").data["results"][0]["public_id"] == item.public_id
 
