@@ -1,5 +1,6 @@
 from decimal import Decimal
 from django.core.exceptions import ObjectDoesNotExist
+from django.db.models import Q
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from apps.businesses.models import BusinessPaymentMethod
@@ -81,6 +82,7 @@ class SaleSerializer(serializers.ModelSerializer):
     balance = serializers.SerializerMethodField()
     payment_status = serializers.SerializerMethodField()
     receivable = serializers.SerializerMethodField()
+    payment_records = serializers.SerializerMethodField()
 
     class Meta:
         model = Sale
@@ -102,6 +104,7 @@ class SaleSerializer(serializers.ModelSerializer):
             "paid_amount",
             "balance",
             "payment_status",
+            "payment_records",
             "created_at",
             "completed_at",
         )
@@ -137,6 +140,28 @@ class SaleSerializer(serializers.ModelSerializer):
             return sale.receivable.public_id
         except ObjectDoesNotExist:
             return None
+
+    @extend_schema_field(serializers.ListField(child=serializers.DictField()))
+    def get_payment_records(self, sale):
+        """Expose les encaissements confirmés du document, avec leur libellé figé."""
+        from apps.finance.models import FinancialMovement
+
+        movements = FinancialMovement.objects.filter(
+            business=sale.business,
+            direction=FinancialMovement.Direction.INFLOW,
+        ).filter(
+            Q(sale=sale)
+            | Q(receivable_payment__receivable__sale=sale)
+        ).select_related("payment_transaction").order_by("occurred_at", "created_at")
+        return [
+            {
+                "amount": str(movement.amount),
+                "currency": movement.currency,
+                "method_name": movement.payment_transaction.method_name_snapshot if movement.payment_transaction_id else movement.payment_method,
+                "occurred_at": movement.occurred_at.isoformat(),
+            }
+            for movement in movements
+        ]
 
 
 class SaleWrite(serializers.ModelSerializer):
