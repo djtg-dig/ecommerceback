@@ -66,6 +66,7 @@ urlpatterns = [
     path("businesses/", include("apps.businesses.urls")),
     path("business-categories/", BusinessCategoriesView.as_view()),
     path("product-categories/", include("apps.catalog.urls")),
+    path("carts/", include("apps.carts.urls")),
     path("health/", HealthCheckView.as_view(), name="health"),
     path("auth/", include("apps.accounts.urls")),
 ]

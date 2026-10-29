@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "apps.api_clients.apps.ApiClientsConfig",
     "apps.businesses.apps.BusinessesConfig",
     "apps.catalog.apps.CatalogConfig",
+    "apps.carts.apps.CartsConfig",
     "apps.inventory.apps.InventoryConfig",
     "apps.purchases.apps.PurchasesConfig",
     "apps.sales.apps.SalesConfig",
