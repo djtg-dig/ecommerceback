@@ -48,7 +48,7 @@ Paiement intégral et absence de créance : **implémentés**. Double soumission
 
 Une facture est un `Sale(INVOICE)`. Un brouillon vide est volontairement possible : création du document et ajout progressif des lignes sont séparés par `Sales.post` et `Lines.post`. Cela autorise client, échéance et référence avant le catalogue. La finalisation refuse néanmoins un brouillon sans ligne et exige un nom de client.
 
-La facture finalisée crée une `Receivable`. Paiement nul : créance ouverte; paiement positif : `add_payment`. Le stock est actuellement déduit au premier règlement réel, pas à l’émission. **Partiellement conforme à la cible** : disponibilité contrôlée à la déduction, mais aucune réservation n’est observée pour une facture impayée.
+La facture finalisée crée une `Receivable`. Paiement nul : créance ouverte; paiement positif : `add_payment`. **Décision métier adoptée :** le stock est déduit au premier règlement réel, jamais à la création ni à la finalisation. Une facture finalisée impayée ne réserve donc pas le stock; un règlement ultérieur peut échouer si le stock a été consommé entre-temps. Ce choix évite une réservation implicite et conserve la déduction et le premier encaissement dans la même transaction.
 
 ## Paiements, créances, stocks et retours
 
@@ -75,10 +75,10 @@ Les vues résolvent le `Business`, vérifient l’appartenance avec `require_per
 
 ## Invariants, écarts et recommandations
 
-1. **P0, décision à prendre :** une facture impayée doit-elle réserver/déduire le stock ? Aujourd’hui non; concurrence POS possible avant premier règlement.
+1. **P0, décision adoptée :** une facture impayée ne réserve ni ne déduit le stock; le premier règlement contrôle et déduit toutes les lignes atomiquement.
 2. **P0, absent/à confirmer :** ticket POS et facture imprimable.
 3. **P1 :** définir expiration/nettoyage des brouillons POS et facture.
-4. **P1 :** documenter distinctement statut document, créance et livraison/réservation.
+4. **P1 :** présenter clairement que la disponibilité peut changer entre facture impayée et premier règlement.
 
 Invariants vérifiés dans le code : pas de finalisation sans ligne; vente directe intégralement payée; mouvements et paiements immuables; relations mono-entreprise; retour limité au vendu et remboursement limité à l’encaissé.
 
