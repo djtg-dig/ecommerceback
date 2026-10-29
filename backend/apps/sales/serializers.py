@@ -178,6 +178,12 @@ class LineSerializer(serializers.ModelSerializer):
     variant = serializers.CharField(
         source="variant.public_id", read_only=True, allow_null=True
     )
+    allows_decimal_quantity = serializers.SerializerMethodField()
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_allows_decimal_quantity(self, line):
+        product = line.variant.product if line.variant_id else line.product
+        return product.unit_of_measure.allows_decimal_quantity
 
     class Meta:
         model = SaleLine
@@ -186,6 +192,7 @@ class LineSerializer(serializers.ModelSerializer):
             "product",
             "variant",
             "item_name_snapshot", "sku_snapshot", "unit_symbol_snapshot",
+            "allows_decimal_quantity",
             "quantity",
             "unit_price",
             "unit_cost_snapshot",

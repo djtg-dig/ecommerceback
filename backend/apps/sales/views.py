@@ -328,7 +328,7 @@ class Lines(SD):
         if s:
             require_permission(r.user, b, self.sale_permission(s, BusinessMemberPermission.Permission.SALE_LINE_VIEW, BusinessMemberPermission.Permission.INVOICE_VIEW), write=False)
         return (
-            Response(LineSerializer(s.lines.all(), many=True).data) if s else self.nf()
+            Response(LineSerializer(s.lines.select_related("product__unit_of_measure", "variant__product__unit_of_measure"), many=True).data) if s else self.nf()
         )
 
     def post(self, r, business_public_id, sale_public_id):
@@ -347,7 +347,7 @@ class Lines(SD):
 
 class LineDetail(Lines):
     def get_object(self, sale, line_public_id):
-        return sale.lines.filter(public_id=line_public_id).first()
+        return sale.lines.select_related("product__unit_of_measure", "variant__product__unit_of_measure").filter(public_id=line_public_id).first()
 
     def patch(self, request, business_public_id, sale_public_id, line_public_id):
         business = Business.objects.filter(public_id=business_public_id).first()

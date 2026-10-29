@@ -274,7 +274,7 @@ class Lines(PurchaseDetail):
         )
         p = self.obj(b, purchase_public_id) if b else None
         return (
-            Response(PurchaseLineSerializer(p.lines.all(), many=True).data)
+            Response(PurchaseLineSerializer(p.lines.select_related("product__unit_of_measure", "variant__product__unit_of_measure"), many=True).data)
             if p
             else self.nf()
         )
@@ -299,7 +299,7 @@ class Lines(PurchaseDetail):
 
 class LineDetail(Lines):
     def getobj(self, p, x):
-        return p.lines.filter(public_id=x).first()
+        return p.lines.select_related("product__unit_of_measure", "variant__product__unit_of_measure").filter(public_id=x).first()
 
     def get(self, r, business_public_id, purchase_public_id, line_public_id):
         b = self.business(
