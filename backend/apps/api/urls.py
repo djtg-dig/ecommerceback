@@ -19,10 +19,17 @@ from apps.sales_report_views import ProductReportView, SalesReportView
 from apps.expense_receivable_report_views import ExpensesReportView, ReceivablesReportView
 from apps.purchase_report_views import PurchasesReportView, SupplierDebtsReportView
 from apps.catalog.views import UnitOfMeasureListView
+from apps.catalog.views import PublicBusinessView, PublicCatalogPagination, PublicCategoryProductsView, PublicHomeProductsView, PublicProductDetailView, PublicProductSearchView, PublicSuggestionsView
 
 urlpatterns = [
     path("currencies/", CurrencyListView.as_view(), name="currency-list"),
     path("units-of-measure/", UnitOfMeasureListView.as_view(), name="unit-of-measure-list"),
+    path("public/products/home/", PublicHomeProductsView.as_view()),
+    path("public/products/search/", PublicProductSearchView.as_view()),
+    path("public/products/suggestions/", PublicSuggestionsView.as_view()),
+    path("public/products/<str:product_public_id>/", PublicProductDetailView.as_view()),
+    path("public/categories/<slug:slug>/", PublicCategoryProductsView.as_view()),
+    path("public/businesses/<str:business_public_id>/", PublicBusinessView.as_view()),
     path(
         "me/business-invitations/",
         BusinessInvitationRecipientListView.as_view(),

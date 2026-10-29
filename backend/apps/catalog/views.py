@@ -6,7 +6,7 @@ from decimal import Decimal
 from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError
 from django.db.models import DecimalField, Exists, F, OuterRef, Prefetch, Q, Subquery, Value
-from django.db.models.functions import Coalesce, Trim, Upper
+from django.db.models.functions import Coalesce, Trim, Upper, Lower
 from rest_framework import generics, permissions, serializers, status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
@@ -31,6 +31,7 @@ from .serializers import (
     PosSearchResultSerializer,
     UnitOfMeasureSerializer,
 )
+from .public_serializers import PublicCategorySerializer, PublicProductSerializer
 from .services import create_product, create_variant, effective_attributes
 
 
@@ -120,6 +121,106 @@ class UnitOfMeasureListView(generics.ListAPIView):
 
     def get_serializer_class(self):
         return UnitOfMeasureSerializer
+
+
+class PublicCatalogPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 20
+
+
+class PublicCatalogMixin:
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+    def queryset(self):
+        return Product.objects.filter(
+            is_public=True,
+            status=Product.Status.ACTIVE,
+            business__status=Business.Status.ACTIVE,
+        ).select_related("business", "category", "unit_of_measure").prefetch_related(
+            Prefetch("media", queryset=ProductMedia.objects.filter(media_type=ProductMedia.MediaType.IMAGE).only("id", "product_id", "secure_url", "is_primary", "position").order_by("-is_primary", "position", "id"), to_attr="public_images")
+        )
+
+
+class PublicHomeProductsView(PublicCatalogMixin, APIView):
+    """Return a deterministic, category/business-diverse selection capped at 100."""
+    def get(self, request):
+        # Round-robin over a stable ordering prevents one seller/category from
+        # filling the home selection before other eligible products are shown.
+        products = list(self.queryset().order_by("category__slug", "business__public_id", "public_id"))
+        buckets = {}
+        for product in products:
+            buckets.setdefault((product.category_id, product.business_id), []).append(product)
+        selected = []
+        while buckets and len(selected) < 100:
+            for key in list(buckets):
+                selected.append(buckets[key].pop(0))
+                if not buckets[key]:
+                    del buckets[key]
+                if len(selected) == 100:
+                    break
+        page = int(request.query_params.get("page", "1"))
+        if page < 1:
+            return Response({"detail": "Not found."}, status=404)
+        start = (page - 1) * 20
+        if start >= len(selected) and page > 1:
+            return Response({"detail": "Not found."}, status=404)
+        return Response({"count": len(selected), "next": page + 1 if start + 20 < len(selected) else None, "results": PublicProductSerializer(selected[start:start + 20], many=True).data})
+
+
+class PublicProductSearchView(PublicCatalogMixin, APIView):
+    def get(self, request):
+        query = " ".join(request.query_params.get("q", "").split())
+        products = self.queryset()
+        if query:
+            products = products.filter(Q(name__icontains=query) | Q(description__icontains=query) | Q(category__name__icontains=query) | Q(business__name__icontains=query))
+        paginator = PublicCatalogPagination()
+        page = paginator.paginate_queryset(products.order_by(Lower("name"), "public_id"), request)
+        return paginator.get_paginated_response(PublicProductSerializer(page, many=True).data)
+
+
+class PublicSuggestionsView(PublicCatalogMixin, APIView):
+    def get(self, request):
+        query = " ".join(request.query_params.get("q", "").split())
+        if not query:
+            return Response([])
+        products = self.queryset().filter(Q(name__icontains=query) | Q(description__icontains=query)).order_by(Lower("name"), "public_id")[:5]
+        categories = ProductCategory.objects.filter(is_active=True, products__is_public=True, products__status=Product.Status.ACTIVE).filter(name__icontains=query).distinct().order_by("name")[:3]
+        businesses = Business.objects.filter(status=Business.Status.ACTIVE, products__is_public=True, products__status=Product.Status.ACTIVE, name__icontains=query).distinct().order_by("name")[:3]
+        return Response([
+            *[{"type": "PRODUCT", "label": product.name, "href": f"/produits/{product.public_id}"} for product in products],
+            *[{"type": "CATEGORY", "label": category.name, "href": f"/categories/{category.slug}"} for category in categories],
+            *[{"type": "BUSINESS", "label": business.name, "href": f"/boutiques/{business.public_id}"} for business in businesses],
+        ])
+
+
+class PublicProductDetailView(PublicCatalogMixin, APIView):
+    def get(self, request, product_public_id):
+        product = self.queryset().filter(public_id=product_public_id).first()
+        if not product:
+            return Response({"detail": "Not found."}, status=404)
+        return Response(PublicProductSerializer(product).data)
+
+
+class PublicCategoryProductsView(PublicCatalogMixin, APIView):
+    def get(self, request, slug):
+        category = ProductCategory.objects.filter(slug=slug, is_active=True).first()
+        if not category:
+            return Response({"detail": "Not found."}, status=404)
+        paginator = PublicCatalogPagination()
+        page = paginator.paginate_queryset(self.queryset().filter(category=category).order_by(Lower("name"), "public_id"), request)
+        return paginator.get_paginated_response({"category": PublicCategorySerializer(category).data, "products": PublicProductSerializer(page, many=True).data})
+
+
+class PublicBusinessView(PublicCatalogMixin, APIView):
+    def get(self, request, business_public_id):
+        business = Business.objects.filter(public_id=business_public_id, status=Business.Status.ACTIVE, products__is_public=True, products__status=Product.Status.ACTIVE).distinct().first()
+        if not business:
+            return Response({"detail": "Not found."}, status=404)
+        paginator = PublicCatalogPagination()
+        page = paginator.paginate_queryset(self.queryset().filter(business=business).order_by(Lower("name"), "public_id"), request)
+        return paginator.get_paginated_response({"business": {"public_id": business.public_id, "name": business.name, "description": business.description}, "products": PublicProductSerializer(page, many=True).data})
 
 
 class BusinessProductMixin:

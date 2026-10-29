@@ -198,6 +198,8 @@ class Product(models.Model):
     currency = models.CharField(max_length=3, choices=(("CDF", "CDF"), ("USD", "USD")))
     attributes = models.JSONField(default=dict, blank=True)
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.ACTIVE)
+    # Publication is an explicit seller decision; legacy products remain private.
+    is_public = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
