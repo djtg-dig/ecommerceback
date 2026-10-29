@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from apps.accounts.models import CarriIdentity
 from apps.businesses.models import Business, BusinessMember, BusinessPaymentMethod
-from apps.catalog.models import Product, ProductCategory, ProductVariant
+from apps.catalog.models import Product, ProductCategory, ProductVariant, UnitOfMeasure
 from apps.finance.models import FinancialMovement
 from apps.finance.services import create_financial_movement
 from apps.inventory.models import InventoryItem, StockMovement
@@ -138,6 +138,30 @@ def test_return_quantities_snapshots_totals_and_catalog_changes():
     assert Sale.objects.get(pk=sale.pk).status == Sale.Status.COMPLETED
     make_return(sale, actor, [{"sale_line_public_id": first.public_id, "quantity": "3"}], key="second")
     with pytest.raises(ValidationError): make_return(sale, actor, [{"sale_line_public_id": first.public_id, "quantity": "0.001"}], key="third")
+
+
+def test_piece_return_rejects_a_fraction_while_decimal_units_accept_it():
+    _, actor, product, _, sale, first, _ = context()
+
+    assert product.unit_of_measure.code == "PCS"
+    with pytest.raises(ValidationError, match="whole quantities"):
+        make_return(
+            sale,
+            actor,
+            [{"sale_line_public_id": first.public_id, "quantity": "1.500"}],
+            key="piece-fraction",
+        )
+
+    product.unit_of_measure = UnitOfMeasure.objects.get(code="KG")
+    product.save(update_fields=("unit_of_measure", "updated_at"))
+    sale_return = make_return(
+        sale,
+        actor,
+        [{"sale_line_public_id": first.public_id, "quantity": "1.500"}],
+        key="kilogram-fraction",
+    )
+
+    assert sale_return.lines.get().quantity == Decimal("1.500")
 
 
 def test_return_rejections_and_idempotency():

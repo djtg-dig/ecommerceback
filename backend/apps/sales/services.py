@@ -79,7 +79,12 @@ def create_sale_return(
             return existing
         if locked_sale.status != Sale.Status.COMPLETED:
             raise ValidationError("Only completed sales can be returned.")
-        locked_lines = {line.public_id: line for line in SaleLine.objects.select_for_update().filter(sale=locked_sale, public_id__in=[line_id for line_id, _ in normalized])}
+        locked_lines = {
+            line.public_id: line
+            for line in SaleLine.objects.select_for_update(of=("self",))
+            .select_related("product__unit_of_measure", "variant__product__unit_of_measure")
+            .filter(sale=locked_sale, public_id__in=[line_id for line_id, _ in normalized])
+        }
         if len(locked_lines) != len(normalized):
             raise ValidationError("Return line does not belong to this sale.")
         returned = {}
@@ -87,6 +92,14 @@ def create_sale_return(
             returned[line.sale_line_id] = returned.get(line.sale_line_id, Decimal("0.000")) + line.quantity
         for line_id, quantity in normalized:
             line = locked_lines[line_id]
+            product = line.variant.product if line.variant_id else line.product
+            if (
+                not product.unit_of_measure.allows_decimal_quantity
+                and quantity != quantity.to_integral_value()
+            ):
+                raise ValidationError(
+                    "This unit must be returned in whole quantities."
+                )
             if returned.get(line.pk, Decimal("0.000")) + quantity > line.quantity:
                 raise ValidationError("Return quantity exceeds sold quantity.")
 
