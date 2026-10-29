@@ -20,10 +20,21 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     internal_reference = serializers.SerializerMethodField()
     stock_status = serializers.SerializerMethodField()
     last_movement_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    unit_symbol = serializers.SerializerMethodField()
+    allows_decimal_quantity = serializers.SerializerMethodField()
 
     class Meta:
         model = InventoryItem
-        fields = ("public_id", "product", "variant", "item_name", "internal_reference", "quantity", "reserved_quantity", "available_quantity", "low_stock_threshold", "is_low_stock", "stock_status", "last_movement_at", "created_at", "updated_at")
+        fields = ("public_id", "product", "variant", "item_name", "internal_reference", "unit_symbol", "allows_decimal_quantity", "quantity", "reserved_quantity", "available_quantity", "low_stock_threshold", "is_low_stock", "stock_status", "last_movement_at", "created_at", "updated_at")
+
+    def target_product(self, item):
+        return item.product if item.product_id else item.variant.product
+
+    def get_unit_symbol(self, item):
+        return self.target_product(item).unit_of_measure.code
+
+    def get_allows_decimal_quantity(self, item):
+        return self.target_product(item).unit_of_measure.allows_decimal_quantity
 
     @extend_schema_field(serializers.CharField())
     def get_item_name(self, item):
@@ -64,10 +75,22 @@ class StockMovementSerializer(serializers.ModelSerializer):
     item_name = serializers.SerializerMethodField()
     product = serializers.SerializerMethodField()
     variant = serializers.SerializerMethodField()
+    unit_symbol = serializers.SerializerMethodField()
+    allows_decimal_quantity = serializers.SerializerMethodField()
 
     class Meta:
         model = StockMovement
-        fields = ("public_id", "inventory_item", "item_name", "product", "variant", "movement_type", "quantity", "quantity_before", "quantity_after", "reason", "reference_type", "reference_id", "performed_by", "created_at")
+        fields = ("public_id", "inventory_item", "item_name", "product", "variant", "unit_symbol", "allows_decimal_quantity", "movement_type", "quantity", "quantity_before", "quantity_after", "reason", "reference_type", "reference_id", "performed_by", "created_at")
+
+    def target_product(self, movement):
+        item = movement.inventory_item
+        return item.product if item.product_id else item.variant.product
+
+    def get_unit_symbol(self, movement):
+        return self.target_product(movement).unit_of_measure.code
+
+    def get_allows_decimal_quantity(self, movement):
+        return self.target_product(movement).unit_of_measure.allows_decimal_quantity
 
     @extend_schema_field(serializers.CharField())
     def get_item_name(self, movement):

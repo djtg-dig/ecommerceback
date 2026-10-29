@@ -18,7 +18,11 @@ class SupplierPurchaseHistorySerializer(serializers.ModelSerializer):
   return 'UNPAID' if paid==0 else ('PAID' if paid==total else 'PARTIALLY_PAID')
 class PurchaseLineSerializer(serializers.ModelSerializer):
  product=serializers.CharField(source='product.public_id',read_only=True,allow_null=True);variant=serializers.CharField(source='variant.public_id',read_only=True,allow_null=True)
- class Meta:model=PurchaseLine;fields=('public_id','product','variant','quantity','unit_cost','line_total','created_at','updated_at')
+ unit_symbol=serializers.SerializerMethodField();allows_decimal_quantity=serializers.SerializerMethodField()
+ def _product(self,line):return line.variant.product if line.variant_id else line.product
+ def get_unit_symbol(self,line):return self._product(line).unit_of_measure.code
+ def get_allows_decimal_quantity(self,line):return self._product(line).unit_of_measure.allows_decimal_quantity
+ class Meta:model=PurchaseLine;fields=('public_id','product','variant','unit_symbol','allows_decimal_quantity','quantity','unit_cost','line_total','created_at','updated_at')
 class PurchaseSerializer(serializers.ModelSerializer):
  paid_amount=serializers.DecimalField(max_digits=16,decimal_places=2,read_only=True);balance=serializers.DecimalField(max_digits=16,decimal_places=2,read_only=True);payment_status=serializers.CharField(read_only=True)
  supplier=serializers.CharField(source='supplier.public_id',read_only=True,allow_null=True);subtotal=serializers.DecimalField(max_digits=16,decimal_places=2,read_only=True);total=serializers.DecimalField(max_digits=16,decimal_places=2,read_only=True)

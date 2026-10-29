@@ -44,7 +44,7 @@ class BusinessInventoryMixin:
         return business
 
     def get_item(self, business, item_public_id):
-        return InventoryItem.objects.filter(business=business, public_id=item_public_id).select_related("product", "variant__product").first()
+        return InventoryItem.objects.filter(business=business, public_id=item_public_id).select_related("product__unit_of_measure", "variant__product__unit_of_measure").first()
 
     @staticmethod
     def not_found():
@@ -66,7 +66,7 @@ class InventoryListCreateView(BusinessInventoryMixin, APIView):
         )
         if not business:
             return self.not_found()
-        items = InventoryItem.objects.filter(business=business).select_related("product", "variant__product").annotate(
+        items = InventoryItem.objects.filter(business=business).select_related("product__unit_of_measure", "variant__product__unit_of_measure").annotate(
             last_movement_at=Max("movements__created_at"),
             available_db=F("quantity") - F("reserved_quantity"),
             low_stock_db=Case(
@@ -151,7 +151,7 @@ class StockMovementListCreateView(BusinessInventoryMixin, APIView):
         item = self.get_item(business, inventory_public_id) if business else None
         if not item:
             return self.not_found()
-        return Response(StockMovementSerializer(item.movements.all(), many=True).data)
+        return Response(StockMovementSerializer(item.movements.select_related("inventory_item__product__unit_of_measure", "inventory_item__variant__product__unit_of_measure"), many=True).data)
 
     def post(self, request, business_public_id, inventory_public_id):
         serializer = StockMovementCreateSerializer(data=request.data)
@@ -243,8 +243,8 @@ class BusinessStockMovementHistoryView(BusinessInventoryMixin, APIView):
         if not business:
             return self.not_found()
         movements = StockMovement.objects.filter(business=business).select_related(
-            "inventory_item__product",
-            "inventory_item__variant__product",
+            "inventory_item__product__unit_of_measure",
+            "inventory_item__variant__product__unit_of_measure",
         )
         if product := request.query_params.get("product"):
             movements = movements.filter(
