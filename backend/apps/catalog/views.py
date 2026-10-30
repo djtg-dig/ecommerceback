@@ -144,29 +144,29 @@ class PublicCatalogMixin:
 
 
 class PublicHomeProductsView(PublicCatalogMixin, APIView):
-    """Return a deterministic, category/business-diverse selection capped at 100."""
+    """Retourne une sélection publique déterministe, bornée avant sérialisation."""
+
+    selection_limit = 100
+    page_size = 20
+
     def get(self, request):
-        # Round-robin over a stable ordering prevents one seller/category from
-        # filling the home selection before other eligible products are shown.
-        products = list(self.queryset().order_by("category__slug", "business__public_id", "public_id"))
-        buckets = {}
-        for product in products:
-            buckets.setdefault((product.category_id, product.business_id), []).append(product)
-        selected = []
-        while buckets and len(selected) < 100:
-            for key in list(buckets):
-                selected.append(buckets[key].pop(0))
-                if not buckets[key]:
-                    del buckets[key]
-                if len(selected) == 100:
-                    break
-        page = int(request.query_params.get("page", "1"))
+        # La limite est appliquée en SQL avant le prefetch des médias. L'ancien
+        # round-robin matérialisait l'intégralité du catalogue pour n'en rendre
+        # au plus que 100 produits, ce qui ne tenait pas à l'échelle.
+        selected = list(
+            self.queryset()
+            .order_by("category__slug", "business__public_id", "public_id")[: self.selection_limit]
+        )
+        try:
+            page = int(request.query_params.get("page", "1"))
+        except (TypeError, ValueError):
+            page = 0
         if page < 1:
             return Response({"detail": "Not found."}, status=404)
-        start = (page - 1) * 20
+        start = (page - 1) * self.page_size
         if start >= len(selected) and page > 1:
             return Response({"detail": "Not found."}, status=404)
-        return Response({"count": len(selected), "next": page + 1 if start + 20 < len(selected) else None, "results": PublicProductSerializer(selected[start:start + 20], many=True).data})
+        return Response({"count": len(selected), "next": page + 1 if start + self.page_size < len(selected) else None, "previous": page - 1 if page > 1 else None, "results": PublicProductSerializer(selected[start:start + self.page_size], many=True).data})
 
 
 class PublicProductSearchView(PublicCatalogMixin, APIView):

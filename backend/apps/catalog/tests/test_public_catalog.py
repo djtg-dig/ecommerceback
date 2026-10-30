@@ -39,3 +39,35 @@ def test_public_catalog_never_returns_private_fields_or_inactive_products(public
     response = APIClient().get("/api/v1/public/products/search/")
     assert response.status_code == 200 and response.data["count"] == 0
     assert APIClient().get(f"/api/v1/public/products/{visible.public_id}/").status_code == 404
+
+
+def test_public_home_is_bounded_and_paginates_its_selection(public_catalog):
+    """Le catalogue d'accueil ne matérialise jamais plus de 100 produits publics."""
+    shop, _, _ = public_catalog
+    category = ProductCategory.objects.get(code="PUBLIC_CAT")
+    unit = UnitOfMeasure.objects.get(code="PCS")
+    for index in range(105):
+        Product.objects.create(
+            business=shop,
+            category=category,
+            name=f"Produit public {index:03d}",
+            unit_of_measure=unit,
+            selling_price=Decimal("10"),
+            currency="CDF",
+            attributes={},
+            is_public=True,
+        )
+
+    client = APIClient()
+    first = client.get("/api/v1/public/products/home/", {"page": 1})
+    fifth = client.get("/api/v1/public/products/home/", {"page": 5})
+    sixth = client.get("/api/v1/public/products/home/", {"page": 6})
+
+    assert first.status_code == 200
+    assert first.data["count"] == 100
+    assert len(first.data["results"]) == 20
+    assert first.data["previous"] is None and first.data["next"] == 2
+    assert fifth.status_code == 200
+    assert len(fifth.data["results"]) == 20
+    assert fifth.data["previous"] == 4 and fifth.data["next"] is None
+    assert sixth.status_code == 404
