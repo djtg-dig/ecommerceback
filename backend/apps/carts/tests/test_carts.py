@@ -194,10 +194,24 @@ def test_existing_cart_remains_readable_but_member_cannot_mutate_after_joining(s
     assert client.get(f"/api/v1/carts/{source}/").status_code == 200
     assert api(other_buyer).get(f"/api/v1/carts/{source}/").status_code == 404
     for response in (
+        client.patch(f"/api/v1/carts/{source}/", {"name": "Interdit"}, format="json"),
         client.post("/api/v1/carts/items/", {"cart": source, "product": product.public_id, "quantity": "1"}, format="json"),
         client.post(f"/api/v1/carts/{source}/items/", {"product": product.public_id, "quantity": "1"}, format="json"),
         client.patch(f"/api/v1/carts/{source}/items/{product.public_id}/", {"quantity": "1"}, format="json"),
+        client.delete(f"/api/v1/carts/{source}/items/{product.public_id}/"),
+        client.post(f"/api/v1/carts/{source}/clear/", {}, format="json"),
+        client.delete(f"/api/v1/carts/{source}/"),
         client.post("/api/v1/carts/transfers/", {"source_cart": source, "destination_cart": destination, "product": product.public_id, "quantity": "1"}, format="json"),
     ):
         assert response.status_code == 403
         assert response.data["code"] == "BUSINESS_MEMBER_CANNOT_PURCHASE"
+
+    membership = BusinessMember.objects.get(identity=buyer, business=business)
+    membership.status = BusinessMember.Status.SUSPENDED
+    membership.save(update_fields=("status",))
+    assert client.patch(f"/api/v1/carts/{source}/", {"name": "De nouveau autorisé"}, format="json").status_code == 200
+
+    BusinessMember.objects.filter(pk=membership.pk).update(status=BusinessMember.Status.ACTIVE)
+    response = client.patch(f"/api/v1/carts/{source}/", {"name": "Encore interdit"}, format="json")
+    assert response.status_code == 403
+    assert response.data["code"] == "BUSINESS_MEMBER_CANNOT_PURCHASE"

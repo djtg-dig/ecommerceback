@@ -11,6 +11,7 @@ import logging
 import shutil
 import subprocess
 import tempfile
+import warnings
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -72,37 +73,44 @@ def validate_image(upload: BinaryIO, *, kind: str) -> MediaMetadata:
     """Inspect pixels, not the submitted extension or MIME type."""
     from PIL import Image, UnidentifiedImageError
 
-    limits = {
+    branding_limits = {
         # Les images d'identité sont normalisées par le client avant envoi.
         # Une faible définition peut être floue, mais n'est pas un risque de sécurité.
         "logo": (2 * 1024 * 1024, 1, 1, 3000, 3000),
         "banner": (5 * 1024 * 1024, 1, 1, 6000, 3000),
-        "product": (settings.ECOMMERCE_MEDIA_IMAGE_MAX_BYTES, 800, 800, 6000, 6000),
     }
-    maximum, min_width, min_height, max_width, max_height = limits[kind]
+    maximum = settings.ECOMMERCE_MEDIA_IMAGE_MAX_BYTES if kind == "product" else branding_limits[kind][0]
     size = _size(upload)
     if size <= 0 or size > maximum:
         raise ValidationError({"file": f"Le fichier image doit peser au plus {maximum // 1024 // 1024} Mo."})
     previous_limit = Image.MAX_IMAGE_PIXELS
     try:
-        Image.MAX_IMAGE_PIXELS = 36_000_000
-        _rewind(upload)
-        with Image.open(upload) as image:
-            image.verify()
-        _rewind(upload)
-        with Image.open(upload) as image:
-            image.load()
-            image_format = (image.format or "").upper()
-            width, height = image.size
-    except (UnidentifiedImageError, Image.DecompressionBombError, OSError, ValueError) as exc:
+        Image.MAX_IMAGE_PIXELS = settings.ECOMMERCE_MEDIA_IMAGE_MAX_PIXELS
+        # Pillow warns at half its hard limit. We retain the hard rejection at
+        # the configured limit and do not reject otherwise safe large photos.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+            _rewind(upload)
+            with Image.open(upload) as image:
+                image.verify()
+            _rewind(upload)
+            with Image.open(upload) as image:
+                image.load()
+                image_format = (image.format or "").upper()
+                width, height = image.size
+    except Image.DecompressionBombError as exc:
+        raise ValidationError({"file": f"L’image dépasse la limite de sécurité de {settings.ECOMMERCE_MEDIA_IMAGE_MAX_PIXELS // 1_000_000} millions de pixels."}) from exc
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise ValidationError({"file": "Le fichier ne contient pas une image valide et sûre."}) from exc
     finally:
         Image.MAX_IMAGE_PIXELS = previous_limit
         _rewind(upload)
     if image_format not in IMAGE_FORMATS:
         raise ValidationError({"file": "Formats image acceptés : JPEG, PNG ou WebP."})
-    if not (min_width <= width <= max_width and min_height <= height <= max_height):
-        raise ValidationError({"file": f"Dimensions attendues : de {min_width}×{min_height} à {max_width}×{max_height}px."})
+    if kind in branding_limits:
+        _, min_width, min_height, max_width, max_height = branding_limits[kind]
+        if not (min_width <= width <= max_width and min_height <= height <= max_height):
+            raise ValidationError({"file": f"Dimensions attendues : de {min_width}×{min_height} à {max_width}×{max_height}px."})
     return MediaMetadata("IMAGE", "image", width, height, IMAGE_FORMATS[image_format], size)
 
 

@@ -22,19 +22,36 @@ def image_file(width, height, image_format="PNG"):
     return SimpleUploadedFile(f"image.{image_format.lower()}", stream.getvalue(), content_type="application/octet-stream")
 
 
-def test_product_image_is_verified_by_content_not_declared_mime_type():
-    metadata = validate_image(image_file(800, 800), kind="product")
+@pytest.mark.parametrize("width,height", [(400, 400), (600, 900), (720, 1280), (1200, 800), (800, 800), (3000, 2000), (6001, 2)])
+def test_product_images_are_verified_by_content_without_edge_dimension_limits(width, height):
+    metadata = validate_image(image_file(width, height), kind="product")
     assert metadata.media_type == "IMAGE"
-    assert metadata.width == 800
+    assert (metadata.width, metadata.height) == (width, height)
     assert metadata.resource_type == "image"
 
 
-def test_documents_and_too_small_images_are_rejected():
-    document = SimpleUploadedFile("fake.png", b"not an image", content_type="image/png")
+def test_corrupt_or_renamed_non_image_is_rejected():
+    document = SimpleUploadedFile("fake.jpg", b"not an image", content_type="image/jpeg")
     with pytest.raises(ValidationError):
         validate_image(document, kind="product")
-    with pytest.raises(ValidationError):
-        validate_image(image_file(799, 800), kind="product")
+
+
+def test_product_image_larger_than_the_configured_file_limit_is_rejected(settings):
+    upload = image_file(400, 400)
+    settings.ECOMMERCE_MEDIA_IMAGE_MAX_BYTES = 1
+    with pytest.raises(ValidationError, match="au plus"):
+        validate_image(upload, kind="product")
+
+
+def test_product_image_over_the_decoded_pixel_limit_is_rejected(monkeypatch):
+    from PIL import Image
+
+    def bomb(*args, **kwargs):
+        raise Image.DecompressionBombError("too many pixels")
+
+    monkeypatch.setattr(Image, "open", bomb)
+    with pytest.raises(ValidationError, match="limite de sécurité"):
+        validate_image(image_file(400, 400), kind="product")
 
 
 def test_video_cannot_be_primary_even_before_database_constraints():
