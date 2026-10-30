@@ -69,6 +69,28 @@ def test_add_merge_quantities_and_unit_validation(setup):
     assert client.post(endpoint, {"product": foreign.public_id, "quantity": "1"}, format="json").status_code == 400
 
 
+def test_cart_payload_exposes_safe_presentation_data(setup):
+    buyer, _, business, _, product, _, _ = setup
+    client = api(buyer)
+    cart = create_cart(client, business, "Main")
+    assert client.post(f"/api/v1/carts/{cart}/items/", {"product": product.public_id, "quantity": "2"}, format="json").status_code == 201
+
+    payload = client.get(f"/api/v1/carts/{cart}/").data
+
+    assert payload["business_name"] == business.name
+    assert payload["items"][0] == {
+        "product": product.public_id,
+        "product_name": product.name,
+        "unit": product.unit_of_measure.symbol,
+        "quantity": "2.000",
+        "selling_price": "1.00",
+        "currency": "CDF",
+        "primary_image_url": None,
+        "created_at": payload["items"][0]["created_at"],
+        "updated_at": payload["items"][0]["updated_at"],
+    }
+
+
 def test_auto_cart_selection_and_item_transfer(setup):
     buyer, _, business, _, product, _, _ = setup
     client = api(buyer)

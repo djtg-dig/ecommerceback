@@ -22,7 +22,10 @@ class CartPagination(PageNumberPagination):
 
 class CartViewMixin:
     def carts(self, request):
-        return Cart.objects.filter(buyer=request.user).select_related("business", "locked_by").prefetch_related("items__product__unit_of_measure")
+        return Cart.objects.filter(buyer=request.user).select_related("business", "locked_by").prefetch_related(
+            "items__product__unit_of_measure",
+            "items__product__media",
+        )
 
     def cart(self, request, reference):
         return self.carts(request).filter(reference=reference).first()
@@ -45,6 +48,12 @@ class CartListCreateView(CartViewMixin, APIView):
         business_reference = request.query_params.get("business")
         if business_reference:
             carts = carts.filter(business__public_id=business_reference)
+        search = request.query_params.get("search")
+        if search:
+            carts = carts.filter(name__icontains=search.strip())
+        status_value = request.query_params.get("status")
+        if status_value in Cart.Status.values:
+            carts = carts.filter(status=status_value)
         paginator = CartPagination()
         page = paginator.paginate_queryset(carts, request)
         return paginator.get_paginated_response(CartSerializer(page, many=True).data)
