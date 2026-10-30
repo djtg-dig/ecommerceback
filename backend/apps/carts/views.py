@@ -11,7 +11,7 @@ from apps.catalog.models import Product
 
 from .models import Cart, CartItem
 from .serializers import AddProductSerializer, AddToCartSerializer, CartSerializer, QuantitySerializer, TransferSerializer
-from .services import CartLockedError, add_product, create_default_cart, require_mutable, set_item_quantity, transfer_item
+from .services import BusinessMemberCannotPurchaseError, CartLockedError, add_product, create_cart, create_default_cart, require_mutable, require_purchase_allowed, set_item_quantity, transfer_item
 
 
 class CartPagination(PageNumberPagination):
@@ -35,6 +35,12 @@ class CartViewMixin:
 
     def locked(self):
         return Response({"code": "CART_LOCKED", "detail": "Ce panier est verrouillé."}, status=status.HTTP_409_CONFLICT)
+
+    def member_cannot_purchase(self):
+        return Response({
+            "code": "BUSINESS_MEMBER_CANNOT_PURCHASE",
+            "detail": "Vous ne pouvez pas acheter de produits dans une boutique dont vous êtes membre.",
+        }, status=status.HTTP_403_FORBIDDEN)
 
     def product(self, product_reference):
         # A buyer can only add a currently sellable product. Publication rules do
@@ -65,9 +71,11 @@ class CartListCreateView(CartViewMixin, APIView):
         business = Business.objects.filter(public_id=business_reference).first()
         if not business:
             raise ValidationError({"business": "Entreprise introuvable."})
-        cart = Cart(buyer=request.user, business=business, name=serializer.validated_data["name"])
         try:
+            cart = create_cart(buyer=request.user, business=business, name=serializer.validated_data["name"])
             cart.save()
+        except BusinessMemberCannotPurchaseError:
+            return self.member_cannot_purchase()
         except DjangoValidationError as exc:
             raise ValidationError(exc.message_dict) from exc
         except IntegrityError:
@@ -85,7 +93,10 @@ class CartDetailView(CartViewMixin, APIView):
         if not cart:
             return self.not_found()
         try:
+            require_purchase_allowed(buyer=request.user, business=cart.business)
             require_mutable(cart)
+        except BusinessMemberCannotPurchaseError:
+            return self.member_cannot_purchase()
         except CartLockedError:
             return self.locked()
         serializer = CartSerializer(cart, data=request.data, partial=True)
@@ -104,7 +115,10 @@ class CartDetailView(CartViewMixin, APIView):
             if not cart:
                 return self.not_found()
             try:
+                require_purchase_allowed(buyer=request.user, business=cart.business)
                 require_mutable(cart)
+            except BusinessMemberCannotPurchaseError:
+                return self.member_cannot_purchase()
             except CartLockedError:
                 return self.locked()
             cart.delete()
@@ -123,6 +137,8 @@ class CartItemListCreateView(CartViewMixin, APIView):
             raise ValidationError({"product": "Produit introuvable ou indisponible."})
         try:
             item = add_product(cart=cart, product=product, quantity=serializer.validated_data["quantity"])
+        except BusinessMemberCannotPurchaseError:
+            return self.member_cannot_purchase()
         except CartLockedError:
             return self.locked()
         except DjangoValidationError as exc:
@@ -140,6 +156,8 @@ class CartItemDetailView(CartViewMixin, APIView):
         serializer.is_valid(raise_exception=True)
         try:
             item = set_item_quantity(cart=cart, product=product, quantity=serializer.validated_data["quantity"])
+        except BusinessMemberCannotPurchaseError:
+            return self.member_cannot_purchase()
         except CartLockedError:
             return self.locked()
         except DjangoValidationError as exc:
@@ -154,7 +172,10 @@ class CartItemDetailView(CartViewMixin, APIView):
             if not cart:
                 return self.not_found()
             try:
+                require_purchase_allowed(buyer=request.user, business=cart.business)
                 require_mutable(cart)
+            except BusinessMemberCannotPurchaseError:
+                return self.member_cannot_purchase()
             except CartLockedError:
                 return self.locked()
             item = CartItem.objects.select_for_update().filter(cart=cart, product__public_id=product_reference).first()
@@ -171,7 +192,10 @@ class CartClearView(CartViewMixin, APIView):
             if not cart:
                 return self.not_found()
             try:
+                require_purchase_allowed(buyer=request.user, business=cart.business)
                 require_mutable(cart)
+            except BusinessMemberCannotPurchaseError:
+                return self.member_cannot_purchase()
             except CartLockedError:
                 return self.locked()
             CartItem.objects.filter(cart=cart).delete()
@@ -197,9 +221,14 @@ class AddToCartView(CartViewMixin, APIView):
             elif len(drafts) > 1:
                 raise ValidationError({"cart": "Sélectionnez le panier à utiliser."})
             else:
-                cart = create_default_cart(buyer=request.user, business=product.business)
+                try:
+                    cart = create_default_cart(buyer=request.user, business=product.business)
+                except BusinessMemberCannotPurchaseError:
+                    return self.member_cannot_purchase()
         try:
             add_product(cart=cart, product=product, quantity=serializer.validated_data["quantity"])
+        except BusinessMemberCannotPurchaseError:
+            return self.member_cannot_purchase()
         except CartLockedError:
             return self.locked()
         except DjangoValidationError as exc:
@@ -218,6 +247,8 @@ class CartTransferView(CartViewMixin, APIView):
             return self.not_found()
         try:
             transfer_item(buyer=request.user, source=source, destination=destination, product=product, quantity=serializer.validated_data["quantity"])
+        except BusinessMemberCannotPurchaseError:
+            return self.member_cannot_purchase()
         except CartLockedError:
             return self.locked()
         except DjangoValidationError as exc:

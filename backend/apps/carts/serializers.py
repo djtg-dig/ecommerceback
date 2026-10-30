@@ -9,7 +9,9 @@ from .models import Cart, CartItem
 class CartItemSerializer(serializers.ModelSerializer):
     product = serializers.CharField(source="product.public_id", read_only=True)
     product_name = serializers.CharField(source="product.name", read_only=True)
+    unit_code = serializers.CharField(source="product.unit_of_measure.code", read_only=True)
     unit = serializers.CharField(source="product.unit_of_measure.symbol", read_only=True)
+    allows_decimal_quantity = serializers.BooleanField(source="product.unit_of_measure.allows_decimal_quantity", read_only=True)
     selling_price = serializers.DecimalField(source="product.selling_price", max_digits=14, decimal_places=2, read_only=True)
     currency = serializers.CharField(source="product.currency", read_only=True)
     primary_image_url = serializers.SerializerMethodField()
@@ -26,7 +28,7 @@ class CartItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = CartItem
         fields = (
-            "product", "product_name", "unit", "quantity", "selling_price", "currency",
+            "product", "product_name", "unit_code", "unit", "allows_decimal_quantity", "quantity", "selling_price", "currency",
             "primary_image_url", "created_at", "updated_at",
         )
 

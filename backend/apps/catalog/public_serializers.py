@@ -10,12 +10,14 @@ class PublicProductSerializer(serializers.ModelSerializer):
     business_name = serializers.CharField(source="business.name", read_only=True)
     category = serializers.CharField(source="category.slug", read_only=True, allow_null=True)
     category_name = serializers.CharField(source="category.name", read_only=True, allow_null=True)
+    unit_code = serializers.CharField(source="unit_of_measure.code", read_only=True)
     unit = serializers.CharField(source="unit_of_measure.symbol", read_only=True)
+    allows_decimal_quantity = serializers.BooleanField(source="unit_of_measure.allows_decimal_quantity", read_only=True)
     image = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
-        fields = ("public_id", "name", "description", "business", "business_name", "category", "category_name", "selling_price", "min_price", "max_price", "currency", "is_negotiable", "is_online_purchasable", "is_home_deliverable", "unit", "image")
+        fields = ("public_id", "name", "description", "business", "business_name", "category", "category_name", "selling_price", "min_price", "max_price", "currency", "is_negotiable", "is_online_purchasable", "is_home_deliverable", "unit_code", "unit", "allows_decimal_quantity", "image")
 
     def get_image(self, product):
         media = getattr(product, "public_images", ())

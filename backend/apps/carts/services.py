@@ -6,11 +6,32 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from apps.businesses.models import BusinessMember
+
 from .models import Cart, CartItem, normalize_cart_name
 
 
 class CartLockedError(Exception):
     """Raised whenever a buyer tries to mutate a locked cart."""
+
+
+class BusinessMemberCannotPurchaseError(Exception):
+    """Raised when an active member attempts to buy from their own business."""
+
+
+def require_purchase_allowed(*, buyer, business) -> None:
+    """Keep member purchase eligibility independent from roles and permissions.
+
+    A pending invitation has no ``BusinessMember`` record. Suspended and removed
+    memberships are intentionally excluded: only a current active membership
+    blocks a marketplace purchase.
+    """
+    if BusinessMember.objects.filter(
+        identity=buyer,
+        business=business,
+        status=BusinessMember.Status.ACTIVE,
+    ).exists():
+        raise BusinessMemberCannotPurchaseError()
 
 
 def require_mutable(cart: Cart) -> None:
@@ -36,6 +57,7 @@ def normalize_quantity(product, value) -> Decimal:
 
 
 def create_cart(*, buyer, business, name):
+    require_purchase_allowed(buyer=buyer, business=business)
     cart = Cart(buyer=buyer, business=business, name=name)
     cart.full_clean()
     return cart
@@ -43,6 +65,7 @@ def create_cart(*, buyer, business, name):
 
 def create_default_cart(*, buyer, business):
     """Serialize default-name allocation per buyer to prevent duplicate names."""
+    require_purchase_allowed(buyer=buyer, business=business)
     with transaction.atomic():
         type(buyer).objects.select_for_update().get(pk=buyer.pk)
         existing = set(Cart.objects.filter(buyer=buyer, business=business).values_list("name_normalized", flat=True))
@@ -66,6 +89,7 @@ def create_default_cart(*, buyer, business):
 def add_product(*, cart, product, quantity):
     with transaction.atomic():
         cart = Cart.objects.select_for_update().get(pk=cart.pk)
+        require_purchase_allowed(buyer=cart.buyer, business=cart.business)
         require_mutable(cart)
         if cart.business_id != product.business_id:
             raise ValidationError({"product": "Le produit n'appartient pas à l'entreprise du panier."})
@@ -82,6 +106,7 @@ def add_product(*, cart, product, quantity):
 def set_item_quantity(*, cart, product, quantity):
     with transaction.atomic():
         cart = Cart.objects.select_for_update().get(pk=cart.pk)
+        require_purchase_allowed(buyer=cart.buyer, business=cart.business)
         require_mutable(cart)
         item = CartItem.objects.select_for_update().filter(cart=cart, product=product).first()
         if not item:
@@ -102,6 +127,7 @@ def transfer_item(*, buyer, source, destination, product, quantity):
             raise ValidationError({"destination_cart": "Les deux paniers doivent vous appartenir."})
         if source.business_id != destination.business_id:
             raise ValidationError({"destination_cart": "Les paniers doivent appartenir à la même entreprise."})
+        require_purchase_allowed(buyer=buyer, business=source.business)
         require_mutable(source)
         require_mutable(destination)
         quantity = normalize_quantity(product, quantity)

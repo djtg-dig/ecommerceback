@@ -4,7 +4,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
-from apps.businesses.models import Business
+from apps.businesses.models import Business, BusinessMember
 from apps.catalog.models import Product, ProductCategory, UnitOfMeasure
 from apps.carts.models import Cart, CartItem
 
@@ -81,7 +81,9 @@ def test_cart_payload_exposes_safe_presentation_data(setup):
     assert payload["items"][0] == {
         "product": product.public_id,
         "product_name": product.name,
+        "unit_code": product.unit_of_measure.code,
         "unit": product.unit_of_measure.symbol,
+        "allows_decimal_quantity": False,
         "quantity": "2.000",
         "selling_price": "1.00",
         "currency": "CDF",
@@ -122,3 +124,80 @@ def test_cross_business_ownership_and_locked_cart_mutations(setup):
     assert client.delete(f"/api/v1/carts/{cart_reference}/items/{product.public_id}/").status_code == 409
     assert client.post(f"/api/v1/carts/{cart_reference}/clear/", {}, format="json").status_code == 409
     assert client.delete(f"/api/v1/carts/{cart_reference}/").status_code == 409
+
+
+@pytest.mark.parametrize(
+    ("role", "is_owner", "title"),
+    [
+        (BusinessMember.Role.OWNER, True, "Gérant"),
+        (BusinessMember.Role.MANAGER, False, "Administrateur"),
+        (BusinessMember.Role.EMPLOYEE, False, "Employé"),
+    ],
+)
+def test_active_business_members_cannot_create_or_auto_create_carts(setup, role, is_owner, title):
+    buyer, _, business, _, product, _, _ = setup
+    BusinessMember.objects.create(
+        identity=buyer,
+        business=business,
+        role=role,
+        is_owner=is_owner,
+        title=title,
+        status=BusinessMember.Status.ACTIVE,
+    )
+    client = api(buyer)
+
+    created = client.post("/api/v1/carts/", {"business": business.public_id, "name": "Interdit"}, format="json")
+    automatic = client.post("/api/v1/carts/items/", {"product": product.public_id, "quantity": "1"}, format="json")
+
+    for response in (created, automatic):
+        assert response.status_code == 403
+        assert response.data == {
+            "code": "BUSINESS_MEMBER_CANNOT_PURCHASE",
+            "detail": "Vous ne pouvez pas acheter de produits dans une boutique dont vous êtes membre.",
+        }
+    assert not Cart.objects.filter(buyer=buyer, business=business).exists()
+
+
+def test_member_status_and_business_scope_determine_purchase_eligibility(setup):
+    buyer, _, business, other, product, _, foreign = setup
+    BusinessMember.objects.create(
+        identity=buyer,
+        business=business,
+        role=BusinessMember.Role.EMPLOYEE,
+        title="Ancien membre",
+        status=BusinessMember.Status.SUSPENDED,
+    )
+    client = api(buyer)
+    assert create_cart(client, business, "Autorisé")
+
+    BusinessMember.objects.filter(identity=buyer, business=business).update(status=BusinessMember.Status.REMOVED)
+    assert create_cart(client, other, "Autre boutique")
+
+    BusinessMember.objects.filter(identity=buyer, business=business).update(status=BusinessMember.Status.ACTIVE)
+    assert client.post("/api/v1/carts/items/", {"product": foreign.public_id, "quantity": "1"}, format="json").status_code == 201
+
+
+def test_existing_cart_remains_readable_but_member_cannot_mutate_after_joining(setup):
+    buyer, other_buyer, business, _, product, _, _ = setup
+    client = api(buyer)
+    source = create_cart(client, business, "Avant adhésion")
+    destination = create_cart(client, business, "Destination")
+    assert client.post(f"/api/v1/carts/{source}/items/", {"product": product.public_id, "quantity": "2"}, format="json").status_code == 201
+    BusinessMember.objects.create(
+        identity=buyer,
+        business=business,
+        role=BusinessMember.Role.EMPLOYEE,
+        title="Membre",
+        status=BusinessMember.Status.ACTIVE,
+    )
+
+    assert client.get(f"/api/v1/carts/{source}/").status_code == 200
+    assert api(other_buyer).get(f"/api/v1/carts/{source}/").status_code == 404
+    for response in (
+        client.post("/api/v1/carts/items/", {"cart": source, "product": product.public_id, "quantity": "1"}, format="json"),
+        client.post(f"/api/v1/carts/{source}/items/", {"product": product.public_id, "quantity": "1"}, format="json"),
+        client.patch(f"/api/v1/carts/{source}/items/{product.public_id}/", {"quantity": "1"}, format="json"),
+        client.post("/api/v1/carts/transfers/", {"source_cart": source, "destination_cart": destination, "product": product.public_id, "quantity": "1"}, format="json"),
+    ):
+        assert response.status_code == 403
+        assert response.data["code"] == "BUSINESS_MEMBER_CANNOT_PURCHASE"

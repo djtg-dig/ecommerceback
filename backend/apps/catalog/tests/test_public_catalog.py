@@ -27,7 +27,9 @@ def test_public_catalog_is_opt_in_and_searchable(public_catalog):
     home = client.get("/api/v1/public/products/home/")
     assert home.status_code == 200 and [row["public_id"] for row in home.data["results"]] == [visible.public_id]
     assert client.get("/api/v1/public/products/search/", {"q": "ROUGE"}).data["count"] == 1
-    assert client.get(f"/api/v1/public/products/{visible.public_id}/").data["business"] == shop.public_id
+    detail = client.get(f"/api/v1/public/products/{visible.public_id}/").data
+    assert detail["business"] == shop.public_id
+    assert detail["unit_code"] == "PCS" and detail["allows_decimal_quantity"] is False
     suggestions = client.get("/api/v1/public/products/suggestions/", {"q": "chauss"})
     assert suggestions.status_code == 200 and any(item["type"] == "CATEGORY" for item in suggestions.data)
 
