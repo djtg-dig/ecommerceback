@@ -507,6 +507,10 @@ class BusinessMemberPermission(models.Model):
         SALE_REPORT_VIEW = "SALE_REPORT_VIEW", "View sales report"
         PURCHASE_REPORT_VIEW = "PURCHASE_REPORT_VIEW", "View purchase report"
         EXPENSE_RECEIVABLE_REPORT_VIEW = "EXPENSE_RECEIVABLE_REPORT_VIEW", "View expense and receivable report"
+        MESSAGING_VIEW = "MESSAGING_VIEW", "View conversations"
+        MESSAGING_REPLY = "MESSAGING_REPLY", "Reply to buyers"
+        MESSAGING_ASSIGN = "MESSAGING_ASSIGN", "Assign conversations"
+        MESSAGING_MANAGE = "MESSAGING_MANAGE", "Manage messaging"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     member = models.ForeignKey(

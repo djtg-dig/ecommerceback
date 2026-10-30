@@ -23,8 +23,12 @@ from ..models import (
     BusinessMemberInvitation,
     BusinessMemberPermission,
 )
-from ..permissions import has_permission
-from ..permissions import LEGACY_PERMISSION_VALUES, atomic_permission_values
+from ..permissions import (
+    LEGACY_PERMISSION_VALUES,
+    atomic_permission_values,
+    has_permission,
+    validate_permission_dependencies,
+)
 
 
 class InvitationActionError(Exception):
@@ -79,7 +83,9 @@ def _validated_permissions(permissions, *, persisted_invitation=False):
     legacy = [permission for permission in permissions if permission not in atomic_permission_values()]
     if legacy:
         raise ValidationError({"permissions": "Les permissions historiques ne peuvent plus être attribuées."})
-    return list(dict.fromkeys(permissions))
+    permissions = list(dict.fromkeys(permissions))
+    validate_permission_dependencies(permissions)
+    return permissions
 
 
 def _validate_actor(actor_member, business, permission):

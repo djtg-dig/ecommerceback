@@ -22,6 +22,24 @@ def atomic_permission_values():
 # ambiguïté le sous-ensemble de permissions effectivement attribuables.
 ATOMIC_PERMISSION_VALUES = tuple(atomic_permission_values())
 
+MESSAGING_PERMISSION_VALUES = frozenset({
+    BusinessMemberPermission.Permission.MESSAGING_VIEW,
+    BusinessMemberPermission.Permission.MESSAGING_REPLY,
+    BusinessMemberPermission.Permission.MESSAGING_ASSIGN,
+    BusinessMemberPermission.Permission.MESSAGING_MANAGE,
+})
+MESSAGING_PERMISSION_DEPENDENCIES = {
+    BusinessMemberPermission.Permission.MESSAGING_REPLY: frozenset({
+        BusinessMemberPermission.Permission.MESSAGING_VIEW,
+    }),
+    BusinessMemberPermission.Permission.MESSAGING_ASSIGN: frozenset({
+        BusinessMemberPermission.Permission.MESSAGING_VIEW,
+    }),
+    BusinessMemberPermission.Permission.MESSAGING_MANAGE: frozenset({
+        BusinessMemberPermission.Permission.MESSAGING_VIEW,
+    }),
+}
+
 
 def effective_permissions(member):
     """Return the current member's effective atomic permissions in registry order.
@@ -48,6 +66,20 @@ def validate_permission(permission):
         raise ValidationError({"permission": "Unknown Business permission."})
 
     return permission
+
+
+def validate_permission_dependencies(permissions):
+    """Valide les dépendances d'un ensemble de permissions explicites."""
+    permissions = set(permissions)
+    for permission, required in MESSAGING_PERMISSION_DEPENDENCIES.items():
+        missing = required - permissions
+        if permission in permissions and missing:
+            raise ValidationError({
+                "permissions": (
+                    f"{permission} requires {sorted(missing)[0]}."
+                ),
+            })
+    return permissions
 
 
 def membership_for(identity, business, *, include_suspended=False):
@@ -89,6 +121,13 @@ def has_permission(member, permission, *, write=False):
     ).exists()
 
 
+def has_messaging_permission(member, permission, *, write=False):
+    """Évalue un droit de messagerie sans élargir sa portée fonctionnelle."""
+    if permission not in MESSAGING_PERMISSION_VALUES:
+        raise ValidationError({"permission": "Unknown messaging permission."})
+    return has_permission(member, permission, write=write)
+
+
 def require_permission(identity, business, permission, *, write=False):
     """Return the authorized member or raise the API's canonical 404/403 errors.
 
@@ -106,6 +145,13 @@ def require_permission(identity, business, permission, *, write=False):
         raise PermissionDenied("Forbidden.")
 
     return member
+
+
+def require_messaging_permission(identity, business, permission, *, write=False):
+    """Exige un droit de messagerie dans le contexte exact d'une entreprise."""
+    if permission not in MESSAGING_PERMISSION_VALUES:
+        raise ValidationError({"permission": "Unknown messaging permission."})
+    return require_permission(identity, business, permission, write=write)
 
 
 def require_any_permission(identity, business, permissions, *, write=False):

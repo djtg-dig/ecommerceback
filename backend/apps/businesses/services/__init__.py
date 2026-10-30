@@ -17,7 +17,11 @@ from ..models import (
     BusinessPaymentMethod,
     Currency,
 )
-from ..permissions import has_permission, validate_permission
+from ..permissions import (
+    MESSAGING_PERMISSION_DEPENDENCIES,
+    has_permission,
+    validate_permission,
+)
 
 MAX_PUBLIC_ID_ATTEMPTS = 5
 DEFAULT_PAYMENT_METHODS = (
@@ -174,6 +178,15 @@ def grant_permission(actor_member, member, permission):
             raise ValidationError("Only active members can receive permissions.")
         if not actor.is_owner and not has_permission(actor, permission, write=False):
             raise ValidationError("A member cannot grant a permission they do not hold.")
+        missing_dependencies = [
+            required
+            for required in MESSAGING_PERMISSION_DEPENDENCIES.get(permission, ())
+            if not has_permission(target, required)
+        ]
+        if missing_dependencies:
+            raise ValidationError(
+                f"{permission} requires {missing_dependencies[0]}."
+            )
 
         permission_row, _ = BusinessMemberPermission.objects.get_or_create(
             member=target,
@@ -205,9 +218,15 @@ def revoke_permission(actor_member, member, permission):
         if target.is_owner:
             raise ValidationError("Owner permissions are implicit and cannot be revoked.")
 
+        revoked_permissions = {permission}
+        revoked_permissions.update(
+            dependent
+            for dependent, required in MESSAGING_PERMISSION_DEPENDENCIES.items()
+            if permission in required
+        )
         BusinessMemberPermission.objects.filter(
             member=target,
-            permission=permission,
+            permission__in=revoked_permissions,
         ).delete()
 
 
