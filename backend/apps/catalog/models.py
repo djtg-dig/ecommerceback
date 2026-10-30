@@ -200,6 +200,8 @@ class Product(models.Model):
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.ACTIVE)
     # Publication is an explicit seller decision; legacy products remain private.
     is_public = models.BooleanField(default=False)
+    is_online_purchasable = models.BooleanField(default=False)
+    is_home_deliverable = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

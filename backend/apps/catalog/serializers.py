@@ -104,7 +104,7 @@ class ProductOutputSerializer(serializers.ModelSerializer):
             "public_id", "name", "description", "category", "category_code", "category_name",
             "category_source", "product_type_key",
             "internal_reference", "barcode", "unit_of_measure", "unit_symbol", "selling_price", "min_price", "max_price", "is_negotiable", "cost_price", "currency", "attributes",
-            "status", "is_public", "primary_image_url", "created_at", "updated_at",
+            "status", "is_public", "is_online_purchasable", "is_home_deliverable", "primary_image_url", "created_at", "updated_at",
         )
 
 
@@ -139,7 +139,7 @@ class ProductWriteSerializer(serializers.ModelSerializer):
         model = Product
         fields = (
             "name", "description", "category", "category_code", "internal_reference", "barcode", "unit_of_measure", "selling_price",
-            "cost_price", "min_price", "max_price", "is_negotiable", "currency", "attributes", "status", "is_public",
+            "cost_price", "min_price", "max_price", "is_negotiable", "currency", "attributes", "status", "is_public", "is_online_purchasable", "is_home_deliverable",
         )
         extra_kwargs = {
             "description": {"required": False}, "internal_reference": {"required": False},

@@ -15,7 +15,7 @@ class PublicProductSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Product
-        fields = ("public_id", "name", "description", "business", "business_name", "category", "category_name", "selling_price", "min_price", "max_price", "currency", "is_negotiable", "unit", "image")
+        fields = ("public_id", "name", "description", "business", "business_name", "category", "category_name", "selling_price", "min_price", "max_price", "currency", "is_negotiable", "is_online_purchasable", "is_home_deliverable", "unit", "image")
 
     def get_image(self, product):
         media = getattr(product, "public_images", ())
