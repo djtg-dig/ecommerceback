@@ -31,9 +31,9 @@ def setup():
     other = Business.objects.create(name="Shop B")
     buyer = CarriIdentity.objects.create(carri_subject="cart-buyer")
     other_buyer = CarriIdentity.objects.create(carri_subject="cart-other-buyer")
-    product = Product.objects.create(business=business, category=category, name="Piece", unit_of_measure=pcs, selling_price="1", currency="CDF", attributes={})
-    kilogram_product = Product.objects.create(business=business, category=category, name="Weight", unit_of_measure=kg, selling_price="1", currency="CDF", attributes={})
-    foreign = Product.objects.create(business=other, category=category, name="Foreign", unit_of_measure=pcs, selling_price="1", currency="CDF", attributes={})
+    product = Product.objects.create(business=business, category=category, name="Piece", unit_of_measure=pcs, selling_price="1", currency="CDF", attributes={}, is_public=True, is_online_purchasable=True)
+    kilogram_product = Product.objects.create(business=business, category=category, name="Weight", unit_of_measure=kg, selling_price="1", currency="CDF", attributes={}, is_public=True, is_online_purchasable=True)
+    foreign = Product.objects.create(business=other, category=category, name="Foreign", unit_of_measure=pcs, selling_price="1", currency="CDF", attributes={}, is_public=True, is_online_purchasable=True)
     return buyer, other_buyer, business, other, product, kilogram_product, foreign
 
 
@@ -67,6 +67,24 @@ def test_add_merge_quantities_and_unit_validation(setup):
     assert client.post(endpoint, {"product": product.public_id, "quantity": "1.5"}, format="json").status_code == 400
     assert client.post(endpoint, {"product": kg_product.public_id, "quantity": "1.5"}, format="json").status_code == 201
     assert client.post(endpoint, {"product": foreign.public_id, "quantity": "1"}, format="json").status_code == 400
+
+
+def test_private_or_offline_product_cannot_be_added(setup):
+    buyer, _, business, _, product, _, _ = setup
+    client = api(buyer)
+
+    product.is_public = False
+    product.save(update_fields=("is_public",))
+    private = client.post("/api/v1/carts/items/", {"product": product.public_id, "quantity": "1"}, format="json")
+
+    product.is_public = True
+    product.is_online_purchasable = False
+    product.save(update_fields=("is_public", "is_online_purchasable"))
+    offline = client.post("/api/v1/carts/items/", {"product": product.public_id, "quantity": "1"}, format="json")
+
+    assert private.status_code == 400
+    assert offline.status_code == 400
+    assert not Cart.objects.filter(buyer=buyer, business=business).exists()
 
 
 def test_cart_payload_exposes_safe_presentation_data(setup):

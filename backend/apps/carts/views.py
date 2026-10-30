@@ -43,9 +43,15 @@ class CartViewMixin:
         }, status=status.HTTP_403_FORBIDDEN)
 
     def product(self, product_reference):
-        # A buyer can only add a currently sellable product. Publication rules do
-        # not exist yet; this prevents inactive and archived catalogue entries.
-        return Product.objects.select_related("business", "unit_of_measure").filter(public_id=product_reference, status=Product.Status.ACTIVE).first()
+        # Cart mutations must enforce the same commercial visibility contract as
+        # the marketplace instead of trusting a product identifier from the client.
+        return Product.objects.select_related("business", "unit_of_measure").filter(
+            public_id=product_reference,
+            status=Product.Status.ACTIVE,
+            is_public=True,
+            is_online_purchasable=True,
+            business__status=Business.Status.ACTIVE,
+        ).first()
 
 
 class CartListCreateView(CartViewMixin, APIView):
