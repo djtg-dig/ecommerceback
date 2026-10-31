@@ -37,6 +37,8 @@ DEBUG = False
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS")
 
 INSTALLED_APPS = [
+    "daphne",
+    "channels",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -90,6 +92,24 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [{"BACKEND": "django.template.backends.django.DjangoTemplates", "DIRS": [], "APP_DIRS": True, "OPTIONS": {"context_processors": ["django.template.context_processors.request", "django.contrib.auth.context_processors.auth", "django.contrib.messages.context_processors.messages"]}}]
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
+
+
+def redis_channel_layer(redis_url: str) -> dict[str, dict[str, object]]:
+    """Construit la couche Channels sans interpréter ni journaliser l'URL Redis."""
+    return {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [redis_url],
+                "prefix": os.getenv("REDIS_CHANNEL_PREFIX", "ecommerce"),
+            },
+        }
+    }
+
+
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+CHANNEL_LAYERS = redis_channel_layer(REDIS_URL) if REDIS_URL else {}
+WEBSOCKET_ALLOWED_ORIGINS = env_list("WEBSOCKET_ALLOWED_ORIGINS")
 
 DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "NAME": os.getenv("POSTGRES_DB", ""), "USER": os.getenv("POSTGRES_USER", ""), "PASSWORD": os.getenv("POSTGRES_PASSWORD", ""), "HOST": os.getenv("POSTGRES_HOST", ""), "PORT": os.getenv("POSTGRES_PORT", "5432")}}
 AUTH_PASSWORD_VALIDATORS = []

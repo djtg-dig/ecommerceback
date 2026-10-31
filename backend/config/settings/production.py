@@ -8,6 +8,12 @@ if not SECRET_KEY:  # noqa: F405
     raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set in production.")
 if not ALLOWED_HOSTS:  # noqa: F405
     raise ImproperlyConfigured("DJANGO_ALLOWED_HOSTS must be set in production.")
+if not REDIS_URL:  # noqa: F405
+    raise ImproperlyConfigured("REDIS_URL must be set in production.")
+if not WEBSOCKET_ALLOWED_ORIGINS:  # noqa: F405
+    raise ImproperlyConfigured("WEBSOCKET_ALLOWED_ORIGINS must be set in production.")
+
+CHANNEL_LAYERS = redis_channel_layer(REDIS_URL)  # noqa: F405
 
 DEBUG = False
 SECURE_SSL_REDIRECT = True
