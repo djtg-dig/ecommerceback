@@ -20,6 +20,7 @@ from apps.expense_receivable_report_views import ExpensesReportView, Receivables
 from apps.purchase_report_views import PurchasesReportView, SupplierDebtsReportView
 from apps.catalog.views import UnitOfMeasureListView
 from apps.catalog.views import PublicBusinessView, PublicCatalogPagination, PublicCategoryProductsView, PublicHomeProductsView, PublicProductDetailView, PublicProductSearchView, PublicSuggestionsView
+from apps.messaging.views import EligibleSellerListView
 
 urlpatterns = [
     path("currencies/", CurrencyListView.as_view(), name="currency-list"),
@@ -30,6 +31,11 @@ urlpatterns = [
     path("public/products/<str:product_public_id>/", PublicProductDetailView.as_view()),
     path("public/categories/<slug:slug>/", PublicCategoryProductsView.as_view()),
     path("public/businesses/<str:business_public_id>/", PublicBusinessView.as_view()),
+    path(
+        "public/businesses/<str:business_reference>/messaging-sellers/",
+        EligibleSellerListView.as_view(),
+        name="messaging-seller-list",
+    ),
     path(
         "me/business-invitations/",
         BusinessInvitationRecipientListView.as_view(),
@@ -74,6 +80,7 @@ urlpatterns = [
     path("business-categories/", BusinessCategoriesView.as_view()),
     path("product-categories/", include("apps.catalog.urls")),
     path("carts/", include("apps.carts.urls")),
+    path("messaging/", include("apps.messaging.urls")),
     path("health/", HealthCheckView.as_view(), name="health"),
     path("auth/", include("apps.accounts.urls")),
 ]

@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     "apps.businesses.apps.BusinessesConfig",
     "apps.catalog.apps.CatalogConfig",
     "apps.carts.apps.CartsConfig",
+    "apps.messaging.apps.MessagingConfig",
     "apps.inventory.apps.InventoryConfig",
     "apps.purchases.apps.PurchasesConfig",
     "apps.sales.apps.SalesConfig",
@@ -141,6 +142,19 @@ ECOMMERCE_MEDIA_VIDEO_MAX_BYTES = int(os.getenv("ECOMMERCE_MEDIA_VIDEO_MAX_BYTES
 ECOMMERCE_PRODUCT_IMAGE_LIMIT = int(os.getenv("ECOMMERCE_PRODUCT_IMAGE_LIMIT", "10"))
 ECOMMERCE_PRODUCT_VIDEO_LIMIT = int(os.getenv("ECOMMERCE_PRODUCT_VIDEO_LIMIT", "3"))
 ECOMMERCE_PRODUCT_MEDIA_LIMIT = int(os.getenv("ECOMMERCE_PRODUCT_MEDIA_LIMIT", "13"))
+
+# Les pièces jointes de messagerie ne sont jamais servies par MEDIA_URL. Seule
+# la vue authentifiée ouvre ces fichiers depuis ce répertoire privé.
+MESSAGING_PRIVATE_MEDIA_ROOT = Path(
+    os.getenv(
+        "MESSAGING_PRIVATE_MEDIA_ROOT",
+        str(PROJECT_DIR / "private_media" / "messaging"),
+    )
+).resolve()
+MESSAGING_ATTACHMENT_MAX_BYTES = int(
+    os.getenv("MESSAGING_ATTACHMENT_MAX_BYTES", str(8 * 1024 * 1024))
+)
+MESSAGING_MESSAGE_MAX_LENGTH = int(os.getenv("MESSAGING_MESSAGE_MAX_LENGTH", "4000"))
 
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
 CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS")
@@ -336,5 +350,6 @@ SPECTACULAR_SETTINGS = {
         {"name": "Receivables", "description": "Créances clients et paiements internes."},
         {"name": "Expense Categories", "description": "Catégories de dépenses par commerce."},
         {"name": "Expenses", "description": "Dépenses internes du commerce."},
+        {"name": "Messaging", "description": "Conversations privées entre un acheteur et un vendeur désigné."},
     ],
 }
