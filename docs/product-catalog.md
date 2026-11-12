@@ -1,6 +1,6 @@
 # Product catalog
 
-`apps.catalog` owns both the global taxonomy and the tenant-owned product catalog. It deliberately contains no stock quantity, supplier, purchase, sale, cart, order, payment, images or marketplace publication. Product is descriptive catalog data; the future Inventory domain will own availability for either a simple product or one of its variants.
+`apps.catalog` owns both the global taxonomy and the tenant-owned product catalog. It deliberately contains no stock quantity, supplier, purchase, sale, cart, order, payment, or marketplace publication. Product media metadata is stored in `ProductMedia` and points to public Cloudinary URLs; Product is descriptive catalog data while the Inventory domain owns availability.
 
 ## Taxonomy and attributes
 
@@ -35,7 +35,7 @@ A variant contains only variant-axis values. Its `variant_signature` is SHA-256 
 
 All writes require an active OWNER or MANAGER membership. Active EMPLOYEE memberships can read product and variant data only. Every lookup is constrained by membership, business and then product/variant; knowing an `SH`, `PR`, or `PV` code is never authorization.
 
-A future `ProductImage` relation will add file handling. Marketplace publication will later have its own publication state, distinct from internal `Product.status`.
+The public product serializer exposes the primary image in `image` for backwards compatibility and all public product photographs in `images`, ordered by primary flag and position. Each item contains only `url`, `is_primary`, and `position`; private media and Cloudinary credentials are never exposed.
 
 
 ## Inventory boundary

@@ -31,7 +31,23 @@ class ConversationStateError(Exception):
     """Signale une action incompatible avec l'état de la conversation."""
 
 
+class BusinessMemberCannotContactSellerError(Exception):
+    """Une adhésion active interdit le rôle d'acheteur dans sa boutique."""
+
+
+def require_buyer_can_contact(*, buyer, business):
+    """Réutilise la définition d'adhésion active du module paniers."""
+    if BusinessMember.objects.filter(
+        identity=buyer,
+        business=business,
+        status=BusinessMember.Status.ACTIVE,
+    ).exists():
+        raise BusinessMemberCannotContactSellerError()
+
+
 def issue_websocket_ticket(*, identity, conversation):
+    if identity.id == conversation.buyer_id:
+        require_buyer_can_contact(buyer=identity, business=conversation.business)
     require_conversation_access(identity, conversation)
     raw_token = secrets.token_urlsafe(32)
     expires_at = timezone.now() + timedelta(seconds=45)
@@ -56,6 +72,8 @@ def consume_websocket_ticket(*, raw_token, conversation):
             raise PermissionDenied("Ticket WebSocket invalide ou expiré.")
         ticket.consumed_at = timezone.now()
         ticket.save(update_fields=("consumed_at",))
+        if ticket.identity_id == conversation.buyer_id:
+            require_buyer_can_contact(buyer=ticket.identity, business=conversation.business)
         require_conversation_access(ticket.identity, conversation)
         return ticket.identity
 
@@ -190,6 +208,7 @@ def get_or_create_conversation(*, buyer, business, seller_reference):
     """Crée une seule conversation par triplet, même sous concurrence."""
     if business.status != Business.Status.ACTIVE:
         raise ValidationError({"business": "Cette entreprise n'est pas disponible."})
+    require_buyer_can_contact(buyer=buyer, business=business)
     try:
         with transaction.atomic():
             member = require_eligible_seller(
@@ -322,6 +341,8 @@ def send_message(*, identity, conversation, content="", reply_reference="", cart
             seller_permission=REPLY,
             write=True,
         )
+        if role == "BUYER":
+            require_buyer_can_contact(buyer=identity, business=conversation.business)
         require_active_conversation_seller(conversation, write=True)
         if conversation.status != Conversation.Status.OPEN:
             raise ConversationStateError("La conversation n'accepte pas de nouveaux messages.")

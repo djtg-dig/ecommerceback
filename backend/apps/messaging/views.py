@@ -34,6 +34,8 @@ from .services import (
     require_conversation_access,
     send_message,
     issue_websocket_ticket,
+    BusinessMemberCannotContactSellerError,
+    require_buyer_can_contact,
 )
 
 
@@ -78,6 +80,13 @@ class EligibleSellerListView(APIView):
         ).first()
         if business is None:
             raise NotFound("Not found.")
+        try:
+            require_buyer_can_contact(buyer=request.user, business=business)
+        except BusinessMemberCannotContactSellerError:
+            return Response({
+                "code": "BUSINESS_MEMBER_CANNOT_CONTACT_SELLER",
+                "detail": "Vous êtes membre de cette entreprise et ne pouvez pas contacter ses vendeurs en tant qu'acheteur.",
+            }, status=status.HTTP_403_FORBIDDEN)
         sellers = [seller_projection(member) for member in eligible_sellers(business=business, buyer=request.user)]
         return Response(EligibleSellerSerializer(sellers, many=True).data)
 
@@ -124,6 +133,11 @@ class ConversationListCreateView(APIView):
                 business=business,
                 seller_reference=serializer.validated_data["seller"],
             )
+        except BusinessMemberCannotContactSellerError:
+            return Response({
+                "code": "BUSINESS_MEMBER_CANNOT_CONTACT_SELLER",
+                "detail": "Vous êtes membre de cette entreprise et ne pouvez pas contacter ses vendeurs en tant qu'acheteur.",
+            }, status=status.HTTP_403_FORBIDDEN)
         except DjangoValidationError as error:
             _validation_error(error)
         return Response(
@@ -146,7 +160,13 @@ class ConversationWebSocketTicketView(APIView):
     @extend_schema(responses={201: dict}, tags=["Messaging"])
     def post(self, request, conversation_reference):
         conversation = get_accessible_conversation(identity=request.user, reference=conversation_reference)
-        token, expires_at = issue_websocket_ticket(identity=request.user, conversation=conversation)
+        try:
+            token, expires_at = issue_websocket_ticket(identity=request.user, conversation=conversation)
+        except BusinessMemberCannotContactSellerError:
+            return Response({
+                "code": "BUSINESS_MEMBER_CANNOT_CONTACT_SELLER",
+                "detail": "Vous êtes membre de cette entreprise et ne pouvez pas utiliser cette conversation comme acheteur.",
+            }, status=status.HTTP_403_FORBIDDEN)
         return Response({"ticket": token, "expires_at": expires_at}, status=status.HTTP_201_CREATED)
 
 
@@ -191,6 +211,11 @@ class ConversationMessageListCreateView(APIView):
             )
         except DjangoValidationError as error:
             _validation_error(error)
+        except BusinessMemberCannotContactSellerError:
+            return Response({
+                "code": "BUSINESS_MEMBER_CANNOT_CONTACT_SELLER",
+                "detail": "Vous êtes membre de cette entreprise et ne pouvez pas envoyer de message comme acheteur.",
+            }, status=status.HTTP_403_FORBIDDEN)
         except ConversationStateError as error:
             return _state_conflict(error)
         message = Message.objects.select_related("conversation", "reply_to", "cart").get(pk=message.pk)

@@ -14,15 +14,22 @@ class PublicProductSerializer(serializers.ModelSerializer):
     unit = serializers.CharField(source="unit_of_measure.symbol", read_only=True)
     allows_decimal_quantity = serializers.BooleanField(source="unit_of_measure.allows_decimal_quantity", read_only=True)
     image = serializers.SerializerMethodField()
+    images = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
-        fields = ("public_id", "name", "description", "business", "business_name", "category", "category_name", "selling_price", "min_price", "max_price", "currency", "is_negotiable", "is_online_purchasable", "is_home_deliverable", "unit_code", "unit", "allows_decimal_quantity", "image")
+        fields = ("public_id", "name", "description", "business", "business_name", "category", "category_name", "selling_price", "min_price", "max_price", "currency", "is_negotiable", "is_online_purchasable", "is_home_deliverable", "unit_code", "unit", "allows_decimal_quantity", "image", "images")
 
     def get_image(self, product):
         media = getattr(product, "public_images", ())
         image = next((item for item in media if item.is_primary), None) or next(iter(media), None)
         return image.secure_url if image else None
+
+    def get_images(self, product):
+        return [
+            {"url": item.secure_url, "is_primary": item.is_primary, "position": item.position}
+            for item in getattr(product, "public_images", ())
+        ]
 
 
 class PublicCategorySerializer(serializers.ModelSerializer):

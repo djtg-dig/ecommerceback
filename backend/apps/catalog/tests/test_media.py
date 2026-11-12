@@ -9,6 +9,7 @@ from apps.catalog.models import ProductMedia
 from apps.catalog.models import Product, ProductCategory
 from apps.catalog.media import delete_product_media, update_product_media
 from apps.catalog.serializers import ProductOutputSerializer
+from apps.catalog.public_serializers import PublicProductSerializer
 from apps.catalog.views import media_error_response
 from apps.businesses.models import Business
 from apps.common.media import MediaStorageError, MediaStoragePermissionError, upload_to_cloudinary, validate_image, validate_video
@@ -70,6 +71,19 @@ def test_primary_image_serializer_prefers_primary_then_first_prefetched_photo():
     assert serializer.get_primary_image_url(ProductStub([Media("https://example.test/first.jpg"), Media("https://example.test/primary.jpg", True)])) == "https://example.test/primary.jpg"
     assert serializer.get_primary_image_url(ProductStub([Media("https://example.test/first.jpg"), Media("https://example.test/second.jpg")])) == "https://example.test/first.jpg"
     assert serializer.get_primary_image_url(ProductStub([])) is None
+
+
+def test_public_serializer_exposes_ordered_product_gallery():
+    class Media:
+        def __init__(self, url, primary, position):
+            self.secure_url, self.is_primary, self.position = url, primary, position
+    class ProductStub:
+        public_images = [Media("https://example.test/primary.jpg", True, 0), Media("https://example.test/second.jpg", False, 1)]
+
+    assert PublicProductSerializer().get_images(ProductStub()) == [
+        {"url": "https://example.test/primary.jpg", "is_primary": True, "position": 0},
+        {"url": "https://example.test/second.jpg", "is_primary": False, "position": 1},
+    ]
 
 
 @pytest.mark.django_db

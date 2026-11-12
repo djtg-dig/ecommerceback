@@ -1,8 +1,8 @@
 # Private buyer–seller messaging
 
-The `messaging` application provides the first REST-only version of private
-buyer–seller conversations. It deliberately contains no business WebSocket
-consumer, presence tracking, push notification, reassignment, or group chat.
+The `messaging` application provides private buyer–seller conversations over
+REST and Django Channels. It has no presence tracking, reassignment, or group
+chat.
 
 ## Participants and seller eligibility
 
@@ -13,6 +13,14 @@ contains only active members of the requested active Business who:
 - are not the authenticated buyer;
 - have effective `MESSAGING_VIEW` and `MESSAGING_REPLY` permissions;
 - have an active identity according to the local identity model.
+
+An identity with an `ACTIVE` `BusinessMember` record for the requested Business
+cannot act as a buyer for that Business. This is enforced by the service layer
+with the stable error code `BUSINESS_MEMBER_CANNOT_CONTACT_SELLER`. Suspended
+and removed memberships follow the existing cart rule and do not block this
+buyer role. Existing history remains readable according to the normal
+conversation access rules, but new buyer messages and WebSocket tickets are
+rejected.
 
 Business owners receive the two permissions implicitly. Roles do not grant
 messaging access. An owner, manager, or other seller still cannot read a
@@ -52,6 +60,7 @@ seller-selection route despite its placement under `public/`.
 | `GET` | `/api/v1/public/businesses/{business}/messaging-sellers/` | List the minimal eligible-seller projection |
 | `GET`, `POST` | `/api/v1/messaging/conversations/` | List accessible conversations or create/find one |
 | `GET` | `/api/v1/messaging/conversations/{conversation}/` | Read one accessible conversation |
+| `POST` | `/api/v1/messaging/conversations/{conversation}/websocket-ticket/` | Issue a short-lived, one-use WebSocket ticket |
 | `POST` | `/api/v1/messaging/conversations/{conversation}/close/` | Close a conversation |
 | `POST` | `/api/v1/messaging/conversations/{conversation}/reopen/` | Reopen a closed conversation |
 | `GET`, `POST` | `/api/v1/messaging/conversations/{conversation}/messages/` | Paginate history or send a message |
@@ -103,3 +112,12 @@ process. Tests cover eligibility, privacy between buyers and sellers, owner
 isolation, revoked access, concurrency, replies, carts, attachment validation
 and download authorization, deletion cleanup, state transitions, and receipt /
 read invariants.
+
+## WebSocket
+
+The browser obtains a ticket from the REST endpoint and opens:
+`/ws/messaging/conversations/{conversation}/` with the subprotocol
+`carri-messaging-v1` and the opaque ticket as its second protocol value. The
+ticket is stored hashed, expires after 45 seconds and is consumed atomically.
+The consumer joins only the conversation group and rechecks participant and
+seller permissions before accepting the connection and each write.

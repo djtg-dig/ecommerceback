@@ -12,6 +12,7 @@ from apps.messaging.models import Conversation, Message
 from apps.messaging.identifiers import generate_conversation_reference, generate_message_reference
 from apps.messaging.services import (
     ConversationStateError,
+    BusinessMemberCannotContactSellerError,
     accessible_conversations,
     close_conversation,
     confirm_delivery,
@@ -24,6 +25,55 @@ from apps.messaging.services import (
 )
 
 from .conftest import grant_messaging, make_identity, make_member
+
+
+def test_active_business_member_cannot_start_buyer_conversation(messaging_context):
+    context = messaging_context
+    with pytest.raises(BusinessMemberCannotContactSellerError):
+        get_or_create_conversation(
+            buyer=context["owner_identity"],
+            business=context["business"],
+            seller_reference=context["seller"].public_id,
+        )
+
+
+@pytest.mark.parametrize("member_key", ["owner_identity", "seller_identity"])
+def test_active_member_with_or_without_messaging_role_is_still_blocked_as_buyer(messaging_context, member_key):
+    context = messaging_context
+    with pytest.raises(BusinessMemberCannotContactSellerError):
+        get_or_create_conversation(
+            buyer=context[member_key],
+            business=context["business"],
+            seller_reference=context["owner"].public_id,
+        )
+
+
+def test_active_member_without_messaging_permission_is_blocked_as_buyer(messaging_context):
+    context = messaging_context
+    employee = make_member(
+        business=context["business"],
+        identity=make_identity("no-messaging"),
+        title="Employé",
+    )
+    with pytest.raises(BusinessMemberCannotContactSellerError):
+        get_or_create_conversation(
+            buyer=employee.identity,
+            business=context["business"],
+            seller_reference=context["owner"].public_id,
+        )
+
+
+def test_member_of_another_business_can_start_conversation(messaging_context):
+    context = messaging_context
+    other_business = Business.objects.create(name="Autre boutique")
+    member = make_member(business=other_business, identity=context["owner_identity"], owner=True, title="Gérant")
+    conversation, created = get_or_create_conversation(
+        buyer=member.identity,
+        business=context["business"],
+        seller_reference=context["seller"].public_id,
+    )
+    assert created is True
+    assert conversation.buyer_id == member.identity_id
 
 
 def test_eligible_sellers_require_both_permissions_and_active_membership(messaging_context):
