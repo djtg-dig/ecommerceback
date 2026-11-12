@@ -4,7 +4,7 @@ import hmac
 import logging
 import time
 from dataclasses import dataclass
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import jwt
 import requests
@@ -41,11 +41,40 @@ class UnverifiedOIDCEmail(InvalidOIDCUserInfo):
 class VerifiedUserInfo(str):
     """Email normalisé compatible avec l'ancien contrat, enrichi du profil."""
 
-    def __new__(cls, email, *, first_name="", last_name=""):
+    def __new__(cls, email, *, first_name="", last_name="", avatar_url=None, profile_picture_claim=False):
         value = str.__new__(cls, email)
         value.first_name = first_name
         value.last_name = last_name
+        value.avatar_url = avatar_url
+        value.profile_picture_claim = profile_picture_claim
         return value
+
+
+def validate_avatar_url(value):
+    """Retourne une URL Cloudinary HTTPS autorisée, sinon ``None``.
+
+    L'URL est conservée comme référence distante : aucune image n'est copiée
+    dans E-commerce. Le chemin doit commencer par le cloud configuré afin
+    d'empêcher l'enregistrement d'une URL arbitraire présentée comme avatar.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    parsed = urlsplit(value.strip())
+    cloud_name = settings.CLOUDINARY_CLOUD_NAME.strip()
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "res.cloudinary.com"
+        or not cloud_name
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if len(path_parts) < 3 or path_parts[0] != cloud_name or path_parts[1] != "image":
+        return None
+    return value.strip()
 
 
 def _issuer():
@@ -199,10 +228,16 @@ def verified_userinfo(*, access_token, subject):
         raise InvalidOIDCUserInfo("Carri userinfo email is invalid.") from exc
     first_name = data.get("first_name", data.get("given_name", ""))
     last_name = data.get("last_name", data.get("family_name", ""))
+    avatar_url = validate_avatar_url(data.get("picture"))
+    # Une valeur non vide mais non autorisée ne doit jamais être interprétée
+    # comme une suppression : l'avatar local valide est conservé.
+    picture_claim = "picture" in data and (not data.get("picture") or avatar_url is not None)
     return VerifiedUserInfo(
         email,
         first_name=first_name.strip() if isinstance(first_name, str) else "",
         last_name=last_name.strip() if isinstance(last_name, str) else "",
+        avatar_url=avatar_url,
+        profile_picture_claim=picture_claim,
     )
 
 

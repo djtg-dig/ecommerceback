@@ -17,7 +17,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from apps.accounts.logging import OAuthQueryStringRedactionFilter
 from apps.accounts.models import CarriIdentity, OAuthHandoff, OAuthLoginAttempt
 from apps.accounts.services import oidc
-from apps.accounts.views import _pair
+from apps.accounts.views import _identity, _pair
 
 
 def test_django_logs_redact_carri_oauth_query_strings():
@@ -90,7 +90,45 @@ def test_me_requires_ecommerce_jwt_and_returns_identity():
     access = _pair(identity)["access"]
     response = client.get("/api/v1/auth/me/", HTTP_AUTHORIZATION=f"Bearer {access}")
     assert response.status_code == 200
-    assert response.json() == {"id": str(identity.id), "carri_subject": "sub-1"}
+    assert response.json() == {"id": str(identity.id), "carri_subject": "sub-1", "avatar_url": None}
+
+
+@pytest.mark.django_db
+@override_settings(CLOUDINARY_CLOUD_NAME="local-cloud")
+def test_avatar_is_added_replaced_removed_and_preserved_when_userinfo_is_incomplete():
+    now = int(datetime.now(timezone.utc).timestamp())
+    identity = _identity(
+        "avatar-subject", verified_email="avatar@example.com", auth_time=now,
+        avatar_url="https://res.cloudinary.com/local-cloud/image/upload/v1/avatar-a.jpg",
+        profile_picture_claim=True,
+    )
+    assert identity.avatar_url.endswith("avatar-a.jpg")
+    _identity(
+        "avatar-subject", verified_email="avatar@example.com", auth_time=now,
+        avatar_url="https://res.cloudinary.com/local-cloud/image/upload/v1/avatar-b.jpg",
+        profile_picture_claim=True,
+    )
+    identity.refresh_from_db()
+    assert identity.avatar_url.endswith("avatar-b.jpg")
+    _identity("avatar-subject", verified_email="avatar@example.com", auth_time=now, profile_picture_claim=True)
+    identity.refresh_from_db()
+    assert identity.avatar_url == ""
+    identity.avatar_url = "https://res.cloudinary.com/local-cloud/image/upload/v1/avatar-c.jpg"
+    identity.save(update_fields=["avatar_url"])
+    _identity("avatar-subject", verified_email="avatar@example.com", auth_time=now, profile_picture_claim=False)
+    identity.refresh_from_db()
+    assert identity.avatar_url.endswith("avatar-c.jpg")
+
+
+@pytest.mark.parametrize("url", [
+    "http://res.cloudinary.com/local-cloud/image/upload/v1/avatar.jpg",
+    "https://evil.example/local-cloud/image/upload/v1/avatar.jpg",
+    "https://res.cloudinary.com/other-cloud/image/upload/v1/avatar.jpg",
+    "https://res.cloudinary.com/local-cloud/video/upload/v1/avatar.mp4",
+])
+@override_settings(CLOUDINARY_CLOUD_NAME="local-cloud")
+def test_avatar_url_validation_rejects_non_https_or_non_authorized_cloudinary_urls(url):
+    assert oidc.validate_avatar_url(url) is None
 
 
 @pytest.mark.django_db

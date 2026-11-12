@@ -39,7 +39,7 @@ def _pair(identity):
     return {"access": str(refresh.access_token), "refresh": str(refresh)}
 
 
-def _identity(subject, *, verified_email, auth_time, first_name="", last_name=""):
+def _identity(subject, *, verified_email, auth_time, first_name="", last_name="", avatar_url=None, profile_picture_claim=False):
     if type(auth_time) is not int:
         raise InvalidOIDCToken("Identity token auth_time is missing.")
     authenticated_at = datetime.fromtimestamp(auth_time, tz=dt_timezone.utc)
@@ -56,8 +56,7 @@ def _identity(subject, *, verified_email, auth_time, first_name="", last_name=""
     identity.email_verified_at = now
     identity.last_oidc_auth_at = authenticated_at
     identity.last_login_at = now
-    identity.save(
-        update_fields=[
+    update_fields = [
             "verified_email",
             "first_name",
             "last_name",
@@ -66,7 +65,13 @@ def _identity(subject, *, verified_email, auth_time, first_name="", last_name=""
             "last_oidc_auth_at",
             "last_login_at",
         ]
-    )
+    # Une réponse UserInfo sans claim picture est incomplète : l'avatar connu
+    # reste intact. Un claim explicitement vide confirme en revanche la
+    # suppression demandée par l'utilisateur.
+    if profile_picture_claim:
+        identity.avatar_url = avatar_url or ""
+        update_fields.append("avatar_url")
+    identity.save(update_fields=update_fields)
     return identity
 
 
@@ -217,6 +222,8 @@ class CarriMobileExchangeView(APIView):
                     auth_time=payload.get("auth_time"),
                     first_name=getattr(userinfo, "first_name", ""),
                     last_name=getattr(userinfo, "last_name", ""),
+                    avatar_url=getattr(userinfo, "avatar_url", None),
+                    profile_picture_claim=getattr(userinfo, "profile_picture_claim", False),
                 )
             logger.info("carri.mobile_exchange.success identity=%s", identity.pk)
             return Response(_pair(identity), status=status.HTTP_200_OK)
@@ -420,6 +427,8 @@ class CarriCallbackView(APIView):
                     auth_time=payload.get("auth_time"),
                     first_name=getattr(userinfo, "first_name", ""),
                     last_name=getattr(userinfo, "last_name", ""),
+                    avatar_url=getattr(userinfo, "avatar_url", None),
+                    profile_picture_claim=getattr(userinfo, "profile_picture_claim", False),
                 )
                 attempt.consumed_at = timezone.now()
                 attempt.save(update_fields=["consumed_at"])
@@ -510,7 +519,7 @@ class EcommerceLogoutView(APIView):
 
 class CurrentIdentityView(APIView):
     def get(self, request):
-        return Response({"id": str(request.user.id), "carri_subject": request.user.carri_subject})
+        return Response({"id": str(request.user.id), "carri_subject": request.user.carri_subject, "avatar_url": request.user.avatar_url or None})
 
 
 class UserPreferencesView(APIView):
@@ -614,7 +623,7 @@ CarriHandoffConsumeView.post = extend_schema(
 )(CarriHandoffConsumeView.post)
 CurrentIdentityView.get = extend_schema(
     tags=["Authentication"], operation_id="current_ecommerce_identity",
-    responses={200: inline_serializer("CurrentIdentity", {"id": serializers.UUIDField(), "carri_subject": serializers.CharField()}), 401: _error_schema},
+    responses={200: inline_serializer("CurrentIdentity", {"id": serializers.UUIDField(), "carri_subject": serializers.CharField(), "avatar_url": serializers.URLField(allow_null=True)}), 401: _error_schema},
 )(CurrentIdentityView.get)
 UserPreferencesView.get = extend_schema(
     tags=["User preferences"], operation_id="get_user_preferences",

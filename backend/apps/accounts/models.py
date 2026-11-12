@@ -19,6 +19,7 @@ class CarriIdentity(models.Model):
     verified_email = models.EmailField(blank=True, default="", db_index=True)
     first_name = models.CharField(max_length=150, blank=True, default="")
     last_name = models.CharField(max_length=150, blank=True, default="")
+    avatar_url = models.URLField(max_length=2048, blank=True, default="")
     email_verified = models.BooleanField(default=False)
     email_verified_at = models.DateTimeField(null=True, blank=True)
     last_oidc_auth_at = models.DateTimeField(null=True, blank=True)
