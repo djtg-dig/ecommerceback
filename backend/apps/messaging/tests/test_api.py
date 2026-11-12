@@ -52,6 +52,21 @@ def test_seller_list_requires_authentication_and_exposes_minimum_fields(api_clie
     assert "online" not in payload.lower()
 
 
+def test_seller_list_exposes_identity_first_name_and_not_membership_title(api_client, messaging_context):
+    context = messaging_context
+    context["seller_identity"].first_name = "c'arrive"
+    context["seller_identity"].save(update_fields=["first_name"])
+    path = f"/api/v1/public/businesses/{context['business'].public_id}/messaging-sellers/"
+
+    response = authenticate(api_client, context["buyer"]).get(path)
+
+    assert response.status_code == 200
+    sellers = {item["reference"]: item for item in response.json()}
+    assert sellers[context["seller"].public_id]["first_name"] == "c'arrive"
+    assert sellers[context["seller"].public_id]["display_name"] == "c'arrive"
+    assert "Conseillère ventes" not in response.content.decode()
+
+
 def test_create_or_find_and_list_conversation(api_client, messaging_context):
     context = messaging_context
     client = authenticate(api_client, context["buyer"])
