@@ -39,7 +39,7 @@ def _pair(identity):
     return {"access": str(refresh.access_token), "refresh": str(refresh)}
 
 
-def _identity(subject, *, verified_email, auth_time):
+def _identity(subject, *, verified_email, auth_time, first_name="", last_name=""):
     if type(auth_time) is not int:
         raise InvalidOIDCToken("Identity token auth_time is missing.")
     authenticated_at = datetime.fromtimestamp(auth_time, tz=dt_timezone.utc)
@@ -50,6 +50,8 @@ def _identity(subject, *, verified_email, auth_time):
         raise InvalidOIDCToken("Identity token auth_time is invalid.")
     identity, _ = CarriIdentity.objects.get_or_create(carri_subject=subject)
     identity.verified_email = verified_email
+    identity.first_name = first_name.strip() if isinstance(first_name, str) else ""
+    identity.last_name = last_name.strip() if isinstance(last_name, str) else ""
     identity.email_verified = True
     identity.email_verified_at = now
     identity.last_oidc_auth_at = authenticated_at
@@ -57,6 +59,8 @@ def _identity(subject, *, verified_email, auth_time):
     identity.save(
         update_fields=[
             "verified_email",
+            "first_name",
+            "last_name",
             "email_verified",
             "email_verified_at",
             "last_oidc_auth_at",
@@ -199,7 +203,7 @@ class CarriMobileExchangeView(APIView):
                 require_nonce=True,
                 require_at_hash=True,
             )
-            email = verified_userinfo(
+            userinfo = verified_userinfo(
                 access_token=access_token,
                 subject=payload["sub"],
             )
@@ -209,8 +213,10 @@ class CarriMobileExchangeView(APIView):
                 IDTokenReplay.objects.create(token_hash=token_hash, expires_at=expires_at)
                 identity = _identity(
                     payload["sub"],
-                    verified_email=email,
+                    verified_email=str(userinfo),
                     auth_time=payload.get("auth_time"),
+                    first_name=getattr(userinfo, "first_name", ""),
+                    last_name=getattr(userinfo, "last_name", ""),
                 )
             logger.info("carri.mobile_exchange.success identity=%s", identity.pk)
             return Response(_pair(identity), status=status.HTTP_200_OK)
@@ -389,7 +395,7 @@ class CarriCallbackView(APIView):
                     require_at_hash=bool(tokens.get("access_token")),
                 )
                 try:
-                    email = verified_userinfo(
+                    userinfo = verified_userinfo(
                         access_token=tokens.get("access_token", ""),
                         subject=payload["sub"],
                     )
@@ -410,8 +416,10 @@ class CarriCallbackView(APIView):
                     ))
                 identity = _identity(
                     payload["sub"],
-                    verified_email=email,
+                    verified_email=str(userinfo),
                     auth_time=payload.get("auth_time"),
+                    first_name=getattr(userinfo, "first_name", ""),
+                    last_name=getattr(userinfo, "last_name", ""),
                 )
                 attempt.consumed_at = timezone.now()
                 attempt.save(update_fields=["consumed_at"])

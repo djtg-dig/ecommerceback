@@ -38,6 +38,16 @@ class UnverifiedOIDCEmail(InvalidOIDCUserInfo):
     pass
 
 
+class VerifiedUserInfo(str):
+    """Email normalisé compatible avec l'ancien contrat, enrichi du profil."""
+
+    def __new__(cls, email, *, first_name="", last_name=""):
+        value = str.__new__(cls, email)
+        value.first_name = first_name
+        value.last_name = last_name
+        return value
+
+
 def _issuer():
     issuer = settings.CARRI_ACCOUNT_ISSUER.rstrip("/")
     if not issuer:
@@ -187,7 +197,13 @@ def verified_userinfo(*, access_token, subject):
         validate_email(email)
     except ValidationError as exc:
         raise InvalidOIDCUserInfo("Carri userinfo email is invalid.") from exc
-    return email
+    first_name = data.get("first_name", data.get("given_name", ""))
+    last_name = data.get("last_name", data.get("family_name", ""))
+    return VerifiedUserInfo(
+        email,
+        first_name=first_name.strip() if isinstance(first_name, str) else "",
+        last_name=last_name.strip() if isinstance(last_name, str) else "",
+    )
 
 
 def exchange_web_code(*, code, code_verifier, redirect_uri):

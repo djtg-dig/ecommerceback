@@ -8,11 +8,11 @@ from .models import Conversation, Message
 
 
 def seller_projection(member):
+    first_name = member.identity.first_name.strip()
     return {
         "reference": member.public_id,
-        # CarriIdentity ne conserve pas de prénom dans ce projet. Ne jamais
-        # exposer le titre professionnel comme s'il s'agissait d'un nom.
-        "display_name": "Vendeur",
+        "first_name": first_name or "Vendeur",
+        "display_name": first_name or "Vendeur",
         "avatar": None,
     }
 
@@ -39,6 +39,7 @@ def conversation_seller_map(conversations):
 
 class EligibleSellerSerializer(serializers.Serializer):
     reference = serializers.CharField()
+    first_name = serializers.CharField()
     display_name = serializers.CharField()
     avatar = serializers.CharField(allow_null=True)
 

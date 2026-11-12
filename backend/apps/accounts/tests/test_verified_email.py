@@ -35,6 +35,21 @@ def test_verified_userinfo_normalizes_email_and_matches_validated_subject():
     assert email == "user@example.com"
 
 
+def test_verified_userinfo_preserves_official_profile_names():
+    with patch(
+        "apps.accounts.services.oidc.fetch_userinfo",
+        return_value=userinfo_response(first_name="Jean", last_name="Dupont"),
+    ):
+        userinfo = oidc.verified_userinfo(
+            access_token="opaque-access-token",
+            subject="US1234567890",
+        )
+
+    assert str(userinfo) == "user@example.com"
+    assert userinfo.first_name == "Jean"
+    assert userinfo.last_name == "Dupont"
+
+
 def test_verified_userinfo_rejects_subject_mismatch():
     with patch(
         "apps.accounts.services.oidc.fetch_userinfo",
