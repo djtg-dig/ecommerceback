@@ -104,6 +104,21 @@ class Conversation(models.Model):
         return super().save(*args, **kwargs)
 
 
+class WebSocketTicket(models.Model):
+    """Ticket opaque, court et à usage unique pour un socket privé."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    token_hash = models.CharField(max_length=64, unique=True, editable=False)
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="websocket_tickets")
+    identity = models.ForeignKey("accounts.CarriIdentity", on_delete=models.CASCADE)
+    expires_at = models.DateTimeField(db_index=True)
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=("conversation", "expires_at"), name="msg_ticket_conv_exp_idx")]
+
+
 class Message(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     reference = models.CharField(max_length=12, unique=True, editable=False, db_index=True)

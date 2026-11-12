@@ -1,6 +1,8 @@
 """Règles métier réutilisables par REST et les futurs consumers Channels."""
 
 import hashlib
+import secrets
+from datetime import timedelta
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,7 +20,7 @@ from apps.businesses.permissions import has_messaging_permission
 from apps.carts.models import Cart
 from apps.common.media import validate_image
 
-from .models import Conversation, Message
+from .models import Conversation, Message, WebSocketTicket
 
 
 VIEW = BusinessMemberPermission.Permission.MESSAGING_VIEW
@@ -27,6 +29,35 @@ REPLY = BusinessMemberPermission.Permission.MESSAGING_REPLY
 
 class ConversationStateError(Exception):
     """Signale une action incompatible avec l'état de la conversation."""
+
+
+def issue_websocket_ticket(*, identity, conversation):
+    require_conversation_access(identity, conversation)
+    raw_token = secrets.token_urlsafe(32)
+    expires_at = timezone.now() + timedelta(seconds=45)
+    WebSocketTicket.objects.filter(expires_at__lt=timezone.now()).delete()
+    WebSocketTicket.objects.create(
+        token_hash=hashlib.sha256(raw_token.encode()).hexdigest(),
+        conversation=conversation,
+        identity=identity,
+        expires_at=expires_at,
+    )
+    return raw_token, expires_at
+
+
+def consume_websocket_ticket(*, raw_token, conversation):
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    with transaction.atomic():
+        ticket = WebSocketTicket.objects.select_for_update().select_related("identity").filter(
+            token_hash=token_hash, conversation=conversation, consumed_at__isnull=True,
+            expires_at__gt=timezone.now(),
+        ).first()
+        if ticket is None:
+            raise PermissionDenied("Ticket WebSocket invalide ou expiré.")
+        ticket.consumed_at = timezone.now()
+        ticket.save(update_fields=("consumed_at",))
+        require_conversation_access(ticket.identity, conversation)
+        return ticket.identity
 
 
 @dataclass(frozen=True)

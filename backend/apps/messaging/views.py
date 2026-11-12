@@ -33,6 +33,7 @@ from .services import (
     reopen_conversation,
     require_conversation_access,
     send_message,
+    issue_websocket_ticket,
 )
 
 
@@ -139,6 +140,14 @@ class ConversationDetailView(APIView):
             reference=conversation_reference,
         )
         return Response(_conversation_data(conversation, request))
+
+
+class ConversationWebSocketTicketView(APIView):
+    @extend_schema(responses={201: dict}, tags=["Messaging"])
+    def post(self, request, conversation_reference):
+        conversation = get_accessible_conversation(identity=request.user, reference=conversation_reference)
+        token, expires_at = issue_websocket_ticket(identity=request.user, conversation=conversation)
+        return Response({"ticket": token, "expires_at": expires_at}, status=status.HTTP_201_CREATED)
 
 
 class ConversationMessageListCreateView(APIView):
