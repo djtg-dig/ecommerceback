@@ -221,7 +221,7 @@ def test_nextjs_access_denied_posts_only_safe_error_and_binding_then_rejects_rep
     client = APIClient()
     metadata = {
         "authorization_endpoint": "https://identity.example/oauth/authorize/",
-        "scopes_supported": ["openid", "email"],
+        "scopes_supported": ["openid", "email", "profile"],
     }
     with patch("apps.accounts.views.discovery", return_value=metadata):
         login = client.get(
@@ -231,6 +231,7 @@ def test_nextjs_access_denied_posts_only_safe_error_and_binding_then_rejects_rep
 
     authorization_query = parse_qs(urlsplit(login["Location"]).query)
     assert authorization_query["prompt"] == ["login"]
+    assert set(authorization_query["scope"][0].split()) == {"openid", "email", "profile"}
     state = authorization_query["state"][0]
     attempt = OAuthLoginAttempt.objects.get(
         state_hash=hashlib.sha256(state.encode()).hexdigest()
@@ -283,7 +284,7 @@ def test_nextjs_access_denied_rejects_invalid_state_without_delivery():
     client = APIClient()
     metadata = {
         "authorization_endpoint": "https://identity.example/oauth/authorize/",
-        "scopes_supported": ["openid", "email"],
+        "scopes_supported": ["openid", "email", "profile"],
     }
     with patch("apps.accounts.views.discovery", return_value=metadata):
         login = client.get(
@@ -317,7 +318,7 @@ def test_nextjs_access_denied_invalidates_expired_attempt_without_delivery():
     client = APIClient()
     metadata = {
         "authorization_endpoint": "https://identity.example/oauth/authorize/",
-        "scopes_supported": ["openid", "email"],
+        "scopes_supported": ["openid", "email", "profile"],
     }
     with patch("apps.accounts.views.discovery", return_value=metadata):
         login = client.get(
@@ -395,7 +396,7 @@ def test_nextjs_callback_delivers_specific_unverified_email_error_without_identi
     client = APIClient()
     metadata = {
         "authorization_endpoint": "https://identity.example/oauth/authorize/",
-        "scopes_supported": ["openid", "email"],
+        "scopes_supported": ["openid", "email", "profile"],
     }
     with patch("apps.accounts.views.discovery", return_value=metadata):
         login = client.get(
@@ -451,7 +452,7 @@ def test_web_callback_delivers_handoff_by_post_without_tokens_or_query_leak(capl
     client = APIClient()
     metadata = {
         "authorization_endpoint": "https://identity.example/oauth/authorize/",
-        "scopes_supported": ["openid", "email"],
+        "scopes_supported": ["openid", "email", "profile"],
     }
     token_payload = {"id_token": "id", "access_token": "access"}
     id_payload = {
@@ -517,7 +518,7 @@ def test_callback_rejects_login_csrf_without_the_browser_binding_cookie():
     client = APIClient()
     metadata = {
         "authorization_endpoint": "https://identity.example/oauth/authorize/",
-        "scopes_supported": ["openid", "email"],
+        "scopes_supported": ["openid", "email", "profile"],
     }
     with patch("apps.accounts.views.discovery", return_value=metadata):
         login = client.get(
@@ -549,7 +550,7 @@ def test_callback_rejects_substituted_delivery_binding_in_oauth_state():
     client = APIClient()
     metadata = {
         "authorization_endpoint": "https://identity.example/oauth/authorize/",
-        "scopes_supported": ["openid", "email"],
+        "scopes_supported": ["openid", "email", "profile"],
     }
     with patch("apps.accounts.views.discovery", return_value=metadata):
         login = client.get(
