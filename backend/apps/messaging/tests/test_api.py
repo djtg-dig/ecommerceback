@@ -41,7 +41,7 @@ def test_seller_list_requires_authentication_and_exposes_minimum_fields(api_clie
     sellers = {item["reference"]: item for item in response.json()}
     assert sellers[context["seller"].public_id] == {
         "reference": context["seller"].public_id,
-        "display_name": "Conseillère ventes",
+        "display_name": "Vendeur",
         "avatar": None,
     }
     assert context["owner"].public_id in sellers

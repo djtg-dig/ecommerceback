@@ -10,7 +10,9 @@ from .models import Conversation, Message
 def seller_projection(member):
     return {
         "reference": member.public_id,
-        "display_name": member.title.strip() or "Vendeur",
+        # CarriIdentity ne conserve pas de prénom dans ce projet. Ne jamais
+        # exposer le titre professionnel comme s'il s'agissait d'un nom.
+        "display_name": "Vendeur",
         "avatar": None,
     }
 
