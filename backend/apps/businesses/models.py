@@ -76,6 +76,11 @@ class Business(models.Model):
         choices=Status.choices,
         default=Status.ACTIVE,
     )
+    is_verified = models.BooleanField(
+        default=False,
+        verbose_name="Entreprise vérifiée",
+        help_text="Indique si l'entreprise a été vérifiée par Carri Business.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

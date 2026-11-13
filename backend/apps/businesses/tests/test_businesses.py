@@ -57,6 +57,8 @@ def test_create_business_creates_owner_and_is_scoped():
     assert membership.is_owner is True
     assert membership.title == "Gérant"
     assert membership.status == "ACTIVE"
+    assert business.is_verified is False
+    assert response.data["is_verified"] is False
 
     other_identity = CarriIdentity.objects.create(carri_subject="other")
     other_response = auth(other_identity).get(
@@ -167,6 +169,26 @@ def test_primary_currency_is_immutable_after_business_creation():
     assert create_response.status_code == 201
     assert update_response.status_code == 400
     assert Business.objects.get(public_id=business_id).primary_currency == "USD"
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("method", ["patch", "put"])
+def test_business_owner_cannot_change_verification_status(method):
+    owner = CarriIdentity.objects.create(carri_subject=f"verification-owner-{method}")
+    business = Business.objects.create(name="Unverified shop")
+    BusinessMember.objects.create(business=business, identity=owner, is_owner=True, title="Gérant")
+
+    response = getattr(auth(owner), method)(
+        f"/api/v1/businesses/{business.public_id}/",
+        {"is_verified": True, "name": "Still unverified"},
+        format="json",
+    )
+
+    assert response.status_code in (200, 405)
+    business.refresh_from_db()
+    assert business.is_verified is False
+    if response.status_code == 200:
+        assert response.data["is_verified"] is False
 
 
 @pytest.mark.django_db

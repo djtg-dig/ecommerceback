@@ -126,6 +126,7 @@ class BusinessSerializer(serializers.ModelSerializer):
             "sales_channel",
             "delivery_methods",
             "status",
+            "is_verified",
             "categories",
             "primary_category",
             "created_at",

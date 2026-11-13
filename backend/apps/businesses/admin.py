@@ -8,9 +8,16 @@ class BusinessAdmin(admin.ModelAdmin):
     list_display = (
         "name",
         "status",
+        "verification_status",
         "primary_currency",
         "created_at",
     )
+    list_filter = ("is_verified", "status", "primary_currency")
+    search_fields = ("name", "public_id", "phone", "zone")
+
+    @admin.display(boolean=True, description="Entreprise vérifiée")
+    def verification_status(self, business):
+        return business.is_verified
 
     def get_readonly_fields(self, request, obj=None):
         """Allow the initial currency choice but protect it once history may exist."""

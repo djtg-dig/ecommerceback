@@ -29,9 +29,22 @@ def test_public_catalog_is_opt_in_and_searchable(public_catalog):
     assert client.get("/api/v1/public/products/search/", {"q": "ROUGE"}).data["count"] == 1
     detail = client.get(f"/api/v1/public/products/{visible.public_id}/").data
     assert detail["business"] == shop.public_id
+    assert detail["business_is_verified"] is False
     assert detail["unit_code"] == "PCS" and detail["allows_decimal_quantity"] is False
     suggestions = client.get("/api/v1/public/products/suggestions/", {"q": "chauss"})
     assert suggestions.status_code == 200 and any(item["type"] == "CATEGORY" for item in suggestions.data)
+
+
+@pytest.mark.django_db
+def test_public_product_exposes_business_verification_status(public_catalog):
+    shop, _, visible = public_catalog
+    shop.is_verified = True
+    shop.save(update_fields=("is_verified", "updated_at"))
+
+    detail = APIClient().get(f"/api/v1/public/products/{visible.public_id}/")
+
+    assert detail.status_code == 200
+    assert detail.data["business_is_verified"] is True
 
 
 def test_public_catalog_never_returns_private_fields_or_inactive_products(public_catalog):

@@ -7,6 +7,7 @@ from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError
 from django.db.models import DecimalField, Exists, F, OuterRef, Prefetch, Q, Subquery, Value
 from django.db.models.functions import Coalesce, Trim, Upper, Lower
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import generics, permissions, serializers, status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
@@ -196,6 +197,12 @@ class PublicSuggestionsView(PublicCatalogMixin, APIView):
 
 
 class PublicProductDetailView(PublicCatalogMixin, APIView):
+    @extend_schema(
+        tags=["Public catalogue"],
+        operation_id="public_product_retrieve",
+        parameters=[OpenApiParameter("product_public_id", str, OpenApiParameter.PATH)],
+        responses={200: PublicProductSerializer, 404: None},
+    )
     def get(self, request, product_public_id):
         product = self.queryset().filter(public_id=product_public_id).first()
         if not product:
@@ -220,7 +227,7 @@ class PublicBusinessView(PublicCatalogMixin, APIView):
             return Response({"detail": "Not found."}, status=404)
         paginator = PublicCatalogPagination()
         page = paginator.paginate_queryset(self.queryset().filter(business=business).order_by(Lower("name"), "public_id"), request)
-        return paginator.get_paginated_response({"business": {"public_id": business.public_id, "name": business.name, "description": business.description}, "products": PublicProductSerializer(page, many=True).data})
+        return paginator.get_paginated_response({"business": {"public_id": business.public_id, "name": business.name, "description": business.description, "is_verified": business.is_verified}, "products": PublicProductSerializer(page, many=True).data})
 
 
 class BusinessProductMixin:
