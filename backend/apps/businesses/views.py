@@ -1085,7 +1085,11 @@ class BusinessInvitationRecipientListView(APIView):
                 "Votre adresse e-mail Carri doit être vérifiée pour consulter vos invitations.",
                 status.HTTP_403_FORBIDDEN,
             )
-        invitations = BusinessMemberInvitation.objects.select_related("business").prefetch_related(
+        invitations = BusinessMemberInvitation.objects.select_related(
+            "business__structured_address__country",
+            "business__structured_address__administrative_area",
+            "business__structured_address__locality__administrative_area__country",
+        ).prefetch_related(
             "business__category_memberships__category"
         ).filter(normalized_email=normalize_email(identity.verified_email))
         invitation_public_id = request.query_params.get("invitation", "")

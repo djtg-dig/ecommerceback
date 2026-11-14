@@ -127,6 +127,65 @@ def test_historic_business_remains_valid_without_a_structured_address():
 
 
 @pytest.mark.django_db
+def test_new_business_writes_ignore_the_legacy_address_field():
+    identity = CarriIdentity.objects.create(carri_subject="legacy-address-write")
+    country = Country.objects.create(name="RDC", iso2="CD", phone_code="+243")
+
+    response = auth(identity).post(
+        "/api/v1/businesses/",
+        {
+            "name": "Adresse officielle",
+            "address": "Ancien contrat à ignorer",
+            "primary_currency": "CDF",
+            "sales_location_type": "HOME_BASED",
+            "sales_channel": "ONLINE",
+            "delivery_methods": ["PICKUP"],
+            "structured_address": {"country_id": country.id, "city": "Kinshasa"},
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+    business = Business.objects.get(public_id=response.data["public_id"])
+    assert business.address == ""
+    assert business.structured_address.city == "Kinshasa"
+
+
+@pytest.mark.django_db
+def test_legacy_address_audit_requires_explicit_country_confirmation_to_convert():
+    country = Country.objects.create(name="RDC", iso2="CD", phone_code="+243")
+    legacy = Business.objects.create(name="Historique", address="12 avenue du Marché")
+    empty = Business.objects.create(name="Sans adresse")
+    output = StringIO()
+
+    call_command("audit_legacy_business_addresses", stdout=output)
+
+    assert "Entreprises analysées : 2" in output.getvalue()
+    assert "à vérifier : 1" in output.getvalue()
+    assert "sans adresse : 1" in output.getvalue()
+    legacy.refresh_from_db()
+    assert legacy.structured_address is None
+
+    converted = StringIO()
+    call_command(
+        "audit_legacy_business_addresses",
+        "--apply",
+        "--business-public-id",
+        legacy.public_id,
+        "--country-iso2",
+        country.iso2,
+        stdout=converted,
+    )
+
+    legacy.refresh_from_db()
+    assert legacy.structured_address.additional_information == "12 avenue du Marché"
+    assert legacy.address == "12 avenue du Marché"
+    assert "converties : 1" in converted.getvalue()
+    empty.refresh_from_db()
+    assert empty.structured_address is None
+
+
+@pytest.mark.django_db
 def test_only_an_authorized_member_can_update_a_business_structured_address():
     owner = CarriIdentity.objects.create(carri_subject="address-update-owner")
     outsider = CarriIdentity.objects.create(carri_subject="address-update-outsider")

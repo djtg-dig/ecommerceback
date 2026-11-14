@@ -203,6 +203,11 @@ class BusinessCreateSerializer(BaseBusinessSerializer):
             "categories",
             "primary_category",
         )
+        extra_kwargs = {
+            # Conservé en lecture pendant la transition : les nouveaux clients
+            # doivent écrire exclusivement dans ``structured_address``.
+            "address": {"read_only": True},
+        }
 
 
 class BusinessUpdateSerializer(BaseBusinessSerializer):
@@ -243,6 +248,9 @@ class BusinessUpdateSerializer(BaseBusinessSerializer):
             "categories",
             "primary_category",
         )
+        extra_kwargs = {
+            "address": {"read_only": True},
+        }
 
 
 class BusinessSerializer(serializers.ModelSerializer):
@@ -530,9 +538,11 @@ class BusinessMemberInvitationRecipientSerializer(serializers.ModelSerializer):
         source="business.description",
         read_only=True,
     )
-    business_address = serializers.CharField(
-        source="business.address",
+    business_address = serializers.SerializerMethodField()
+    business_structured_address = AddressSerializer(
+        source="business.structured_address",
         read_only=True,
+        allow_null=True,
     )
     business_zone = serializers.CharField(
         source="business.zone",
@@ -549,6 +559,7 @@ class BusinessMemberInvitationRecipientSerializer(serializers.ModelSerializer):
             "business_name",
             "business_description",
             "business_address",
+            "business_structured_address",
             "business_zone",
             "business_primary_category",
             "title",
@@ -558,6 +569,12 @@ class BusinessMemberInvitationRecipientSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = fields
+
+    @extend_schema_field(serializers.CharField(allow_blank=True))
+    def get_business_address(self, invitation):
+        """Expose l'ancien texte seulement pour les entreprises non migrées."""
+        address = invitation.business.structured_address
+        return str(address) if address else invitation.business.address
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_business_primary_category(self, invitation):

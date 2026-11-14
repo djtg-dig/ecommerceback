@@ -11,10 +11,12 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CarriIdentity
 from apps.businesses.models import (
+    Address,
     Business,
     BusinessMember,
     BusinessMemberInvitation,
     BusinessMemberPermission,
+    Country,
 )
 from apps.businesses.services.invitations import (
     InvitationActionError,
@@ -184,10 +186,15 @@ def test_recipient_inbox_lists_only_matching_pending_invitations():
 
 def test_recipient_can_reopen_own_processed_invitation_with_safe_business_details():
     business, owner, recipient, invitation, token = invitation_context("reopen")
+    country = Country.objects.create(name="RDC", iso2="CD", phone_code="+243")
     business.description = "Commerce de proximité"
-    business.address = "12 avenue du Marché"
+    business.structured_address = Address.objects.create(
+        country=country,
+        city="Kinshasa",
+        street="12 avenue du Marché",
+    )
     business.zone = "Gombe"
-    business.save(update_fields=["description", "address", "zone"])
+    business.save(update_fields=["description", "structured_address", "zone"])
 
     accepted = client_for(recipient).post(
         action_url(invitation, "accept"), {"token": token}, format="json"
@@ -203,7 +210,8 @@ def test_recipient_can_reopen_own_processed_invitation_with_safe_business_detail
     assert len(response.data) == 1
     assert response.data[0]["status"] == BusinessMemberInvitation.Status.ACCEPTED
     assert response.data[0]["business_description"] == "Commerce de proximité"
-    assert response.data[0]["business_address"] == "12 avenue du Marché"
+    assert response.data[0]["business_address"] == "12 avenue du Marché, Kinshasa, RDC (CD)"
+    assert response.data[0]["business_structured_address"]["city"] == "Kinshasa"
     assert response.data[0]["business_zone"] == "Gombe"
 
     assert client_for(identity("different-recipient")).get(
