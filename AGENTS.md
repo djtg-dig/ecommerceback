@@ -1,794 +1,254 @@
-# AGENTS.md — E-commerce Backend
+# Mission : nettoyer les anciennes adresses des entreprises E-commerce
 
-## 1. Présentation du projet
+## 1. Projets concernés
 
-Ce dépôt contient le backend d'une plateforme e-commerce multi-entreprises développée avec Django et Django REST Framework.
+Backend Django :
 
-Technologies principales :
-
-- Python 3.
-- Django 5.2.
-- Django REST Framework.
-- PostgreSQL.
-- Authentification OAuth 2.0 / OpenID Connect via Carri Account.
-- JWT, HMAC et mécanismes de sécurité associés.
-- Cloudinary pour les images et vidéos.
-- API REST consommée principalement par un frontend Next.js.
-
-Répertoires :
-
-Backend :
-`/home/mubaraka/Documents/Entreprise/ecommerce`
-
-Application Django :
 `/home/mubaraka/Documents/Entreprise/ecommerce/backend`
 
-Frontend associé :
+Frontend Next.js :
+
 `/home/mubaraka/Documents/Entreprise/ecomfront`
 
-Carri Account est un service d'authentification indépendant.
+Lire et respecter les instructions `AGENTS.md` de chaque dépôt concerné avant toute intervention.
 
-L'agent doit préserver l'architecture existante et ne jamais modifier un projet externe sans demande explicite.
+## 2. Objectif
 
----
+Le backend possède désormais une architecture d'adresses internationales structurées :
 
-## 2. Principes généraux
+- `Country`
+- `AdministrativeArea`
+- `Locality`
+- `Address`
+- `Business.structured_address`
 
-Avant toute intervention :
+L'ancien modèle `Business` possède toujours un champ texte historique `address`.
 
-1. Lire les fichiers concernés.
-2. Identifier les modèles, serializers, vues, services, permissions et routes impliqués.
-3. Comprendre les règles métier existantes.
-4. Examiner les tests correspondants.
-5. Vérifier les dépendances entre applications Django.
-6. Évaluer les impacts sur les API consommées par Next.js.
+Nous souhaitons abandonner progressivement cet ancien champ au profit de `structured_address`, sans perdre les données existantes ni casser les fonctionnalités de la plateforme.
 
-Ne pas supposer qu'un modèle, endpoint ou champ existe sans l'avoir vérifié.
+## 3. Audit des dépendances
 
-Ne pas introduire de logique métier dupliquée.
+Inspecter le backend et le frontend afin d'identifier toutes les références à l'ancien champ `Business.address`.
 
-Ne pas réécrire inutilement du code fonctionnel.
+Examiner notamment :
 
-Privilégier des modifications minimales, maintenables et testables.
+- Modèles Django.
+- Serializers.
+- Vues, ViewSets et services.
+- Permissions.
+- Django Admin.
+- Tests automatisés.
+- Documentation API.
+- Types et interfaces TypeScript.
+- Formulaires de création et modification d'entreprise.
+- Pages de détail des entreprises.
+- Pages de détail des produits.
+- Composants réutilisables.
 
-Préserver les modifications préexistantes du dépôt.
+Distinguer les champs d'adresse des entreprises de ceux appartenant à d'autres modèles.
 
-Ne pas effectuer de refactorisation hors périmètre sans justification.
+Ne supprimer aucun champ homonyme sans rapport.
 
----
+## 4. Audit et préservation des données historiques
 
-## 3. Architecture Django
+Examiner les anciennes adresses des entreprises.
 
-Respecter l'organisation existante du projet.
+Préparer un mécanisme de migration des données existantes vers `structured_address`.
 
-Séparer correctement les responsabilités :
+Contraintes :
 
-- `models.py` : modèles de données et invariants.
-- `serializers.py` : validation, sérialisation et désérialisation.
-- `views.py` : orchestration HTTP et contrôle d'accès.
-- `services.py` : logique métier complexe et réutilisable.
-- `permissions.py` : autorisations.
-- `selectors.py` : accès aux données, lorsque cette convention existe.
-- `urls.py` : routage.
-- `tests/` : tests automatisés.
+- Ne supprimer aucune adresse historique sans sauvegarde.
+- Ne pas inventer de pays, province ou ville.
+- Ne pas attribuer automatiquement la RDC à toutes les entreprises.
+- Ne pas écraser une adresse structurée déjà renseignée.
+- Ne pas créer d'adresses géographiques incohérentes.
+- Prévoir une procédure de migration idempotente et vérifiable.
 
-Cette organisation est indicative : respecter les modules et conventions réellement présents dans chaque application.
+Lorsqu'une ancienne adresse ne peut pas être convertie de manière fiable, conserver les données historiques et signaler l'entreprise comme nécessitant une vérification manuelle.
 
-Éviter les vues contenant une logique métier excessive.
+Produire un bilan indiquant le nombre d'entreprises analysées, migrées, sans adresse et nécessitant une intervention.
 
-Utiliser des transactions pour les opérations nécessitant une cohérence atomique.
+## 5. Nouvelle source officielle
 
-Ne pas ajouter une abstraction uniquement pour déplacer quelques lignes de code.
+Faire de `Business.structured_address` la source officielle des adresses des entreprises.
 
----
+Les nouvelles créations et modifications doivent utiliser cette structure.
 
-## 4. Documentation du code Python
+Éviter les doubles écritures entre `address` et `structured_address`.
 
-### 4.1 Règle générale
+Conserver temporairement une compatibilité avec l'ancien champ si des consommateurs actifs en dépendent encore.
 
-Le code doit être compréhensible par un développeur qui découvre le projet.
+## 6. Adaptation des API
 
-Documenter les décisions importantes sans surcharger le code de commentaires.
+Vérifier les endpoints de création, consultation et modification des entreprises.
 
-Les commentaires et docstrings doivent être rédigés en français, sauf lorsqu'une convention existante du module impose l'anglais.
+Utiliser `structured_address` pour les données d'adresse.
 
-Conserver les noms techniques, les identifiants et les contrats API dans leur langue actuelle.
+Préserver :
 
-### 4.2 Docstrings
-
-Ajouter des docstrings aux fonctions, classes et méthodes dont le comportement n'est pas immédiatement évident.
-
-Documenter particulièrement :
-
-- Les règles métier complexes.
-- Les calculs financiers.
-- Les transactions.
 - Les permissions.
-- Les mécanismes cryptographiques.
-- Les interactions avec les services externes.
-- Les traitements asynchrones.
-- Les validations complexes.
+- L'isolation multi-entreprises.
+- Les validations métier.
+- Les références existantes.
+- Les structures JSON nécessaires aux consommateurs non encore migrés.
 
-Utiliser un style de docstring cohérent avec le projet.
+Mettre à jour la documentation API officielle et les schémas OpenAPI concernés.
 
-Exemple :
+Ne pas effectuer de changement incompatible sans stratégie de transition.
 
-```python
-def calculate_total_amount(unit_price, quantity, discount=0):
-    """
-    Calcule le montant total d'une ligne de vente.
+## 7. Adaptation du frontend
 
-    Args:
-        unit_price: Prix unitaire du produit.
-        quantity: Quantité vendue.
-        discount: Réduction appliquée.
+Modifier uniquement les composants concernés par les adresses d'entreprise.
 
-    Returns:
-        Montant total après réduction.
+Remplacer les utilisations de l'ancien champ texte par `structured_address`.
 
-    Raises:
-        ValueError: Si la quantité est invalide.
-    """
-```
+Conserver les fonctionnalités existantes, notamment :
 
-Ne pas ajouter de docstrings triviales à toutes les fonctions.
+- Création d'entreprise.
+- Modification d'entreprise.
+- Consultation des entreprises.
+- Affichage des informations d'entreprise sur les pages produits.
 
-### 4.3 Commentaires
+Préserver le design et les autres champs commerciaux.
 
-Expliquer pourquoi une décision technique est nécessaire, et non simplement ce que fait une instruction.
+Ne pas ajouter de fonctionnalités hors périmètre.
 
-Éviter :
+## 8. Suppression de l'ancien champ
 
-```python
-# Ajouter 1 à la quantité
-quantity += 1
-```
+Supprimer définitivement `Business.address` uniquement si toutes les conditions suivantes sont remplies :
 
-Préférer les commentaires qui expliquent une contrainte métier ou une décision non évidente.
+1. Les données historiques ont été migrées ou préservées sans perte.
+2. Les consommateurs frontend ont été adaptés.
+3. Les API ne dépendent plus de l'ancien champ.
+4. Les tests backend réussissent.
+5. Les tests frontend réussissent.
+6. Aucune dépendance active ne nécessite encore le champ.
+7. Les conséquences sur la compatibilité API ont été analysées et documentées.
 
-### 4.4 Typage
+Si une condition n'est pas remplie, conserver temporairement le champ et expliquer précisément le blocage.
 
-Utiliser les annotations de types Python lorsque cela améliore la lisibilité et la sécurité.
+Créer les migrations Django nécessaires, mais ne pas les appliquer sur une base existante sans autorisation explicite.
 
-Privilégier les types explicites.
+## 9. Tests et vérifications
 
-Éviter les annotations trompeuses ou inutilement complexes.
+Backend :
 
----
+- Création d'entreprise avec adresse structurée.
+- Modification de l'adresse.
+- Consultation de l'adresse.
+- Conservation des anciennes données.
+- Permissions et isolation entre entreprises.
+- Compatibilité des API.
+- Absence de régression sur les produits.
 
-## 5. Documentation des API REST
+Frontend :
 
-### 5.1 Obligation de documentation
+- Formulaire de création d'entreprise.
+- Formulaire de modification.
+- Affichage des informations d'entreprise.
+- Affichage des produits associés.
+- Vérification TypeScript.
+- ESLint.
+- Tests pertinents.
 
-Toute API créée ou substantiellement modifiée doit être documentée.
+Exécuter également les contrôles Django et Git prévus par `AGENTS.md`.
 
-Documenter :
+Ne pas annoncer comme réussis des tests qui n'ont pas été exécutés.
 
-- La méthode HTTP.
-- L'URL.
-- Le rôle de l'endpoint.
-- Les paramètres de chemin.
-- Les paramètres de requête.
-- Les champs du corps de requête.
-- Les champs de réponse.
-- Les permissions nécessaires.
-- Les codes HTTP.
-- Les erreurs métier.
-- Les contraintes de validation.
-- Les règles de pagination et de filtrage, lorsque pertinentes.
+## 10. Contraintes
 
-### 5.2 OpenAPI
+- Respecter les instructions `AGENTS.md`.
+- Préserver les modifications préexistantes.
+- Ne pas supprimer de données historiques.
+- Ne pas modifier les modèles sans rapport.
+- Ne pas toucher aux paiements.
+- Ne pas modifier Carri Account ou Kisinet.
+- Ne pas effectuer de migration en production.
+- Ne pas effectuer de commit ou de push automatiquement.
 
-Privilégier une documentation OpenAPI 3.x générée à partir des serializers, vues et routes existants.
+## 11. Rapport final obligatoire
 
-Si le projet utilise déjà `drf-spectacular`, `drf-yasg` ou une autre solution, conserver cette solution.
+À la fin, fournir les sections suivantes :
 
-Ne pas installer une nouvelle bibliothèque de documentation sans vérifier les dépendances existantes.
+1. **Diagnostic** : problème identifié et dépendances historiques.
+2. **Modifications** : corrections effectuées.
+3. **Fichiers** : fichiers créés ou modifiés.
+4. **Documentation** : documentation API mise à jour.
+5. **Tests** : commandes exécutées et résultats.
+6. **Limites** : problèmes restants ou validations non réalisées.
+7. **Commit proposé** : commandes Git complètes.
 
-La documentation doit correspondre au comportement réel des endpoints.
+## 12. Format obligatoire du commit proposé
 
-Ne pas inventer des champs ou des réponses.
+**Exigence impérative :**
 
-### 5.3 Exemple de documentation d'endpoint
+Dans la section « Commit proposé », fournir un seul bloc de code Bash directement copiable dans le terminal.
 
-```text
-POST /api/v1/businesses/{business_id}/products/
+Ce bloc doit contenir, dans cet ordre :
 
-Description :
-Créer un produit dans une entreprise.
-
-Authentification :
-Requise.
-
-Autorisation :
-Permission de création de produit dans l'entreprise.
-
-Corps :
-Champs définis par le serializer de création.
-
-Réponses :
-201 — Produit créé.
-400 — Données invalides.
-401 — Authentification absente ou invalide.
-403 — Permission insuffisante.
-404 — Entreprise introuvable ou inaccessible.
-```
-
-Cet exemple est illustratif : vérifier les statuts et contrats réels avant de les documenter.
-
-### 5.4 Erreurs API
-
-Utiliser les codes HTTP appropriés.
-
-Conserver une structure d'erreur cohérente avec le contrat existant.
-
-Ne pas transformer systématiquement toutes les erreurs en HTTP 500.
-
-Distinguer :
-
-- 400 : requête invalide.
-- 401 : authentification nécessaire ou invalide.
-- 403 : accès interdit.
-- 404 : ressource inexistante ou inaccessible.
-- 409 : conflit d'état, lorsque pertinent.
-- 429 : limitation de requêtes.
-- 500 : erreur serveur inattendue.
-- 502/503 : indisponibilité ou erreur d'un service externe, lorsque pertinent.
-
-Ne pas exposer de traces Python, secrets ou détails internes dans les réponses publiques.
-
-### 5.5 Compatibilité API
-
-Ne pas renommer ou supprimer un endpoint, champ ou code d'erreur existant sans analyser les consommateurs.
-
-Avant une modification incompatible :
-
-1. Identifier les usages dans le frontend.
-2. Examiner les tests.
-3. Proposer une stratégie de transition.
-4. Préserver la compatibilité lorsque cela est possible.
-
-Ne pas modifier silencieusement les contrats API.
-
----
-
-## 6. Documentation fonctionnelle et technique
-
-Lorsqu'une fonctionnalité importante est créée ou substantiellement modifiée, mettre à jour la documentation pertinente.
-
-Documenter notamment :
-
-- Les règles métier.
-- Les modèles concernés.
-- Les permissions.
-- Les endpoints.
-- Les flux de traitement.
-- Les dépendances externes.
-- Les variables d'environnement.
-- Les procédures de test.
-- Les limites connues.
-
-Privilégier les documents existants.
-
-Si nécessaire, organiser la documentation sous `docs/`, par exemple :
-
-```text
-docs/
-├── architecture/
-├── api/
-├── authentication/
-├── businesses/
-├── catalog/
-├── inventory/
-├── sales/
-├── payments/
-└── deployment/
-```
-
-Ne pas créer automatiquement tous ces dossiers : ils servent d'exemple d'organisation.
-
-Éviter les documents redondants.
-
-Ne jamais documenter de secrets réels.
-
----
-
-## 7. Sécurité et authentification
-
-Carri Account est le fournisseur d'identité indépendant.
-
-Respecter les mécanismes existants :
-
-- OAuth 2.0.
-- OpenID Connect.
-- JWT.
-- Validation des signatures.
-- HMAC.
-- Protection anti-rejeu.
-- CSRF.
-- Vérification des permissions.
-- Gestion des sessions et tokens.
-- Communications HTTPS en production.
-
-Ne jamais désactiver une protection de sécurité pour contourner un bug.
-
-Ne pas modifier Carri Account sans autorisation explicite.
-
-Ne pas journaliser :
-
-- Mots de passe.
-- Access tokens.
-- Refresh tokens.
-- Secrets OAuth.
-- Clés privées.
-- Secrets HMAC.
-- Clés Cloudinary.
-
-Ne pas inclure de données personnelles sensibles dans les logs sans nécessité.
-
-Toute opération sensible doit vérifier l'identité et les autorisations côté backend.
-
----
-
-## 8. Isolation multi-entreprises
-
-La plateforme est multi-entreprises.
-
-L'isolation des données est une exigence fondamentale.
-
-Toute requête métier doit respecter le contexte de l'entreprise concernée.
-
-Vérifier :
-
-- L'appartenance à l'entreprise.
-- Les permissions de l'utilisateur.
-- La portée des QuerySets.
-- Les relations entre ressources.
-- Les accès aux objets.
-- Les opérations d'écriture.
-
-Ne jamais se fier uniquement à un `business_id` fourni par le client.
-
-Ne pas permettre à un utilisateur d'accéder aux données d'une autre entreprise sans autorisation.
-
-Ajouter des tests de séparation entre entreprises pour les opérations sensibles.
-
-Les permissions frontend ne remplacent jamais les permissions Django.
-
----
-
-## 9. Modèles et intégrité des données
-
-Les modèles Django représentent les données métier.
-
-Respecter les contraintes existantes :
-
-- Clés étrangères.
-- Contraintes d'unicité.
-- Index.
-- Contraintes de validation.
-- Politiques `on_delete`.
-- Historique métier.
-- Relations entre entreprises.
-
-Ne pas supprimer des données protégées par des relations `PROTECT`.
-
-Ne pas contourner les contraintes de la base.
-
-Ne pas modifier directement les historiques métier immuables.
-
-Pour les opérations critiques, utiliser `transaction.atomic()` lorsque nécessaire.
-
-Utiliser `select_for_update()` lorsque le contrôle de concurrence l'exige.
-
-Ne pas ajouter des transactions ou des verrous sans justification.
-
----
-
-## 10. Migrations Django
-
-### 10.1 Règle obligatoire
-
-Ne jamais appliquer automatiquement une migration à une base de données existante sans autorisation explicite.
-
-Les commandes suivantes nécessitent une autorisation avant toute application réelle :
+1. Le chemin absolu du projet avec `cd`.
+2. La commande `git add --` avec la liste exacte de tous les fichiers créés ou modifiés par cette intervention.
+3. La commande `git diff --cached --check`.
+4. La commande `git diff --cached --stat`.
+5. La commande `git commit -m` contenant un message Conventional Commits en anglais.
+
+Exemple de présentation pour le backend :
 
 ```bash
-python manage.py migrate
+cd /home/mubaraka/Documents/Entreprise/ecommerce
+
+git add -- \
+  backend/apps/businesses/models.py \
+  backend/apps/businesses/serializers.py \
+  backend/apps/businesses/tests/test_geography.py \
+  docs/business-addresses.md
+
+git diff --cached --check
+git diff --cached --stat
+
+git commit -m "refactor(businesses): migrate legacy addresses to structured addresses"
 ```
 
-La génération de fichiers de migration peut être proposée ou réalisée si la tâche le nécessite, mais leur application doit être autorisée.
+**Attention : cet exemple est illustratif.**
 
-### 10.2 Avant une migration
+Ne pas recopier automatiquement cette liste.
 
-Examiner :
+L'agent doit déterminer les fichiers réellement modifiés en inspectant le travail effectué et l'état Git du dépôt.
 
-- Les changements de schéma.
-- Les données existantes.
-- Les risques de perte de données.
-- Les contraintes PostgreSQL.
-- Les dépendances entre migrations.
-- La compatibilité avec le code existant.
+Il doit également :
 
-Ne jamais supprimer une colonne contenant des données sans stratégie explicite.
+- Inclure les nouveaux fichiers et migrations réellement créés.
+- Ne pas ajouter les fichiers non concernés.
+- Ne pas inclure de secrets, fichiers temporaires ou artefacts de tests.
+- Ne pas inclure les modifications préexistantes sans rapport.
+- Vérifier le répertoire racine Git avant de construire les commandes.
 
-Ne pas modifier une migration déjà appliquée sans justification exceptionnelle.
+### Si le backend et le frontend sont deux dépôts Git distincts
 
-### 10.3 Migrations de données
+Fournir **deux blocs Bash séparés**, un pour chaque dépôt.
 
-Pour les migrations de données :
+Chaque bloc doit contenir son propre :
 
-- Prévoir la gestion des données historiques.
-- Évaluer la réversibilité.
-- Éviter les opérations destructives.
-- Tester sur une base isolée lorsque possible.
-- Documenter les risques.
+- `cd`
+- `git add --`
+- `git diff --cached --check`
+- `git diff --cached --stat`
+- `git commit -m`
 
----
+Ne jamais mélanger des fichiers appartenant à deux dépôts différents dans un même commit.
 
-## 11. Gestion des stocks
+### Règle finale
 
-Les opérations de stock sont sensibles.
+**Ne pas exécuter les commandes `git commit` ou `git push`.**
 
-Respecter les règles existantes concernant :
+Les fournir uniquement dans le rapport final afin que je puisse les copier-coller et effectuer moi-même les commits.
 
-- Entrées.
-- Sorties.
-- Ajustements.
-- Transferts.
-- Ventes.
-- Retours.
+## 13. Critère de réussite
 
-Ne pas modifier directement les quantités lorsque le domaine impose la création de mouvements de stock.
+Le système doit utiliser `structured_address` comme source officielle des adresses des entreprises.
 
-Préserver la traçabilité.
+Aucune donnée historique ne doit être perdue.
 
-Éviter les stocks négatifs lorsque les règles métier les interdisent.
+L'ancien champ `Business.address` ne doit être supprimé que lorsque son retrait est techniquement sûr.
 
-Gérer correctement les opérations concurrentes.
-
-Ne pas supprimer ou réécrire l'historique des mouvements pour corriger une erreur d'affichage.
-
----
-
-## 12. Ventes, achats et finances
-
-Les opérations financières doivent être exactes et traçables.
-
-Privilégier `Decimal` pour les montants monétaires.
-
-Éviter les calculs financiers avec `float`.
-
-Respecter :
-
-- La devise de référence.
-- Les taux de change.
-- Les règles d'arrondi.
-- Les montants historiques.
-- Les remises.
-- Les taxes lorsque présentes.
-- Les paiements.
-- Les remboursements.
-
-Ne pas recalculer silencieusement des montants historiques à partir de taux de change actuels.
-
-Ne pas inventer des règles de conversion.
-
-Pour les opérations financières critiques, ajouter des tests sur les arrondis, la concurrence et l'idempotence.
-
----
-
-## 13. Cloudinary et fichiers médias
-
-Les images et vidéos sont stockées sur Cloudinary.
-
-Le backend doit :
-
-- Valider les fichiers.
-- Vérifier les permissions.
-- Contrôler les limites métier.
-- Gérer les erreurs du fournisseur.
-- Enregistrer les métadonnées utiles.
-- Préserver la cohérence entre Cloudinary et PostgreSQL.
-
-Ne jamais enregistrer un média comme disponible si son téléversement a échoué.
-
-Ne pas effectuer de véritable upload sans autorisation explicite pendant les tests ou diagnostics.
-
-Les vidéos doivent être validées avec les outils existants, notamment `ffprobe` si cette dépendance est requise.
-
-Ne pas imposer arbitrairement une résolution minimale excluant les smartphones peu performants.
-
-Conserver les contrôles de sécurité sur les fichiers.
-
-Ne pas supprimer de médias Cloudinary existants sans autorisation.
-
----
-
-## 14. Performance et optimisation
-
-Optimiser les accès PostgreSQL lorsque nécessaire.
-
-Examiner :
-
-- Les requêtes N+1.
-- `select_related()`.
-- `prefetch_related()`.
-- Les index.
-- La pagination.
-- Les agrégations.
-- Les transactions longues.
-- Les appels externes bloquants.
-
-Ne pas ajouter des index sans justification.
-
-Éviter les requêtes inutiles dans les serializers.
-
-Ne pas mettre en cache des données privées sans isolation correcte par utilisateur et entreprise.
-
-Ne pas optimiser prématurément au détriment de la lisibilité.
-
----
-
-## 15. Services externes
-
-Toute intégration externe doit gérer :
-
-- Les délais d'attente.
-- Les erreurs réseau.
-- Les réponses invalides.
-- Les erreurs d'authentification.
-- Les limitations du fournisseur.
-- Les éventuelles tentatives de reprise.
-
-Les retries doivent être limités et adaptés au caractère idempotent de l'opération.
-
-Ne pas relancer automatiquement une opération financière non idempotente sans mécanisme de protection.
-
-Ne pas exposer les secrets des services externes.
-
-Utiliser des mocks ou des fakes dans les tests automatisés.
-
----
-
-## 16. Tests automatisés
-
-Toute correction fonctionnelle doit être accompagnée de tests adaptés.
-
-Privilégier les outils déjà utilisés dans le projet.
-
-Tester notamment :
-
-- Les modèles.
-- Les serializers.
-- Les services.
-- Les endpoints.
-- Les permissions.
-- Les règles métier.
-- Les erreurs.
-- Les cas limites.
-- Les accès inter-entreprises.
-- Les opérations concurrentes lorsque pertinentes.
-
-### 16.1 Tests API
-
-Vérifier :
-
-- Les statuts HTTP.
-- Les champs de réponse.
-- Les erreurs structurées.
-- Les permissions.
-- La validation des données.
-- L'isolation des entreprises.
-
-### 16.2 Tests de sécurité
-
-Tester les tentatives d'accès non autorisées.
-
-Vérifier qu'un utilisateur d'une entreprise ne peut pas consulter ou modifier les données d'une autre entreprise.
-
-Ne pas utiliser les services externes réels dans les tests unitaires.
-
-### 16.3 Commandes
-
-Depuis le répertoire `backend`, utiliser les commandes adaptées au projet :
-
-```bash
-../env/bin/python manage.py check
-../env/bin/python manage.py test
-../env/bin/python manage.py makemigrations --check --dry-run
-git diff --check
-```
-
-Ne pas supposer que tous les tests sont exécutables sans PostgreSQL ou services de test.
-
-Ne pas lancer de tests susceptibles de modifier une base non isolée.
-
-Si la suite complète est trop longue, exécuter les tests ciblés et signaler ceux qui restent à lancer.
-
-Ne jamais déclarer un test réussi s'il n'a pas été exécuté.
-
----
-
-## 17. Qualité du code
-
-Respecter les conventions Python et les outils déjà configurés dans le dépôt.
-
-Privilégier :
-
-- Des fonctions courtes et cohérentes.
-- Des noms explicites.
-- Des validations centralisées lorsque pertinent.
-- Une gestion des exceptions précise.
-- Des imports organisés.
-- Des responsabilités clairement séparées.
-
-Éviter :
-
-- `except Exception` sans justification.
-- Les exceptions silencieusement ignorées.
-- Les valeurs magiques non documentées.
-- La duplication de logique.
-- Les dépendances circulaires.
-- Les requêtes SQL inutiles.
-- Les effets secondaires cachés.
-
-Ne pas ajouter de nouveaux outils de linting ou de formatage sans nécessité.
-
----
-
-## 18. Git et messages de commit
-
-### 18.1 Règle obligatoire
-
-Après chaque intervention comportant des modifications, proposer au moins un message de commit.
-
-Ne jamais effectuer automatiquement :
-
-- `git commit`
-- `git push`
-- `git reset --hard`
-- `git clean -fd`
-- Une réécriture destructive de l'historique Git.
-
-Ces opérations nécessitent une autorisation explicite.
-
-Préserver les modifications préexistantes.
-
-### 18.2 Convention Conventional Commits
-
-Utiliser :
-
-`type(scope): description`
-
-Types recommandés :
-
-- `feat` : nouvelle fonctionnalité.
-- `fix` : correction de bug.
-- `refactor` : restructuration.
-- `perf` : optimisation.
-- `docs` : documentation.
-- `test` : tests.
-- `style` : formatage.
-- `chore` : maintenance.
-- `build` : configuration de compilation.
-- `ci` : intégration continue.
-
-Utiliser `fix` pour les corrections de sécurité, avec un scope explicite tel que `security` ou `auth`.
-
-Scopes possibles :
-
-- `auth`
-- `api`
-- `businesses`
-- `catalog`
-- `products`
-- `inventory`
-- `sales`
-- `purchases`
-- `payments`
-- `finance`
-- `currencies`
-- `media`
-- `permissions`
-- `database`
-- `docs`
-- `config`
-
-Messages en anglais, concis et précis.
-
-Exemples :
-
-```text
-feat(catalog): support dynamic product attributes
-fix(media): accept product videos at any resolution
-fix(auth): validate HMAC signatures consistently
-feat(inventory): add stock transfer validation
-fix(sales): prevent duplicate sale processing
-perf(products): optimize catalog queries
-docs(api): document product media endpoints
-test(permissions): cover cross-business access
-refactor(payments): isolate payment provider logic
-```
-
-### 18.3 Commits logiques
-
-Si plusieurs changements indépendants sont réalisés, proposer plusieurs commits distincts.
-
-Ne pas mélanger les modifications frontend et backend dans un même commit si les projets sont dans des dépôts différents.
-
-Ne pas inclure de fichiers temporaires, secrets ou artefacts de tests dans les commits proposés.
-
----
-
-## 19. Rapport obligatoire après chaque intervention
-
-À la fin de chaque tâche, fournir :
-
-### Diagnostic
-
-Décrire le problème identifié ou le besoin traité.
-
-### Modifications
-
-Résumer les corrections ou fonctionnalités réalisées.
-
-### Fichiers
-
-Lister les fichiers créés ou modifiés.
-
-### Documentation
-
-Indiquer les docstrings, commentaires ou documents API ajoutés ou mis à jour.
-
-### Tests
-
-Préciser les commandes exécutées et leurs résultats.
-
-### Limites
-
-Indiquer ce qui n'a pas été testé ou ce qui reste à vérifier.
-
-### Commit proposé
-
-Fournir un ou plusieurs messages de commit Conventional Commits.
-
-Ne jamais annoncer qu'une fonctionnalité est validée si seuls les tests statiques ont réussi.
-
----
-
-## 20. Restrictions opérationnelles
-
-Sans autorisation explicite :
-
-- Ne pas modifier Carri Account.
-- Ne pas modifier Kisinet.
-- Ne pas modifier le frontend hors périmètre.
-- Ne pas supprimer des données.
-- Ne pas appliquer de migrations.
-- Ne pas réinitialiser PostgreSQL.
-- Ne pas effectuer d'opérations destructives.
-- Ne pas effectuer d'uploads réels vers Cloudinary.
-- Ne pas déclencher de paiements réels.
-- Ne pas exposer les variables d'environnement sensibles.
-- Ne pas effectuer de commit ou de push.
-
-Ne pas modifier les règles de sécurité ou les permissions pour faire passer artificiellement un test.
-
----
-
-## 21. Priorités du projet
-
-En cas de choix entre plusieurs solutions, privilégier :
-
-1. Sécurité.
-2. Intégrité et isolation des données.
-3. Exactitude des règles métier.
-4. Compatibilité API.
-5. Fiabilité.
-6. Performance.
-7. Maintenabilité.
-8. Documentation.
-9. Simplicité.
-
-Le backend doit être conçu comme un système de production, capable de gérer plusieurs entreprises et leurs données de manière sécurisée et fiable.
+Le rapport final doit obligatoirement contenir les commandes Git complètes, directement copiables, avec les chemins, les fichiers concernés et les messages de commit.
