@@ -1,7 +1,10 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from .models import (
+    Address,
+    AdministrativeArea,
     Business,
     BusinessCurrency,
     BusinessExchangeRate,
@@ -11,6 +14,8 @@ from .models import (
     BusinessMemberPermission,
     BusinessPaymentMethod,
     Currency,
+    Country,
+    Locality,
 )
 from .services.invitations import validate_invitation_state
 from .permissions import atomic_permission_values
@@ -27,7 +32,113 @@ class CategorySerializer(serializers.ModelSerializer):
         )
 
 
+class CountrySerializer(serializers.ModelSerializer):
+    """Projection publique minimale du référentiel de pays."""
+
+    class Meta:
+        model = Country
+        fields = ("id", "name", "iso2", "phone_code")
+        read_only_fields = fields
+
+
+class AdministrativeAreaSerializer(serializers.ModelSerializer):
+    country = CountrySerializer(read_only=True)
+
+    class Meta:
+        model = AdministrativeArea
+        fields = ("id", "country", "name", "code")
+        read_only_fields = fields
+
+
+class LocalitySerializer(serializers.ModelSerializer):
+    administrative_area = AdministrativeAreaSerializer(read_only=True)
+
+    class Meta:
+        model = Locality
+        fields = ("id", "administrative_area", "name", "code")
+        read_only_fields = fields
+
+
+class AddressSerializer(serializers.ModelSerializer):
+    """Valide les relations géographiques avant toute écriture d'adresse."""
+
+    country = CountrySerializer(read_only=True)
+    country_id = serializers.PrimaryKeyRelatedField(
+        source="country",
+        queryset=Country.objects.all(),
+        write_only=True,
+        required=False,
+    )
+    administrative_area = AdministrativeAreaSerializer(read_only=True)
+    administrative_area_id = serializers.PrimaryKeyRelatedField(
+        source="administrative_area",
+        queryset=AdministrativeArea.objects.select_related("country"),
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
+    locality = LocalitySerializer(read_only=True)
+    locality_id = serializers.PrimaryKeyRelatedField(
+        source="locality",
+        queryset=Locality.objects.select_related("administrative_area__country"),
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
+
+    class Meta:
+        model = Address
+        fields = (
+            "id",
+            "country",
+            "country_id",
+            "administrative_area",
+            "administrative_area_id",
+            "locality",
+            "locality_id",
+            "state",
+            "city",
+            "neighborhood",
+            "street",
+            "street_number",
+            "postal_code",
+            "additional_information",
+            "formatted_address",
+            "latitude",
+            "longitude",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+    def validate(self, attrs):
+        values = {
+            field: attrs.get(field, getattr(self.instance, field, None))
+            for field in (
+                "country",
+                "administrative_area",
+                "locality",
+                "state",
+                "city",
+                "neighborhood",
+                "street",
+                "street_number",
+                "postal_code",
+                "additional_information",
+                "formatted_address",
+                "latitude",
+                "longitude",
+            )
+        }
+        try:
+            Address(**values).clean()
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.message_dict) from exc
+        return attrs
+
+
 class BaseBusinessSerializer(serializers.ModelSerializer):
+    structured_address = AddressSerializer(required=False)
     categories = serializers.ListField(
         child=serializers.CharField(),
         write_only=True,
@@ -44,6 +155,18 @@ class BaseBusinessSerializer(serializers.ModelSerializer):
         if len(value) != len(set(value)):
             raise serializers.ValidationError("Chaque modalité ne peut être sélectionnée qu'une fois.")
         return value
+
+    def validate(self, attrs):
+        """Exige le pays à la création et complète les mises à jour partielles."""
+        address_data = attrs.get("structured_address")
+        if address_data is not None and not {"country", "country_id"}.intersection(address_data):
+            if self.instance and self.instance.structured_address_id:
+                address_data["country_id"] = self.instance.structured_address.country_id
+            else:
+                raise serializers.ValidationError(
+                    {"structured_address": {"country_id": "Ce champ est obligatoire."}}
+                )
+        return super().validate(attrs)
 
 
 class BusinessCreateSerializer(BaseBusinessSerializer):
@@ -69,6 +192,7 @@ class BusinessCreateSerializer(BaseBusinessSerializer):
         fields = (
             "name",
             "description",
+            "structured_address",
             "address",
             "zone",
             "primary_currency",
@@ -91,11 +215,24 @@ class BusinessUpdateSerializer(BaseBusinessSerializer):
 
         return super().validate(attrs)
 
+    def update(self, instance, validated_data):
+        """Met à jour l'adresse liée en place pour ne pas en dupliquer les lignes."""
+        address_data = validated_data.pop("structured_address", None)
+        if address_data is not None:
+            if instance.structured_address_id:
+                for field, value in address_data.items():
+                    setattr(instance.structured_address, field, value)
+                instance.structured_address.save()
+            else:
+                instance.structured_address = Address.objects.create(**address_data)
+        return super().update(instance, validated_data)
+
     class Meta:
         model = Business
         fields = (
             "name",
             "description",
+            "structured_address",
             "address",
             "zone",
             "primary_currency",
@@ -111,6 +248,7 @@ class BusinessUpdateSerializer(BaseBusinessSerializer):
 class BusinessSerializer(serializers.ModelSerializer):
     categories = serializers.SerializerMethodField()
     primary_category = serializers.SerializerMethodField()
+    structured_address = AddressSerializer(read_only=True)
 
     class Meta:
         model = Business
@@ -118,6 +256,7 @@ class BusinessSerializer(serializers.ModelSerializer):
             "public_id",
             "name",
             "description",
+            "structured_address",
             "address",
             "zone",
             "primary_currency",

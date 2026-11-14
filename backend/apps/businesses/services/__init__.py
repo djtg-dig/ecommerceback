@@ -8,6 +8,7 @@ from apps.common.choices import PaymentMethod
 
 from ..identifiers import generate_business_public_id
 from ..models import (
+    Address,
     Business,
     BusinessCurrency,
     BusinessCategory,
@@ -75,6 +76,7 @@ def create_business(identity, validated_data):
     """
     categories = validated_data.pop("categories", [])
     primary_category = validated_data.pop("primary_category", None)
+    structured_address = validated_data.pop("structured_address", None)
 
     active_categories = {
         category.code: category
@@ -91,8 +93,10 @@ def create_business(identity, validated_data):
     for _ in range(MAX_PUBLIC_ID_ATTEMPTS):
         try:
             with transaction.atomic():
+                address = Address.objects.create(**structured_address) if structured_address else None
                 business = Business.objects.create(
                     public_id=generate_business_public_id(),
+                    structured_address=address,
                     **validated_data,
                 )
                 ensure_primary_currency(business)

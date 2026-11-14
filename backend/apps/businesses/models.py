@@ -17,6 +17,149 @@ from .identifiers import (
 )
 
 
+class Country(models.Model):
+    """Référentiel ISO 3166-1 alpha-2 utilisé par les adresses."""
+
+    name = models.CharField(max_length=120)
+    iso2 = models.CharField(max_length=2, unique=True)
+    phone_code = models.CharField(max_length=16, blank=True)
+
+    class Meta:
+        ordering = ("name",)
+        verbose_name = "Pays"
+        verbose_name_plural = "Pays"
+
+    def clean(self):
+        super().clean()
+        self.iso2 = self.iso2.strip().upper()
+        if len(self.iso2) != 2 or not self.iso2.isalpha():
+            raise ValidationError({"iso2": "Le code ISO2 doit contenir exactement deux lettres."})
+
+    def save(self, *args, **kwargs):
+        # La normalisation protège aussi les créations hors formulaire Django.
+        self.iso2 = self.iso2.strip().upper()
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.name} ({self.iso2})"
+
+
+class AdministrativeArea(models.Model):
+    """Subdivision administrative optionnelle, propre à un pays."""
+
+    country = models.ForeignKey(Country, on_delete=models.PROTECT, related_name="administrative_areas")
+    name = models.CharField(max_length=150)
+    code = models.CharField(max_length=32, blank=True)
+
+    class Meta:
+        ordering = ("country__name", "name")
+        constraints = [
+            models.UniqueConstraint(fields=("country", "name"), name="administrative_area_country_name_unique"),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.country.iso2})"
+
+
+class Locality(models.Model):
+    """Ville ou localité rattachée à une subdivision administrative."""
+
+    administrative_area = models.ForeignKey(
+        AdministrativeArea,
+        on_delete=models.PROTECT,
+        related_name="localities",
+    )
+    name = models.CharField(max_length=150)
+    code = models.CharField(max_length=32, blank=True)
+
+    class Meta:
+        ordering = ("administrative_area__country__name", "administrative_area__name", "name")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("administrative_area", "name"),
+                name="locality_administrative_area_name_unique",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.administrative_area})"
+
+
+class Address(models.Model):
+    """Adresse internationale structurée, avec repli vers des champs libres."""
+
+    country = models.ForeignKey(Country, on_delete=models.PROTECT, related_name="addresses")
+    administrative_area = models.ForeignKey(
+        AdministrativeArea,
+        on_delete=models.PROTECT,
+        related_name="addresses",
+        null=True,
+        blank=True,
+    )
+    locality = models.ForeignKey(
+        Locality,
+        on_delete=models.PROTECT,
+        related_name="addresses",
+        null=True,
+        blank=True,
+    )
+    state = models.CharField(max_length=150, blank=True)
+    city = models.CharField(max_length=150, blank=True)
+    neighborhood = models.CharField(max_length=150, blank=True)
+    street = models.CharField(max_length=200, blank=True)
+    street_number = models.CharField(max_length=50, blank=True)
+    postal_code = models.CharField(max_length=32, blank=True)
+    additional_information = models.TextField(blank=True)
+    formatted_address = models.CharField(max_length=500, blank=True)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("country__name", "state", "city", "street")
+        indexes = [
+            models.Index(fields=("country", "administrative_area", "locality"), name="address_geography_idx"),
+            models.Index(fields=("postal_code",), name="address_postal_code_idx"),
+        ]
+
+    @staticmethod
+    def _same_name(first, second):
+        return first.strip().casefold() == second.strip().casefold()
+
+    def clean(self):
+        """Empêche les liens géographiques incohérents sans bloquer la saisie libre."""
+        super().clean()
+        errors = {}
+        if self.administrative_area:
+            if self.administrative_area.country_id != self.country_id:
+                errors["administrative_area"] = "Cette subdivision n'appartient pas au pays sélectionné."
+            elif self.state and not self._same_name(self.state, self.administrative_area.name):
+                errors["state"] = "La subdivision libre doit correspondre à la subdivision sélectionnée."
+        if self.locality:
+            if not self.administrative_area_id or self.locality.administrative_area_id != self.administrative_area_id:
+                errors["locality"] = "Cette localité n'appartient pas à la subdivision sélectionnée."
+            elif self.city and not self._same_name(self.city, self.locality.name):
+                errors["city"] = "La ville libre doit correspondre à la localité sélectionnée."
+        if self.latitude is not None and not Decimal("-90") <= self.latitude <= Decimal("90"):
+            errors["latitude"] = "La latitude doit être comprise entre -90 et 90."
+        if self.longitude is not None and not Decimal("-180") <= self.longitude <= Decimal("180"):
+            errors["longitude"] = "La longitude doit être comprise entre -180 et 180."
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        if self.formatted_address:
+            return self.formatted_address
+        parts = [self.street, self.street_number, self.neighborhood, self.city or self.locality, self.state or self.administrative_area, self.country]
+        return ", ".join(str(part) for part in parts if part)
+
+
 class Business(models.Model):
     class Status(models.TextChoices):
         ACTIVE = "ACTIVE", "Active"
@@ -50,6 +193,15 @@ class Business(models.Model):
     )
     name = models.CharField(max_length=180)
     description = models.TextField(blank=True)
+    # ``address`` et ``zone`` sont les champs texte historiques exposés par l'API.
+    # L'adresse structurée reste optionnelle afin de préserver leurs données et contrat.
+    structured_address = models.ForeignKey(
+        Address,
+        on_delete=models.SET_NULL,
+        related_name="businesses",
+        null=True,
+        blank=True,
+    )
     address = models.TextField(blank=True)
     zone = models.CharField(max_length=120, blank=True)
     primary_currency = models.CharField(

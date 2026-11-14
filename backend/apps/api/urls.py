@@ -12,6 +12,9 @@ from apps.businesses.views import (
     BusinessInvitationDeclineView,
     BusinessInvitationRecipientListView,
     CurrencyListView,
+    CountryListView,
+    AdministrativeAreaListView,
+    LocalityListView,
 )
 from apps.dashboard_views import DashboardView
 from apps.profitability_views import ProfitabilitySummaryView
@@ -24,6 +27,9 @@ from apps.messaging.views import EligibleSellerListView
 
 urlpatterns = [
     path("currencies/", CurrencyListView.as_view(), name="currency-list"),
+    path("countries/", CountryListView.as_view(), name="country-list"),
+    path("administrative-areas/", AdministrativeAreaListView.as_view(), name="administrative-area-list"),
+    path("localities/", LocalityListView.as_view(), name="locality-list"),
     path("units-of-measure/", UnitOfMeasureListView.as_view(), name="unit-of-measure-list"),
     path("public/products/home/", PublicHomeProductsView.as_view()),
     path("public/products/search/", PublicProductSearchView.as_view()),

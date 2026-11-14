@@ -1,7 +1,7 @@
 import re
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 from django.utils import timezone
 from drf_spectacular.utils import (
     OpenApiExample,
@@ -17,6 +17,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (
+    AdministrativeArea,
     Business,
     BusinessMedia,
     BusinessCategory,
@@ -28,6 +29,8 @@ from .models import (
     BusinessMemberPermission,
     BusinessPaymentMethod,
     Currency,
+    Country,
+    Locality,
 )
 from .media import BusinessMediaSerializer, delete_business_media, replace_business_media
 from apps.common.media import MediaStorageError
@@ -60,6 +63,9 @@ from .serializers import (
     BusinessCurrencyWriteSerializer,
     BusinessExchangeRateSerializer,
     CurrencySerializer,
+    AdministrativeAreaSerializer,
+    CountrySerializer,
+    LocalitySerializer,
 )
 from .services import (
     create_business,
@@ -91,7 +97,11 @@ from .services.invitations import (
 
 def accessible(identity):
     """Return Businesses visible through an active membership for an identity."""
-    return Business.objects.filter(
+    return Business.objects.select_related(
+        "structured_address__country",
+        "structured_address__administrative_area",
+        "structured_address__locality__administrative_area__country",
+    ).filter(
         members__identity=identity,
         members__status="ACTIVE",
     ).distinct()
@@ -113,6 +123,58 @@ class CurrencyListView(APIView):
     def get(self, request):
         ensure_currency_reference_data()
         return Response(CurrencySerializer(Currency.objects.filter(is_active=True), many=True).data)
+
+
+class CountryListView(APIView):
+    """Référentiel public en lecture seule pour les formulaires d'adresse."""
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        queryset = Country.objects.all()
+        search = request.query_params.get("search", "").strip()
+        if search:
+            queryset = queryset.filter(Q(name__icontains=search) | Q(iso2__icontains=search))
+        return Response(CountrySerializer(queryset, many=True).data)
+
+
+class AdministrativeAreaListView(APIView):
+    """Référentiel public des subdivisions, volontairement filtré par pays."""
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        country_id = request.query_params.get("country_id")
+        if not country_id or not country_id.isdigit():
+            raise serializers.ValidationError({"country_id": "Un identifiant de pays valide est requis."})
+        queryset = AdministrativeArea.objects.select_related("country").filter(country_id=country_id)
+        search = request.query_params.get("search", "").strip()
+        if search:
+            queryset = queryset.filter(Q(name__icontains=search) | Q(code__icontains=search))
+        return Response(AdministrativeAreaSerializer(queryset, many=True).data)
+
+
+class LocalityListView(APIView):
+    """Référentiel public des localités, filtré par subdivision."""
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        administrative_area_id = request.query_params.get("administrative_area_id")
+        if not administrative_area_id or not administrative_area_id.isdigit():
+            raise serializers.ValidationError(
+                {"administrative_area_id": "Un identifiant de subdivision valide est requis."}
+            )
+        queryset = Locality.objects.select_related("administrative_area__country").filter(
+            administrative_area_id=administrative_area_id
+        )
+        search = request.query_params.get("search", "").strip()
+        if search:
+            queryset = queryset.filter(Q(name__icontains=search) | Q(code__icontains=search))
+        return Response(LocalitySerializer(queryset, many=True).data)
 
 
 class BusinessMediaView(APIView):
@@ -388,11 +450,9 @@ class BusinessDetailView(APIView):
         require_permission(request.user, business, BusinessMemberPermission.Permission.BUSINESS_UPDATE, write=True)
         serializer = BusinessUpdateSerializer(business, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        data = dict(serializer.validated_data)
+        data = serializer.validated_data
         categories = data.pop("categories", None)
         primary_category = data.pop("primary_category", None)
-        serializer = BusinessUpdateSerializer(business, data=data, partial=True)
-        serializer.is_valid(raise_exception=True)
         serializer.save()
         if categories is not None:
             try:
