@@ -132,16 +132,46 @@ def _frontend_callback_error(code, detail):
     if not delivery_url:
         return _authentication_error(code, detail)
     parsed = urlsplit(delivery_url)
+    path = "/auth/indisponible" if code == "oauth_provider_unavailable" else "/connexion"
+    query = "" if path == "/auth/indisponible" else urlencode({"erreur": code})
     location = urlunsplit((
         parsed.scheme,
         parsed.netloc,
-        "/connexion",
-        urlencode({"erreur": code}),
+        path,
+        query,
         "",
     ))
     response = redirect(location)
     response["Cache-Control"] = "no-store, max-age=0"
     response["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+def _provider_unavailable_login_response(request, delivery_url):
+    """Redirect only a verified browser delivery to the public retry page.
+
+    The login endpoint is also an API contract. A JSON 503 remains the response
+    for API clients; only the fixed Next.js browser delivery is allowed to turn
+    this expected provider outage into a user-facing page.
+    """
+
+    accept = request.headers.get("Accept", "")
+    if (
+        not delivery_url
+        or "text/html" not in accept
+    ):
+        return _authentication_error(
+            "oauth_provider_unavailable",
+            "Le service d'authentification est temporairement indisponible.",
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    parsed = urlsplit(delivery_url)
+    location = urlunsplit((parsed.scheme, parsed.netloc, "/auth/indisponible", "", ""))
+    response = redirect(location)
+    response["Cache-Control"] = "no-store, max-age=0"
+    response["Referrer-Policy"] = "no-referrer"
+    response["X-Robots-Tag"] = "noindex, nofollow"
     return response
 
 
@@ -249,9 +279,9 @@ class CarriLoginView(APIView):
                 "Le service d'authentification est indisponible.",
                 status.HTTP_503_SERVICE_UNAVAILABLE,
             )
+        delivery_url = ""
         try:
             delivery = request.query_params.get("delivery", "")
-            delivery_url = ""
             delivery_binding = ""
             if delivery:
                 if delivery != "nextjs":
@@ -317,11 +347,7 @@ class CarriLoginView(APIView):
             response["Referrer-Policy"] = "no-referrer"
             return response
         except OIDCUnavailable:
-            return _authentication_error(
-                "oauth_provider_unavailable",
-                "Le service d'authentification est temporairement indisponible.",
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+            return _provider_unavailable_login_response(request, delivery_url)
         except OIDCError:
             logger.error("carri.web_login.invalid_provider_configuration")
             return _authentication_error(

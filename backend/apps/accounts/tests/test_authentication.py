@@ -17,7 +17,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from apps.accounts.logging import OAuthQueryStringRedactionFilter
 from apps.accounts.models import CarriIdentity, OAuthHandoff, OAuthLoginAttempt
 from apps.accounts.services import oidc
-from apps.accounts.views import _identity, _pair
+from apps.accounts.views import _frontend_callback_error, _identity, _pair
 
 
 def test_django_logs_redact_carri_oauth_query_strings():
@@ -37,6 +37,18 @@ def test_django_logs_redact_carri_oauth_query_strings():
     assert "private-state" not in message
     assert "private-code" not in message
     assert "/api/v1/auth/carri/callback/ HTTP/1.1" in message
+
+
+@override_settings(CARRI_ACCOUNT_WEB_HANDOFF_DELIVERY_URL="https://web.example/api/auth/carri/handoff")
+def test_provider_unavailable_callback_uses_the_configured_unavailable_page():
+    response = _frontend_callback_error(
+        "oauth_provider_unavailable",
+        "Le service d'authentification est temporairement indisponible.",
+    )
+
+    assert response.status_code == 302
+    assert response["Location"] == "https://web.example/auth/indisponible"
+    assert "oauth_provider_unavailable" not in response["Location"]
 
 
 @pytest.mark.django_db
@@ -620,6 +632,56 @@ def test_web_login_reports_provider_failure_with_a_stable_code():
         "apps.accounts.views.discovery", side_effect=oidc.OIDCUnavailable()
     ):
         response = APIClient().get("/api/v1/auth/carri/login/")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "code": "oauth_provider_unavailable",
+        "detail": "Le service d'authentification est temporairement indisponible.",
+    }
+
+
+@pytest.mark.django_db
+@override_settings(
+    CARRI_ACCOUNT_CLIENT_ID="web-client",
+    CARRI_ACCOUNT_CLIENT_SECRET="web-secret",
+    CARRI_ACCOUNT_REDIRECT_URI="https://api.example/api/v1/auth/carri/callback/",
+    CARRI_ACCOUNT_WEB_HANDOFF_DELIVERY_URL="https://web.example/api/auth/carri/handoff",
+)
+def test_next_browser_login_redirects_to_the_configured_unavailable_page():
+    with patch(
+        "apps.accounts.views.discovery", side_effect=oidc.OIDCUnavailable()
+    ):
+        response = APIClient().get(
+            "/api/v1/auth/carri/login/",
+            {"delivery": "nextjs", "delivery_binding": "B" * 43},
+            HTTP_ACCEPT="text/html,application/xhtml+xml",
+        )
+
+    assert response.status_code == 302
+    assert response["Location"] == "https://web.example/auth/indisponible"
+    assert response["Cache-Control"] == "no-store, max-age=0"
+    assert response["Referrer-Policy"] == "no-referrer"
+    assert response["X-Robots-Tag"] == "noindex, nofollow"
+    assert "delivery_binding" not in response["Location"]
+    assert "oauth_provider_unavailable" not in response["Location"]
+
+
+@pytest.mark.django_db
+@override_settings(
+    CARRI_ACCOUNT_CLIENT_ID="web-client",
+    CARRI_ACCOUNT_CLIENT_SECRET="web-secret",
+    CARRI_ACCOUNT_REDIRECT_URI="https://api.example/api/v1/auth/carri/callback/",
+    CARRI_ACCOUNT_WEB_HANDOFF_DELIVERY_URL="https://web.example/api/auth/carri/handoff",
+)
+def test_next_delivery_keeps_a_json_provider_error_for_api_clients():
+    with patch(
+        "apps.accounts.views.discovery", side_effect=oidc.OIDCUnavailable()
+    ):
+        response = APIClient().get(
+            "/api/v1/auth/carri/login/",
+            {"delivery": "nextjs", "delivery_binding": "B" * 43},
+            HTTP_ACCEPT="application/json",
+        )
 
     assert response.status_code == 503
     assert response.json() == {
