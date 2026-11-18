@@ -4,7 +4,7 @@ from rest_framework import serializers
 
 from apps.businesses.models import BusinessMember
 
-from .models import Conversation, Message
+from .models import BusinessMessagingSettings, Conversation, Inquiry, Message
 
 
 def seller_projection(member):
@@ -46,14 +46,17 @@ class EligibleSellerSerializer(serializers.Serializer):
 
 class ConversationCreateSerializer(serializers.Serializer):
     business = serializers.CharField(max_length=12)
-    seller = serializers.CharField(max_length=12)
+    # Legacy input remains accepted only when it identifies today's agent.
+    seller = serializers.CharField(max_length=12, required=False)
 
 
 class ConversationSerializer(serializers.ModelSerializer):
     business = serializers.CharField(source="business.public_id", read_only=True)
     business_name = serializers.CharField(source="business.name", read_only=True)
-    seller = serializers.SerializerMethodField()
+    agent = serializers.SerializerMethodField()
     participant_role = serializers.SerializerMethodField()
+    can_reply = serializers.SerializerMethodField()
+    unread_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Conversation
@@ -61,8 +64,11 @@ class ConversationSerializer(serializers.ModelSerializer):
             "reference",
             "business",
             "business_name",
-            "seller",
+            "agent",
             "participant_role",
+            "can_reply",
+            "unread_count",
+            "kind",
             "status",
             "created_at",
             "updated_at",
@@ -70,18 +76,32 @@ class ConversationSerializer(serializers.ModelSerializer):
         )
         read_only_fields = fields
 
-    def get_seller(self, conversation):
-        member_map = self.context.get("seller_members")
-        member = (
-            member_map.get((conversation.business_id, conversation.seller_id))
-            if member_map is not None
-            else conversation_seller_member(conversation)
-        )
-        return seller_projection(member) if member else None
+    def get_agent(self, conversation):
+        from .services import effective_agent
+        try:
+            return seller_projection(effective_agent(business=conversation.business))
+        except Exception:
+            return None
 
     def get_participant_role(self, conversation):
         request = self.context.get("request")
         return "BUYER" if request and request.user.id == conversation.buyer_id else "SELLER"
+
+    def get_can_reply(self, conversation):
+        request = self.context.get("request")
+        if not request:
+            return False
+        if request.user.id == conversation.buyer_id:
+            return conversation.status == Conversation.Status.OPEN
+        from .services import effective_agent
+        try:
+            return effective_agent(business=conversation.business).identity_id == request.user.id and conversation.status == Conversation.Status.OPEN
+        except Exception:
+            return False
+
+    def get_unread_count(self, conversation):
+        request = self.context.get("request")
+        return conversation.messages.filter(recipient=request.user, read_at__isnull=True).count() if request else 0
 
 
 class MessageWriteSerializer(serializers.Serializer):
@@ -155,3 +175,37 @@ class MessageSerializer(serializers.ModelSerializer):
                 f"messages/{message.reference}/attachment/"
             ),
         }
+
+
+class InquiryCreateSerializer(serializers.Serializer):
+    business = serializers.CharField(max_length=12)
+    product = serializers.CharField(max_length=12, required=False)
+    quantity = serializers.DecimalField(max_digits=14, decimal_places=3, required=False, allow_null=True)
+    description = serializers.CharField(max_length=4000, required=False, allow_blank=True, trim_whitespace=False)
+
+
+class InquirySerializer(serializers.ModelSerializer):
+    business = serializers.CharField(source="business.public_id", read_only=True)
+    conversation = serializers.CharField(source="conversation.reference", read_only=True)
+    class Meta:
+        model = Inquiry
+        fields = ("reference", "business", "product_reference", "product_name", "quantity", "description", "status", "conversation", "created_at", "updated_at")
+        read_only_fields = fields
+
+
+class InquiryStatusSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=Inquiry.Status.choices)
+
+
+class MessagingSettingsSerializer(serializers.ModelSerializer):
+    designated_agent = serializers.SerializerMethodField()
+    effective_agent = serializers.SerializerMethodField()
+    class Meta:
+        model = BusinessMessagingSettings
+        fields = ("is_enabled", "designated_agent", "effective_agent", "updated_at")
+        read_only_fields = ("designated_agent", "effective_agent", "updated_at")
+    def get_designated_agent(self, settings_row):
+        return settings_row.designated_agent.public_id if settings_row.designated_agent_id else None
+    def get_effective_agent(self, settings_row):
+        agent = settings_row.effective_agent()
+        return seller_projection(agent) if agent else None

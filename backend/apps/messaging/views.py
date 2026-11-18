@@ -2,6 +2,7 @@
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import FileResponse
+from django.db.models import Q
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
 from rest_framework.exceptions import NotFound
@@ -9,7 +10,8 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.businesses.models import Business
+from apps.businesses.models import Business, BusinessMemberPermission
+from apps.businesses.permissions import require_messaging_permission
 
 from .models import Conversation, Message
 from .serializers import (
@@ -18,6 +20,7 @@ from .serializers import (
     EligibleSellerSerializer,
     MessageSerializer,
     MessageWriteSerializer,
+    InquiryCreateSerializer, InquirySerializer, InquiryStatusSerializer, MessagingSettingsSerializer,
     conversation_seller_map,
     seller_projection,
 )
@@ -36,7 +39,9 @@ from .services import (
     issue_websocket_ticket,
     BusinessMemberCannotContactSellerError,
     require_buyer_can_contact,
+    create_inquiry, effective_agent, messaging_settings, set_designated_agent,
 )
+from .models import Inquiry
 
 
 class MessagingPagination(PageNumberPagination):
@@ -87,7 +92,10 @@ class EligibleSellerListView(APIView):
                 "code": "BUSINESS_MEMBER_CANNOT_CONTACT_SELLER",
                 "detail": "Vous êtes membre de cette entreprise et ne pouvez pas contacter ses vendeurs en tant qu'acheteur.",
             }, status=status.HTTP_403_FORBIDDEN)
-        sellers = [seller_projection(member) for member in eligible_sellers(business=business, buyer=request.user)]
+        try:
+            sellers = [seller_projection(effective_agent(business=business))]
+        except DjangoValidationError:
+            sellers = []
         return Response(EligibleSellerSerializer(sellers, many=True).data)
 
 
@@ -131,7 +139,7 @@ class ConversationListCreateView(APIView):
             conversation, created = get_or_create_conversation(
                 buyer=request.user,
                 business=business,
-                seller_reference=serializer.validated_data["seller"],
+                seller_reference=serializer.validated_data.get("seller"),
             )
         except BusinessMemberCannotContactSellerError:
             return Response({
@@ -144,6 +152,77 @@ class ConversationListCreateView(APIView):
             _conversation_data(conversation, request),
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
+
+
+class InquiryListCreateView(APIView):
+    @extend_schema(responses=InquirySerializer(many=True), tags=["Messaging"])
+    def get(self, request):
+        businesses = request.user.business_memberships.filter(status="ACTIVE").filter(
+            Q(is_owner=True) | Q(permissions__permission=BusinessMemberPermission.Permission.MESSAGING_VIEW)
+        ).values("business_id")
+        queryset = Inquiry.objects.select_related("business", "conversation").filter(Q(buyer=request.user) | Q(business_id__in=businesses)).distinct()
+        if request.query_params.get("business"):
+            queryset = queryset.filter(business__public_id=request.query_params["business"])
+        paginator = MessagingPagination(); page = paginator.paginate_queryset(queryset, request)
+        return paginator.get_paginated_response(InquirySerializer(page, many=True).data)
+
+    @extend_schema(request=InquiryCreateSerializer, responses={201: InquirySerializer}, tags=["Messaging"])
+    def post(self, request):
+        serializer = InquiryCreateSerializer(data=request.data); serializer.is_valid(raise_exception=True)
+        business = Business.objects.filter(public_id=serializer.validated_data["business"]).first()
+        if business is None: raise serializers.ValidationError({"business": "Entreprise introuvable."})
+        try:
+            inquiry = create_inquiry(buyer=request.user, business=business, product_reference=serializer.validated_data.get("product", ""), quantity=serializer.validated_data.get("quantity"), description=serializer.validated_data.get("description", ""))
+        except BusinessMemberCannotContactSellerError:
+            return Response({"code": "BUSINESS_MEMBER_CANNOT_CONTACT_SELLER", "detail": "Vous ne pouvez pas contacter votre propre entreprise comme acheteur."}, status=status.HTTP_403_FORBIDDEN)
+        except DjangoValidationError as error:
+            _validation_error(error)
+        return Response(InquirySerializer(inquiry).data, status=status.HTTP_201_CREATED)
+
+
+class InquiryDetailView(APIView):
+    def _inquiry(self, reference):
+        inquiry = Inquiry.objects.select_related("business", "conversation").filter(reference=reference).first()
+        if inquiry is None: raise NotFound("Not found.")
+        return inquiry
+    def get(self, request, inquiry_reference):
+        inquiry = self._inquiry(inquiry_reference)
+        if inquiry.buyer_id != request.user.id:
+            require_messaging_permission(request.user, inquiry.business, BusinessMemberPermission.Permission.MESSAGING_VIEW)
+        return Response(InquirySerializer(inquiry).data)
+    def patch(self, request, inquiry_reference):
+        inquiry = self._inquiry(inquiry_reference)
+        conversation = get_accessible_conversation(identity=request.user, reference=inquiry.conversation.reference, write=True, seller_permission=BusinessMemberPermission.Permission.MESSAGING_REPLY)
+        if conversation.buyer_id == request.user.id:
+            raise serializers.ValidationError({"detail": "Seul l'agent de messagerie peut modifier le statut de la demande."})
+        serializer = InquiryStatusSerializer(data=request.data); serializer.is_valid(raise_exception=True)
+        inquiry.status = serializer.validated_data["status"]; inquiry.save(update_fields=("status", "updated_at"))
+        return Response(InquirySerializer(inquiry).data)
+
+
+class BusinessMessagingSettingsView(APIView):
+    def _business(self, reference):
+        business = Business.objects.filter(public_id=reference).first()
+        if business is None: raise NotFound("Not found.")
+        return business
+    def get(self, request, business_reference):
+        business = self._business(business_reference)
+        require_messaging_permission(request.user, business, BusinessMemberPermission.Permission.MESSAGING_VIEW)
+        return Response(MessagingSettingsSerializer(messaging_settings(business=business)).data)
+    def patch(self, request, business_reference):
+        business = self._business(business_reference)
+        settings_row = messaging_settings(business=business)
+        if not request.user.business_memberships.filter(business=business, is_owner=True, status="ACTIVE").exists():
+            raise serializers.ValidationError({"detail": "Seul le propriétaire peut gérer la messagerie."})
+        if "designated_agent" in request.data:
+            settings_row = set_designated_agent(actor=request.user, business=business, member_reference=request.data.get("designated_agent") or None)
+        if "is_enabled" in request.data:
+            value = request.data["is_enabled"]
+            if not isinstance(value, bool):
+                raise serializers.ValidationError({"is_enabled": "Cette valeur doit être booléenne."})
+            settings_row.is_enabled = value
+            settings_row.save(update_fields=("is_enabled", "updated_at"))
+        return Response(MessagingSettingsSerializer(settings_row).data)
 
 
 class ConversationDetailView(APIView):

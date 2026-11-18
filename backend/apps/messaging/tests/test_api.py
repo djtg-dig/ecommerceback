@@ -30,7 +30,7 @@ def image_upload(name="photo.png"):
     return SimpleUploadedFile(name, stream.getvalue(), content_type="application/octet-stream")
 
 
-def test_seller_list_requires_authentication_and_exposes_minimum_fields(api_client, messaging_context):
+def test_agent_list_requires_authentication_and_exposes_minimum_fields(api_client, messaging_context):
     context = messaging_context
     path = f"/api/v1/public/businesses/{context['business'].public_id}/messaging-sellers/"
     assert api_client.get(path).status_code in {401, 403}
@@ -38,48 +38,45 @@ def test_seller_list_requires_authentication_and_exposes_minimum_fields(api_clie
     response = authenticate(api_client, context["buyer"]).get(path)
 
     assert response.status_code == 200
-    sellers = {item["reference"]: item for item in response.json()}
-    assert sellers[context["seller"].public_id] == {
-        "reference": context["seller"].public_id,
+    agents = {item["reference"]: item for item in response.json()}
+    assert agents[context["owner"].public_id] == {
+        "reference": context["owner"].public_id,
         "first_name": "Vendeur",
         "display_name": "Vendeur",
         "avatar": None,
     }
-    assert context["owner"].public_id in sellers
+    assert context["seller"].public_id not in agents
     payload = response.content.decode()
     assert "@example.com" not in payload
     assert "MESSAGING_VIEW" not in payload
     assert "online" not in payload.lower()
 
 
-def test_seller_list_exposes_identity_first_name_and_not_membership_title(api_client, messaging_context):
+def test_agent_list_exposes_identity_first_name_and_not_membership_title(api_client, messaging_context):
     context = messaging_context
-    context["seller_identity"].first_name = "c'arrive"
-    context["seller_identity"].save(update_fields=["first_name"])
+    context["owner_identity"].first_name = "c'arrive"
+    context["owner_identity"].save(update_fields=["first_name"])
     path = f"/api/v1/public/businesses/{context['business'].public_id}/messaging-sellers/"
 
     response = authenticate(api_client, context["buyer"]).get(path)
 
     assert response.status_code == 200
-    sellers = {item["reference"]: item for item in response.json()}
-    assert sellers[context["seller"].public_id]["first_name"] == "c'arrive"
-    assert sellers[context["seller"].public_id]["display_name"] == "c'arrive"
+    agents = {item["reference"]: item for item in response.json()}
+    assert agents[context["owner"].public_id]["first_name"] == "c'arrive"
+    assert agents[context["owner"].public_id]["display_name"] == "c'arrive"
     assert "Conseillère ventes" not in response.content.decode()
 
 
 def test_create_or_find_and_list_conversation(api_client, messaging_context):
     context = messaging_context
     client = authenticate(api_client, context["buyer"])
-    payload = {
-        "business": context["business"].public_id,
-        "seller": context["seller"].public_id,
-    }
+    payload = {"business": context["business"].public_id}
 
     first = client.post("/api/v1/messaging/conversations/", payload, format="json")
     second = client.post("/api/v1/messaging/conversations/", payload, format="json")
     listing = client.get("/api/v1/messaging/conversations/")
 
-    assert first.status_code == 200  # La fixture a déjà créé ce triplet.
+    assert first.status_code == 200  # La fixture a déjà créé la discussion directe.
     assert second.status_code == 200
     assert first.json()["reference"] == context["conversation"].reference
     assert first.json()["participant_role"] == "BUYER"
@@ -89,16 +86,16 @@ def test_create_or_find_and_list_conversation(api_client, messaging_context):
     ]
 
 
-def test_non_participants_including_owner_cannot_read_conversation(api_client, messaging_context):
+def test_business_inbox_members_can_read_conversation(api_client, messaging_context):
     context = messaging_context
     path = conversation_path(context["conversation"])
 
-    assert authenticate(api_client, context["owner_identity"]).get(path).status_code == 404
+    assert authenticate(api_client, context["owner_identity"]).get(path).status_code == 200
     assert authenticate(api_client, context["outsider"]).get(path).status_code == 404
     assert authenticate(api_client, context["seller_identity"]).get(path).status_code == 200
 
 
-def test_other_authorized_seller_cannot_read_designated_seller_conversation(api_client, messaging_context):
+def test_other_authorized_business_member_can_read_shared_conversation(api_client, messaging_context):
     context = messaging_context
     other_identity = make_identity("api-other-seller")
     other = make_member(business=context["business"], identity=other_identity, title="Autre")
@@ -106,7 +103,7 @@ def test_other_authorized_seller_cannot_read_designated_seller_conversation(api_
 
     response = authenticate(api_client, other_identity).get(conversation_path(context["conversation"]))
 
-    assert response.status_code == 404
+    assert response.status_code == 200
 
 
 def test_message_api_ignores_spoofed_participants_and_returns_reply_preview(api_client, messaging_context):
@@ -125,9 +122,9 @@ def test_message_api_ignores_spoofed_participants_and_returns_reply_preview(api_
     assert first.status_code == 201
     first_message = Message.objects.get(reference=first.json()["reference"])
     assert first_message.sender == context["buyer"]
-    assert first_message.recipient == context["seller_identity"]
+    assert first_message.recipient == context["owner_identity"]
 
-    reply = authenticate(api_client, context["seller_identity"]).post(
+    reply = authenticate(api_client, context["owner_identity"]).post(
         path,
         {"content": "Oui, il est disponible.", "reply_to": first_message.reference},
         format="json",
@@ -193,9 +190,9 @@ def test_only_recipient_can_mark_message_received_and_read(api_client, messaging
     sender_read = api_client.post(message_path(context["conversation"], message, "read/"))
     assert sender_read.status_code == 403
 
-    seller = authenticate(api_client, context["seller_identity"])
-    received = seller.post(message_path(context["conversation"], message, "received/"))
-    read = seller.post(message_path(context["conversation"], message, "read/"))
+    agent = authenticate(api_client, context["owner_identity"])
+    received = agent.post(message_path(context["conversation"], message, "received/"))
+    read = agent.post(message_path(context["conversation"], message, "read/"))
     assert received.status_code == 200
     assert received.json()["received_at"] is not None
     assert read.status_code == 200
@@ -260,8 +257,8 @@ def test_private_attachment_upload_and_authorized_download(api_client, messaging
     assert authorized["Content-Disposition"].startswith("attachment;")
     assert b"".join(authorized.streaming_content).startswith(b"\x89PNG")
 
-    forbidden = authenticate(api_client, context["owner_identity"]).get(download_path)
-    assert forbidden.status_code == 404
+    owner_download = authenticate(api_client, context["owner_identity"]).get(download_path)
+    assert owner_download.status_code == 200
 
 
 @pytest.mark.parametrize(

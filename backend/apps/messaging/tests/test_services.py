@@ -66,11 +66,10 @@ def test_active_member_without_messaging_permission_is_blocked_as_buyer(messagin
 def test_member_of_another_business_can_start_conversation(messaging_context):
     context = messaging_context
     other_business = Business.objects.create(name="Autre boutique")
-    member = make_member(business=other_business, identity=context["owner_identity"], owner=True, title="Gérant")
+    member = make_member(business=other_business, identity=make_identity("other-business-member"), owner=True, title="Gérant")
     conversation, created = get_or_create_conversation(
         buyer=member.identity,
         business=context["business"],
-        seller_reference=context["seller"].public_id,
     )
     assert created is True
     assert conversation.buyer_id == member.identity_id
@@ -121,7 +120,6 @@ def test_conversation_creation_is_idempotent_and_unique(messaging_context):
     second, created = get_or_create_conversation(
         buyer=context["buyer"],
         business=context["business"],
-        seller_reference=context["seller"].public_id,
     )
 
     assert created is False
@@ -183,12 +181,11 @@ def test_database_rejects_message_without_text_or_file(messaging_context):
             ])
 
 
-def test_only_designated_seller_can_access_private_conversation(messaging_context):
+def test_business_members_with_view_permission_can_access_shared_conversation(messaging_context):
     context = messaging_context
     assert require_conversation_access(context["buyer"], context["conversation"]) == "BUYER"
     assert require_conversation_access(context["seller_identity"], context["conversation"]) == "SELLER"
-    with pytest.raises(NotFound):
-        require_conversation_access(context["owner_identity"], context["conversation"])
+    assert require_conversation_access(context["owner_identity"], context["conversation"]) == "SELLER"
     with pytest.raises(NotFound):
         require_conversation_access(context["outsider"], context["conversation"])
 
@@ -215,20 +212,20 @@ def test_removed_seller_loses_access(messaging_context):
     context["seller"].status = BusinessMember.Status.REMOVED
     context["seller"].save()
 
-    with pytest.raises(PermissionDenied):
+    with pytest.raises(NotFound):
         require_conversation_access(context["seller_identity"], context["conversation"])
 
 
-def test_buyer_cannot_send_to_suspended_or_unpermitted_seller(messaging_context):
+def test_buyer_is_routed_to_owner_when_designated_agent_becomes_ineligible(messaging_context):
     context = messaging_context
     context["seller"].status = BusinessMember.Status.SUSPENDED
     context["seller"].save()
-    with pytest.raises(PermissionDenied):
-        send_message(
-            identity=context["buyer"],
-            conversation=context["conversation"],
-            content="Le vendeur est suspendu",
-        )
+    suspended_fallback = send_message(
+        identity=context["buyer"],
+        conversation=context["conversation"],
+        content="Le propriétaire reprend la messagerie",
+    )
+    assert suspended_fallback.recipient_id == context["owner_identity"].id
 
     context["seller"].status = BusinessMember.Status.ACTIVE
     context["seller"].save()
@@ -236,19 +233,19 @@ def test_buyer_cannot_send_to_suspended_or_unpermitted_seller(messaging_context)
         member=context["seller"],
         permission=BusinessMemberPermission.Permission.MESSAGING_REPLY,
     ).delete()
-    with pytest.raises(PermissionDenied):
-        send_message(
-            identity=context["buyer"],
-            conversation=context["conversation"],
-            content="Le vendeur ne peut plus répondre",
-        )
+    permission_fallback = send_message(
+        identity=context["buyer"],
+        conversation=context["conversation"],
+        content="Le propriétaire reste disponible",
+    )
+    assert permission_fallback.recipient_id == context["owner_identity"].id
 
 
-def test_accessible_queryset_never_grants_owner_global_visibility(messaging_context):
+def test_accessible_queryset_grants_owner_business_inbox_visibility(messaging_context):
     context = messaging_context
     assert list(accessible_conversations(context["buyer"])) == [context["conversation"]]
     assert list(accessible_conversations(context["seller_identity"])) == [context["conversation"]]
-    assert list(accessible_conversations(context["owner_identity"])) == []
+    assert list(accessible_conversations(context["owner_identity"])) == [context["conversation"]]
 
 
 def test_sender_and_recipient_are_derived_from_authenticated_identity(messaging_context):
@@ -259,15 +256,15 @@ def test_sender_and_recipient_are_derived_from_authenticated_identity(messaging_
         content="Le produit est-il disponible ?",
     )
     seller_message = send_message(
-        identity=context["seller_identity"],
+        identity=context["owner_identity"],
         conversation=context["conversation"],
         content="Oui.",
         reply_reference=buyer_message.reference,
     )
 
     assert buyer_message.sender == context["buyer"]
-    assert buyer_message.recipient == context["seller_identity"]
-    assert seller_message.sender == context["seller_identity"]
+    assert buyer_message.recipient == context["owner_identity"]
+    assert seller_message.sender == context["owner_identity"]
     assert seller_message.recipient == context["buyer"]
     assert seller_message.reply_to == buyer_message
     context["conversation"].refresh_from_db()
@@ -281,17 +278,11 @@ def test_message_rejects_third_participant_and_cross_conversation_reply(messagin
         conversation=context["conversation"],
         content="Premier",
     )
-    other_seller_identity = make_identity("other-seller")
-    other_seller = make_member(
+    other_conversation = Conversation.objects.create(
         business=context["business"],
-        identity=other_seller_identity,
-        title="Autre vendeur",
-    )
-    grant_messaging(other_seller)
-    other_conversation, _ = get_or_create_conversation(
         buyer=context["buyer"],
-        business=context["business"],
-        seller_reference=other_seller.public_id,
+        seller=context["owner_identity"],
+        kind=Conversation.Kind.INQUIRY,
     )
     with pytest.raises(ValidationError):
         send_message(
@@ -362,12 +353,12 @@ def test_only_recipient_can_confirm_delivery_and_read(messaging_context):
     with pytest.raises(PermissionDenied):
         confirm_read(identity=context["buyer"], message=message)
 
-    read_message = confirm_read(identity=context["seller_identity"], message=message)
+    read_message = confirm_read(identity=context["owner_identity"], message=message)
     assert read_message.read_at is not None
     assert read_message.received_at is None
-    delivered = confirm_delivery(identity=context["seller_identity"], message=message)
+    delivered = confirm_delivery(identity=context["owner_identity"], message=message)
     assert delivered.received_at is not None
-    assert confirm_read(identity=context["seller_identity"], message=message).read_at == read_message.read_at
+    assert confirm_read(identity=context["owner_identity"], message=message).read_at == read_message.read_at
 
 
 def test_temporal_database_constraints_reject_falsified_dates(messaging_context):
@@ -410,8 +401,7 @@ def test_concurrent_creation_returns_one_conversation():
         title="Gérant",
         owner=True,
     )
-    seller = make_member(business=business, identity=seller_identity)
-    grant_messaging(seller)
+    make_member(business=business, identity=seller_identity)
 
     def create():
         close_old_connections()
@@ -421,7 +411,6 @@ def test_concurrent_creation_returns_one_conversation():
             conversation, _ = get_or_create_conversation(
                 buyer=local_buyer,
                 business=local_business,
-                seller_reference=seller.public_id,
             )
             return conversation.reference
         finally:
@@ -431,4 +420,4 @@ def test_concurrent_creation_returns_one_conversation():
         references = list(executor.map(lambda _: create(), range(2)))
 
     assert len(set(references)) == 1
-    assert Conversation.objects.filter(business=business, buyer=buyer, seller=seller_identity).count() == 1
+    assert Conversation.objects.filter(business=business, buyer=buyer, kind=Conversation.Kind.DIRECT).count() == 1

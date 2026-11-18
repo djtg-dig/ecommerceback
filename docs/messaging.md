@@ -1,14 +1,27 @@
-# Private buyer–seller messaging
+# Customer–business commercial messaging
 
-The `messaging` application provides private buyer–seller conversations over
-REST and Django Channels. It has no presence tracking, reassignment, or group
-chat.
+The `messaging` application provides private buyer–business conversations over
+REST and Django Channels. Conversations belong to the Business rather than to
+an individual employee. Each Business has one effective messaging agent.
+
+When no employee is designated, the active `OWNER` is the effective agent. A
+designation is accepted only for an active member with `MESSAGING_VIEW` and
+`MESSAGING_REPLY`. The owner replaces or clears it transactionally. If the
+member is suspended, removed, deactivated, or loses either permission, the
+effective agent falls back to the owner. The backend recomputes this rule on
+every send; a stale browser cannot send as a former agent.
+
+`BusinessMessagingSettings` stores this configuration. `Inquiry` stores a
+structured commercial request and snapshots the product reference and name so
+the original request remains readable after a product is edited or archived.
 
 ## Participants and seller eligibility
 
-A conversation always belongs to one Business and contains exactly two
-participants: its buyer and one seller selected by that buyer. The seller list
-contains only active members of the requested active Business who:
+A conversation always belongs to one Business and contains a buyer plus the
+company side. Legacy rows retain their original seller identity for history;
+new writes route to the effective agent. The compatibility seller endpoint now
+returns only the effective agent and is not a selection mechanism. The company
+side contains only active members who:
 
 - are not the authenticated buyer;
 - have effective `MESSAGING_VIEW` and `MESSAGING_REPLY` permissions;
@@ -22,22 +35,22 @@ buyer role. Existing history remains readable according to the normal
 conversation access rules, but new buyer messages and WebSocket tickets are
 rejected.
 
-Business owners receive the two permissions implicitly. Roles do not grant
-messaging access. An owner, manager, or other seller still cannot read a
-conversation unless that identity is its designated seller. A suspended,
-removed, or no-longer-authorized seller loses access. Seller eligibility is
-checked again when a conversation is created and before a message is sent.
+Business owners receive the two permissions implicitly. Members with
+`MESSAGING_VIEW` can read the shared Business inbox, but only the effective
+agent can reply. The owner cannot reply while an eligible employee is
+designated. Agent eligibility is checked again before every message.
 
 ## Persistence and states
 
-`Conversation` stores an opaque public reference, Business, buyer, seller,
-status, timestamps, and the last-message timestamp. Database constraints keep
-the participants distinct and make `(business, buyer, seller)` unique.
-Creation locks the selected membership and handles the uniqueness race.
+`Conversation` stores an opaque public reference, Business, buyer, the
+historical initial seller, a direct/inquiry kind, status, timestamps, and the
+last-message timestamp. Existing participant constraints remain in place.
+Creation locks the Business settings and handles the uniqueness race.
 
 `Message` stores an opaque public reference, explicit server-derived sender and
-recipient, content, optional reply, optional Cart, optional private attachment
-metadata, and `sent_at`, `received_at`, and `read_at`. Database and model
+recipient, an optional immutable `sender_member` audit link for company replies,
+content, optional reply, optional Cart, optional private attachment metadata,
+and `sent_at`, `received_at`, and `read_at`. Database and model
 constraints require different participants, a text or attachment, and prevent
 receipt/read timestamps before transmission.
 
@@ -59,6 +72,10 @@ seller-selection route despite its placement under `public/`.
 | --- | --- | --- |
 | `GET` | `/api/v1/public/businesses/{business}/messaging-sellers/` | List the minimal eligible-seller projection |
 | `GET`, `POST` | `/api/v1/messaging/conversations/` | List accessible conversations or create/find one |
+| `GET`, `POST` | `/api/v1/messaging/inquiries/` | List or create a structured commercial request |
+| `GET`, `PATCH` | `/api/v1/messaging/inquiries/{inquiry}/` | Read or update an inquiry workflow status |
+| `GET` | `/api/v1/messaging/businesses/{business}/settings/` | Read messaging settings and effective agent |
+| `PATCH` | `/api/v1/messaging/businesses/{business}/settings/` | Owner-only designation, reset, or enable/disable |
 | `GET` | `/api/v1/messaging/conversations/{conversation}/` | Read one accessible conversation |
 | `POST` | `/api/v1/messaging/conversations/{conversation}/websocket-ticket/` | Issue a short-lived, one-use WebSocket ticket |
 | `POST` | `/api/v1/messaging/conversations/{conversation}/close/` | Close a conversation |
@@ -106,12 +123,11 @@ antivirus engine.
 
 ## Migration and tests
 
-The schema is introduced by `messaging/migrations/0001_initial.py`. Generate and
-review migrations locally, then apply them only through the authorized release
-process. Tests cover eligibility, privacy between buyers and sellers, owner
-isolation, revoked access, concurrency, replies, carts, attachment validation
-and download authorization, deletion cleanup, state transitions, and receipt /
-read invariants.
+The transition is introduced by `messaging/migrations/0003_business_messaging_center.py`.
+It preserves existing columns and rows, adds the agent audit link, settings,
+inquiries, and conversation kind, and backfills only sender memberships that
+can be matched exactly. Review and apply it only through the authorized release
+process; this task does not apply migrations in production.
 
 ## WebSocket
 

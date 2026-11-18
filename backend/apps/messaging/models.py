@@ -1,4 +1,4 @@
-"""Modèles persistants de la messagerie privée à deux participants."""
+"""Modèles persistants de la messagerie commerciale acheteur–entreprise."""
 
 import uuid
 from pathlib import Path
@@ -23,6 +23,10 @@ class Conversation(models.Model):
         CLOSED = "CLOSED", "Closed"
         ARCHIVED = "ARCHIVED", "Archived"
 
+    class Kind(models.TextChoices):
+        DIRECT = "DIRECT", "Direct discussion"
+        INQUIRY = "INQUIRY", "Commercial inquiry"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     reference = models.CharField(max_length=12, unique=True, editable=False, db_index=True)
     business = models.ForeignKey(
@@ -40,6 +44,9 @@ class Conversation(models.Model):
         on_delete=models.PROTECT,
         related_name="seller_conversations",
     )
+    # Historical recipient retained for existing conversations. New sends are
+    # routed through the effective business agent at the time of the send.
+    kind = models.CharField(max_length=12, choices=Kind.choices, default=Kind.DIRECT, db_index=True)
     status = models.CharField(
         max_length=10,
         choices=Status.choices,
@@ -54,7 +61,7 @@ class Conversation(models.Model):
         ordering = ("-last_message_at", "-created_at")
         constraints = [
             models.UniqueConstraint(
-                fields=("business", "buyer", "seller"),
+                fields=("business", "buyer", "seller", "kind"),
                 name="messaging_conversation_participants_unique",
             ),
             models.CheckConstraint(
@@ -66,6 +73,7 @@ class Conversation(models.Model):
             models.Index(fields=("buyer", "status"), name="msg_conv_buyer_status_idx"),
             models.Index(fields=("seller", "status"), name="msg_conv_seller_status_idx"),
             models.Index(fields=("business", "seller"), name="msg_conv_business_seller_idx"),
+            models.Index(fields=("business", "kind"), name="msg_conv_business_kind_idx"),
         ]
 
     def clean(self):
@@ -104,6 +112,87 @@ class Conversation(models.Model):
         return super().save(*args, **kwargs)
 
 
+class BusinessMessagingSettings(models.Model):
+    """The designated agent, with the owner as a computed safe fallback."""
+
+    business = models.OneToOneField("businesses.Business", on_delete=models.CASCADE, related_name="messaging_settings")
+    designated_agent = models.ForeignKey("businesses.BusinessMember", null=True, blank=True, on_delete=models.PROTECT, related_name="designated_messaging_for")
+    is_enabled = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def clean(self):
+        super().clean()
+        if not self.designated_agent_id:
+            return
+        from apps.businesses.models import BusinessMember, BusinessMemberPermission
+        from apps.businesses.permissions import has_messaging_permission
+
+        agent = self.designated_agent
+        if agent.business_id != self.business_id:
+            raise ValidationError({"designated_agent": "L'agent doit appartenir à cette entreprise."})
+        if (agent.status != BusinessMember.Status.ACTIVE or not agent.identity.is_active
+                or not has_messaging_permission(agent, BusinessMemberPermission.Permission.MESSAGING_VIEW)
+                or not has_messaging_permission(agent, BusinessMemberPermission.Permission.MESSAGING_REPLY)):
+            raise ValidationError({"designated_agent": "Le membre désigné ne peut pas répondre aux acheteurs."})
+
+    def effective_agent(self):
+        """Never cache this result: suspension and permission revocation are immediate."""
+        from apps.businesses.models import BusinessMember, BusinessMemberPermission
+        from apps.businesses.permissions import has_messaging_permission
+
+        agent = self.designated_agent
+        if agent and agent.status == BusinessMember.Status.ACTIVE and agent.identity.is_active and has_messaging_permission(agent, BusinessMemberPermission.Permission.MESSAGING_VIEW) and has_messaging_permission(agent, BusinessMemberPermission.Permission.MESSAGING_REPLY):
+            return agent
+        owner = BusinessMember.objects.select_related("identity", "business").filter(
+            business=self.business, is_owner=True, status=BusinessMember.Status.ACTIVE
+        ).first()
+        return owner if owner and owner.identity.is_active else None
+
+
+class Inquiry(models.Model):
+    """Commercial request whose product context remains available after edits."""
+
+    class Status(models.TextChoices):
+        OPEN = "OPEN", "Open"
+        IN_PROGRESS = "IN_PROGRESS", "In progress"
+        CLOSED = "CLOSED", "Closed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    reference = models.CharField(max_length=12, unique=True, editable=False, db_index=True)
+    business = models.ForeignKey("businesses.Business", on_delete=models.PROTECT, related_name="messaging_inquiries")
+    buyer = models.ForeignKey("accounts.CarriIdentity", on_delete=models.PROTECT, related_name="messaging_inquiries")
+    product = models.ForeignKey("catalog.Product", null=True, blank=True, on_delete=models.SET_NULL, related_name="messaging_inquiries")
+    product_reference = models.CharField(max_length=12, blank=True, default="")
+    product_name = models.CharField(max_length=240, blank=True, default="")
+    quantity = models.DecimalField(max_digits=14, decimal_places=3, null=True, blank=True)
+    description = models.TextField(blank=True, default="")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.OPEN, db_index=True)
+    conversation = models.OneToOneField("Conversation", null=True, blank=True, on_delete=models.PROTECT, related_name="inquiry")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=("business", "status"), name="msg_inquiry_biz_status_idx")]
+
+    def clean(self):
+        super().clean()
+        if self.product_id and self.product.business_id != self.business_id:
+            raise ValidationError({"product": "Le produit doit appartenir à l'entreprise destinataire."})
+        if self.quantity is not None and self.quantity <= 0:
+            raise ValidationError({"quantity": "La quantité doit être positive."})
+        if not self.description.strip() and not self.product_id:
+            raise ValidationError({"description": "Décrivez votre besoin ou sélectionnez un produit."})
+
+    def save(self, *args, **kwargs):
+        if not self.reference:
+            self.reference = generate_conversation_reference()
+        self.description = (self.description or "").strip()
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
 class WebSocketTicket(models.Model):
     """Ticket opaque, court et à usage unique pour un socket privé."""
 
@@ -132,6 +221,7 @@ class Message(models.Model):
         on_delete=models.PROTECT,
         related_name="messages_sent",
     )
+    sender_member = models.ForeignKey("businesses.BusinessMember", null=True, blank=True, on_delete=models.PROTECT, related_name="messaging_messages_sent")
     recipient = models.ForeignKey(
         "accounts.CarriIdentity",
         on_delete=models.PROTECT,
@@ -204,9 +294,37 @@ class Message(models.Model):
         if self.sender_id and self.recipient_id and self.sender_id == self.recipient_id:
             errors["recipient"] = "L'émetteur et le destinataire doivent être différents."
         if self.conversation_id and self.sender_id and self.recipient_id:
-            expected = {self.conversation.buyer_id, self.conversation.seller_id}
-            if {self.sender_id, self.recipient_id} != expected:
-                errors["recipient"] = "Le message doit relier les deux participants."
+            if self.sender_id == self.conversation.buyer_id:
+                if self.sender_member_id:
+                    errors["sender_member"] = "Un acheteur ne peut pas être un agent de l'entreprise."
+                elif self._state.adding:
+                    from apps.businesses.models import BusinessMember, BusinessMemberPermission
+                    from apps.businesses.permissions import has_messaging_permission
+
+                    recipient_member = BusinessMember.objects.filter(
+                        business_id=self.conversation.business_id,
+                        identity_id=self.recipient_id,
+                        status=BusinessMember.Status.ACTIVE,
+                    ).select_related("identity").first()
+                    if (
+                        recipient_member is None
+                        or not recipient_member.identity.is_active
+                        or not (
+                            recipient_member.is_owner
+                            or (
+                                has_messaging_permission(recipient_member, BusinessMemberPermission.Permission.MESSAGING_VIEW)
+                                and has_messaging_permission(recipient_member, BusinessMemberPermission.Permission.MESSAGING_REPLY)
+                            )
+                        )
+                    ):
+                        errors["recipient"] = "Le destinataire doit être l'agent de messagerie de l'entreprise."
+            else:
+                member = self.sender_member
+                legacy_sender = bool(self.pk and self.sender_id == self.conversation.seller_id and member is None)
+                if not legacy_sender and (member is None or member.business_id != self.conversation.business_id or member.identity_id != self.sender_id):
+                    errors["sender_member"] = "L'expéditeur entreprise doit conserver son adhésion réelle."
+                if self.recipient_id != self.conversation.buyer_id:
+                    errors["recipient"] = "La réponse entreprise doit être adressée à l'acheteur."
         if self.reply_to_id:
             if self.pk and self.reply_to_id == self.pk:
                 errors["reply_to"] = "Un message ne peut pas se citer lui-même."

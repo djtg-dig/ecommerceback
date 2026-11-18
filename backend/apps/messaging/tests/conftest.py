@@ -63,7 +63,6 @@ def messaging_context(db, tmp_path, settings):
     conversation, _ = get_or_create_conversation(
         buyer=buyer,
         business=business,
-        seller_reference=seller.public_id,
     )
     return {
         "business": business,
